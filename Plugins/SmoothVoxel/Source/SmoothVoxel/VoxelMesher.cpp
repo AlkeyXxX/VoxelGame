@@ -250,7 +250,9 @@ void FVoxelMesher::Build(
                     BlockIndex(X, Y, Z, Size)
                 ];
 
-                if (Block != uint8(EVoxelBlock::Water) && !IsVoxelSolid(Block))
+                const bool bWater = Block == uint8(EVoxelBlock::Water);
+
+                if (!bWater && !IsVoxelSolid(Block))
                 {
                     continue;
                 }
@@ -264,9 +266,11 @@ void FVoxelMesher::Build(
 
                 const float S = VoxelSize;
 
-                FLinearColor BiomeColor = FLinearColor::White;
+                FLinearColor BiomeColor = bWater
+                    ? FLinearColor(0.05f, 0.35f, 0.85f, 1.0f)
+                    : FLinearColor::White;
 
-                if (Input.Biomes.Num() == MaxBlocks)
+                if (!bWater && Input.Biomes.Num() == MaxBlocks)
                 {
                     switch (Input.Biomes[BlockIndex(X, Y, Z, Size)])
                     {
@@ -308,7 +312,7 @@ void FVoxelMesher::Build(
 
                         FVector(-1, 0, 0),
                         BiomeColor,
-                        false);
+                        bWater);
                 }
 
 
@@ -329,7 +333,7 @@ void FVoxelMesher::Build(
 
                         FVector(1, 0, 0),
                         BiomeColor,
-                        false);
+                        bWater);
                 }
 
 
@@ -350,7 +354,7 @@ void FVoxelMesher::Build(
 
                         FVector(0, -1, 0),
                         BiomeColor,
-                        false);
+                        bWater);
                 }
 
 
@@ -371,7 +375,7 @@ void FVoxelMesher::Build(
 
                         FVector(0, 1, 0),
                         BiomeColor,
-                        false);
+                        bWater);
                 }
 
 
@@ -392,7 +396,7 @@ void FVoxelMesher::Build(
 
                         FVector(0, 0, -1),
                         BiomeColor,
-                        false);
+                        bWater);
                 }
 
 
@@ -413,7 +417,7 @@ void FVoxelMesher::Build(
 
                         FVector(0, 0, 1),
                         BiomeColor,
-                        false);
+                        bWater);
                 }
             }
         }
