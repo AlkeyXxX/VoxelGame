@@ -93,6 +93,10 @@ public:
 
 private:
 
+	static bool IsFaceVisible(
+		uint8 Block,
+		uint8 NeighborBlock);
+
 	static uint8 GetBlock(
 		const FVoxelMeshBuildInput& Input,
 		int32 X,
