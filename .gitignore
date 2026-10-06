@@ -1,0 +1,51 @@
+# Unreal Engine generated folders
+
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Visual Studio
+
+.vs/
+.vscode/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.userprefs
+
+# Rider
+
+.idea/
+
+# Build files
+
+*.opensdf
+*.sdf
+*.sln
+*.xcodeproj
+*.xcworkspace
+
+# OS files
+
+.DS_Store
+Thumbs.db
+
+# Unreal generated files
+
+Build/
+Releases/
+
+# Logs
+
+*.log
+
+# Temporary files
+
+*.tmp
+*.temp
+
+# Crash reports
+
+crashinfo-*.txt
