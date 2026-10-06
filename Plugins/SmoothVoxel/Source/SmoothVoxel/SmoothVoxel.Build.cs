@@ -1,4 +1,3 @@
-
 using UnrealBuildTool;
 
 public class SmoothVoxel : ModuleRules
@@ -13,6 +12,9 @@ public class SmoothVoxel : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
+				"UMG",
+				"Slate",
+				"SlateCore",
 				"ProceduralMeshComponent"
 			});
 
