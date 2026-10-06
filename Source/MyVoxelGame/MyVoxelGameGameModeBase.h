@@ -13,8 +13,5 @@ UCLASS()
 class MYVOXELGAME_API AMyVoxelGameGameModeBase : public AGameModeBase
 {
 	GENERATED_BODY()
-
-public:
-	AMyVoxelGameGameModeBase();
 	
 };
