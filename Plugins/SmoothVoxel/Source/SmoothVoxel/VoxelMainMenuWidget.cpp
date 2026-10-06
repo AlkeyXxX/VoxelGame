@@ -3,6 +3,7 @@
 #include "VoxelWorld.h"
 
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 void UVoxelMainMenuWidget::StartNewGame()
 {
@@ -47,7 +48,7 @@ void UVoxelMainMenuWidget::ExitGame()
             this,
             0))
     {
-        UGameplayStatics::QuitGame(
+        UKismetSystemLibrary::QuitGame(
             this,
             PC,
             EQuitPreference::Quit,
