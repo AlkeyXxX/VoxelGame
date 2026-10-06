@@ -3,7 +3,6 @@
 #include "VoxelChunk.h"
 #include "VoxelWorldGenerator.h"
 #include "VoxelWorldSaveGame.h"
-#include "VoxelMainMenuWidget.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -121,80 +120,6 @@ void AVoxelWorld::BeginPlay()
     Super::BeginPlay();
 
     GenerateWorld();
-
-    /*
-     * VoxelWorld не должен владеть Player Input.
-     * Escape обрабатывается отдельным PlayerController,
-     * поэтому обычные W/A/S/D и mouse input остаются нетронутыми.
-     */
-    ShowMainMenu();
-}
-
-
-
-void AVoxelWorld::ToggleMainMenu()
-{
-    if (MainMenuWidget && MainMenuWidget->IsInViewport())
-    {
-        MainMenuWidget->CloseMenu();
-        return;
-    }
-
-    ShowMainMenu();
-}
-
-
-void AVoxelWorld::ShowMainMenu()
-{
-    if (MainMenuWidget && MainMenuWidget->IsInViewport())
-    {
-        return;
-    }
-
-    MainMenuWidget = nullptr;
-
-    APlayerController* PC =
-        UGameplayStatics::GetPlayerController(
-            this,
-            0);
-
-    if (!PC)
-    {
-        return;
-    }
-
-    TSubclassOf<UVoxelMainMenuWidget> WidgetClass =
-        MainMenuClass
-            ? MainMenuClass
-            : UVoxelMainMenuWidget::StaticClass();
-
-    MainMenuWidget =
-        CreateWidget<UVoxelMainMenuWidget>(
-            PC,
-            WidgetClass);
-
-    if (!MainMenuWidget)
-    {
-        return;
-    }
-
-    MainMenuWidget->AddToViewport(1000);
-
-    /*
-     * Настраиваем UI input только после AddToViewport().
-     * Так UMG гарантированно получает keyboard focus.
-     */
-    FInputModeUIOnly InputMode;
-    InputMode.SetWidgetToFocus(
-        MainMenuWidget->TakeWidget());
-
-    InputMode.SetLockMouseToViewportBehavior(
-        EMouseLockMode::DoNotLock);
-
-    PC->bShowMouseCursor = true;
-    PC->SetPause(true);
-    PC->SetInputMode(InputMode);
-    MainMenuWidget->SetKeyboardFocus();
 }
 
 
