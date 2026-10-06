@@ -142,10 +142,15 @@ void AVoxelWorld::ShowMainMenu()
         return;
     }
 
+    TSubclassOf<UVoxelMainMenuWidget> WidgetClass =
+        MainMenuClass
+            ? MainMenuClass
+            : UVoxelMainMenuWidget::StaticClass();
+
     MainMenuWidget =
         CreateWidget<UVoxelMainMenuWidget>(
             PC,
-            UVoxelMainMenuWidget::StaticClass());
+            WidgetClass);
 
     if (!MainMenuWidget)
     {
