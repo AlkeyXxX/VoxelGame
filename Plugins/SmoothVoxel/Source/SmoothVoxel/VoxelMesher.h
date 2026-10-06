@@ -49,6 +49,7 @@ struct FVoxelMeshBuildInput
 	float VoxelSize = 100.0f;
 
 	TArray<uint8> Blocks;
+	TArray<uint8> Biomes;
 
 	FVoxelNeighborData Neighbors;
 };
