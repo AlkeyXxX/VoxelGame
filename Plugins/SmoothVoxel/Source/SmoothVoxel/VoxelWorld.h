@@ -4,7 +4,8 @@
 #include "CoreMinimal.h" 
 #include "GameFramework/Actor.h" 
 #include "VoxelTypes.h" 
-#include "VoxelMesher.h" 
+#include "VoxelMesher.h"
+#include "VoxelWorldGenerator.h"
 #include "VoxelWorld.generated.h"
 
 
@@ -88,13 +89,16 @@ public:
 public:
 
     /*
-     * Количество чанков.
+     * Количество чанков по каждой оси.
+     *
+     * Сейчас оставляем текущую модель. В дальнейшем
+     * этот набор будет описывать активную область мира.
      */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
         Category="Voxel|World",
-        meta=(ClampMin="1", ClampMax="32"))
+        meta=(ClampMin="1", ClampMax="256"))
     int32 WorldSizeX = 4;
 
 
@@ -102,7 +106,7 @@ public:
         EditAnywhere,
         BlueprintReadWrite,
         Category="Voxel|World",
-        meta=(ClampMin="1", ClampMax="32"))
+        meta=(ClampMin="1", ClampMax="256"))
     int32 WorldSizeY = 4;
 
 
@@ -203,6 +207,18 @@ private:
      */
     UPROPERTY()
     TMap<FIntVector, AVoxelChunk*> Chunks;
+
+
+    /*
+     * Процедурный генератор данных мира.
+     */
+    FVoxelWorldGenerator WorldGenerator;
+
+
+    /*
+     * Настроить генератор из текущих UPROPERTY.
+     */
+    void ConfigureWorldGenerator();
 
 
     /*
