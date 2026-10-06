@@ -1,6 +1,7 @@
 
 #include "VoxelWorld.h"
 #include "VoxelChunk.h"
+#include "VoxelWorldGenerator.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -114,6 +115,19 @@ void AVoxelWorld::BeginPlay()
 }
 
 
+void AVoxelWorld::ConfigureWorldGenerator()
+{
+    FVoxelWorldGenerationSettings Settings;
+
+    Settings.Seed = Seed;
+    Settings.BaseHeight = BaseHeight;
+    Settings.HeightVariation = HeightVariation;
+    Settings.NoiseScale = NoiseScale;
+
+    WorldGenerator.Configure(Settings);
+}
+
+
 void AVoxelWorld::GenerateWorld()
 {
     UWorld* World = GetWorld();
@@ -122,6 +136,13 @@ void AVoxelWorld::GenerateWorld()
     {
         return;
     }
+
+
+    /*
+     * Перед генерацией синхронизируем параметры
+     * AVoxelWorld с отдельным world generator.
+     */
+    ConfigureWorldGenerator();
 
 
     /*
@@ -272,32 +293,10 @@ void AVoxelWorld::GenerateChunkBlocks(
                     ChunkCoord.Z * ChunkSize + Z;
 
 
-                /*
-                 * Используем seed как offset.
-                 *
-                 * FMath::PerlinNoise2D детерминированный.
-                 */
-                const float Noise =
-                    FMath::PerlinNoise2D(
-                        FVector2D(
-                            (WorldX + Seed * 13) * NoiseScale,
-                            (WorldY + Seed * 17) * NoiseScale));
-
-
-                int32 Height =
-                    BaseHeight +
-                    FMath::RoundToInt(
-                        Noise *
-                        static_cast<float>(HeightVariation));
-
-
-                /*
-                 * Минимальная высота.
-                 */
-                Height =
-                    FMath::Max(
-                        Height,
-                        1);
+                const int32 Height =
+                    WorldGenerator.GetSurfaceHeight(
+                        WorldX,
+                        WorldY);
 
 
                 uint8 Block =
