@@ -12,18 +12,19 @@ enum class EVoxelBlock : uint8
 	Dirt  = 2,
 	Stone = 3,
 	Sand  = 4,
-	Wood  = 5
+	Wood  = 5,
+	Water = 6
 };
 
 // TEST GITHUB SYNC
 
 FORCEINLINE bool IsVoxelSolid(EVoxelBlock Block)
 {
-	return Block != EVoxelBlock::Air;
+	return Block != EVoxelBlock::Air && Block != EVoxelBlock::Water;
 }
 
 FORCEINLINE bool IsVoxelSolid(uint8 Block)
 {
-	return Block != uint8(EVoxelBlock::Air);
+	return Block != uint8(EVoxelBlock::Air) && Block != uint8(EVoxelBlock::Water);
 }
 
