@@ -887,7 +887,39 @@ bool AVoxelWorld::LoadWorld()
             Record.State);
     }
 
-    ApplyLoadedPersistenceToLoadedChunks();
+    /*
+     * Важно: загруженный SaveGame хранит только delta-изменения
+     * относительно процедурного мира.
+     *
+     * Поэтому уже загруженные chunks нельзя просто дополнить
+     * сохранёнными блоками поверх их текущего runtime-состояния:
+     * иначе изменения, сделанные ПОСЛЕ сейва, останутся.
+     *
+     * Сначала полностью восстанавливаем процедурную базу,
+     * затем GenerateChunkBlocks() накладывает сохранённые
+     * ModifiedBlocks.
+     */
+    for (TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
+    {
+        if (Pair.Value)
+        {
+            GenerateChunkBlocks(
+                Pair.Value);
+        }
+    }
+
+    /*
+     * После восстановления данных перестраиваем mesh всех
+     * загруженных chunks. Так изменения после сейва действительно
+     * исчезают, а состояние возвращается ровно к моменту Save.
+     */
+    for (TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
+    {
+        if (Pair.Value)
+        {
+            Pair.Value->RebuildMesh();
+        }
+    }
 
     UE_LOG(
         LogTemp,
