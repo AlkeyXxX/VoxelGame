@@ -15,6 +15,8 @@ enum class EVoxelBlock : uint8
 	Wood  = 5
 };
 
+// TEST GITHUB SYNC
+
 FORCEINLINE bool IsVoxelSolid(EVoxelBlock Block)
 {
 	return Block != EVoxelBlock::Air;
