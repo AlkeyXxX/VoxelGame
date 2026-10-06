@@ -766,6 +766,217 @@ void AVoxelWorld::GenerateChunkBlocks(
 }
 
 
+void AVoxelWorld::SaveWorld()
+{
+    if (SaveSlotName.IsEmpty())
+    {
+        return;
+    }
+
+    UVoxelWorldSaveGame* SaveGame =
+        Cast<UVoxelWorldSaveGame>(
+            UGameplayStatics::CreateSaveGameObject(
+                UVoxelWorldSaveGame::StaticClass()));
+
+    if (!SaveGame)
+    {
+        return;
+    }
+
+    SaveGame->SaveVersion = 1;
+    SaveGame->Seed = Seed;
+    SaveGame->ChunkSize = ChunkSize;
+    SaveGame->VoxelSize = VoxelSize;
+
+    SaveGame->ModifiedBlocks.Reset();
+
+    for (const TPair<FIntVector, TMap<int32, uint8>>& ChunkPair : ModifiedBlocks)
+    {
+        for (const TPair<int32, uint8>& BlockPair : ChunkPair.Value)
+        {
+            FVoxelSavedBlock& Record =
+                SaveGame->ModifiedBlocks.AddDefaulted_GetRef();
+
+            Record.ChunkCoord = ChunkPair.Key;
+            Record.LocalIndex = BlockPair.Key;
+            Record.Block = BlockPair.Value;
+        }
+    }
+
+    SaveGame->ObjectStates.Reset();
+
+    for (const TPair<int64, uint8>& ObjectPair : PersistentObjectStates)
+    {
+        FVoxelSavedObjectState& Record =
+            SaveGame->ObjectStates.AddDefaulted_GetRef();
+
+        Record.ObjectId = ObjectPair.Key;
+        Record.State = ObjectPair.Value;
+    }
+
+    if (UGameplayStatics::SaveGameToSlot(
+        SaveGame,
+        SaveSlotName,
+        SaveUserIndex))
+    {
+        UE_LOG(
+            LogTemp,
+            Log,
+            TEXT("Voxel world saved: %d block changes, %d object states."),
+            SaveGame->ModifiedBlocks.Num(),
+            SaveGame->ObjectStates.Num());
+    }
+}
+
+
+bool AVoxelWorld::LoadWorld()
+{
+    if (SaveSlotName.IsEmpty() ||
+        !UGameplayStatics::DoesSaveGameExist(
+            SaveSlotName,
+            SaveUserIndex))
+    {
+        return false;
+    }
+
+    UVoxelWorldSaveGame* SaveGame =
+        Cast<UVoxelWorldSaveGame>(
+            UGameplayStatics::LoadGameFromSlot(
+                SaveSlotName,
+                SaveUserIndex));
+
+    if (!SaveGame ||
+        SaveGame->SaveVersion != 1 ||
+        SaveGame->Seed != Seed ||
+        SaveGame->ChunkSize != ChunkSize ||
+        !FMath::IsNearlyEqual(
+            SaveGame->VoxelSize,
+            VoxelSize))
+    {
+        return false;
+    }
+
+    ModifiedBlocks.Empty();
+    PersistentObjectStates.Empty();
+
+    for (const FVoxelSavedBlock& Record :
+        SaveGame->ModifiedBlocks)
+    {
+        const int32 BlockCount =
+            ChunkSize * ChunkSize * ChunkSize;
+
+        if (Record.LocalIndex < 0 ||
+            Record.LocalIndex >= BlockCount ||
+            !IsChunkInsideWorld(Record.ChunkCoord))
+        {
+            continue;
+        }
+
+        ModifiedBlocks
+            .FindOrAdd(Record.ChunkCoord)
+            .Add(
+                Record.LocalIndex,
+                Record.Block);
+    }
+
+    for (const FVoxelSavedObjectState& Record :
+        SaveGame->ObjectStates)
+    {
+        PersistentObjectStates.Add(
+            Record.ObjectId,
+            Record.State);
+    }
+
+    ApplyLoadedPersistenceToLoadedChunks();
+
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Voxel world loaded: %d block changes, %d object states."),
+        SaveGame->ModifiedBlocks.Num(),
+        SaveGame->ObjectStates.Num());
+
+    return true;
+}
+
+
+void AVoxelWorld::ApplyLoadedPersistenceToLoadedChunks()
+{
+    for (const TPair<FIntVector, TMap<int32, uint8>>& ChunkPair :
+        ModifiedBlocks)
+    {
+        AVoxelChunk* Chunk =
+            GetChunk(ChunkPair.Key);
+
+        if (!Chunk)
+        {
+            continue;
+        }
+
+        for (const TPair<int32, uint8>& BlockPair :
+            ChunkPair.Value)
+        {
+            const int32 LocalIndex = BlockPair.Key;
+
+            const int32 X =
+                LocalIndex % ChunkSize;
+
+            const int32 Y =
+                (LocalIndex / ChunkSize) % ChunkSize;
+
+            const int32 Z =
+                LocalIndex /
+                (ChunkSize * ChunkSize);
+
+            Chunk->SetBlock(
+                X,
+                Y,
+                Z,
+                BlockPair.Value);
+        }
+
+        RebuildChunkAndNeighbors(
+            ChunkPair.Key);
+    }
+}
+
+
+void AVoxelWorld::SetPersistentObjectState(
+    int64 ObjectId,
+    uint8 State)
+{
+    SetPersistentObjectStateInternal(
+        ObjectId,
+        State);
+}
+
+
+void AVoxelWorld::SetPersistentObjectStateInternal(
+    int64 ObjectId,
+    uint8 State)
+{
+    PersistentObjectStates.Add(
+        ObjectId,
+        State);
+}
+
+
+bool AVoxelWorld::GetPersistentObjectState(
+    int64 ObjectId,
+    uint8& OutState) const
+{
+    if (const uint8* State =
+        PersistentObjectStates.Find(ObjectId))
+    {
+        OutState = *State;
+        return true;
+    }
+
+    OutState = 0;
+    return false;
+}
+
+
 /*
  * Получение чанка.
  *
