@@ -69,6 +69,12 @@ struct FVoxelMeshBuildOutput
 	TArray<FVector2D> UV0;
 	TArray<FLinearColor> VertexColors;
 
+	TArray<FVector> WaterVertices;
+	TArray<int32> WaterTriangles;
+	TArray<FVector> WaterNormals;
+	TArray<FVector2D> WaterUV0;
+	TArray<FLinearColor> WaterVertexColors;
+
 	bool IsEmpty() const
 	{
 		return Vertices.Num() == 0 || Triangles.Num() == 0;
@@ -100,6 +106,7 @@ private:
 		const FVector& C,
 		const FVector& D,
 		const FVector& Normal,
-		const FLinearColor& Color);
+		const FLinearColor& Color,
+		bool bWater);
 };
 
