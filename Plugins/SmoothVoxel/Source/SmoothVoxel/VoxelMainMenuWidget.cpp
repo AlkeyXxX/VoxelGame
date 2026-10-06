@@ -22,8 +22,6 @@ void UVoxelMainMenuWidget::NativeConstruct()
         BuildMenu();
     }
 
-    SetIsFocusable(true);
-
     if (APlayerController* PC = GetOwningPlayer())
     {
         PC->bShowMouseCursor = true;
@@ -33,7 +31,7 @@ void UVoxelMainMenuWidget::NativeConstruct()
             EMouseLockMode::DoNotLock);
 
         PC->SetInputMode(InputMode);
-        SetKeyboardFocus();
+
     }
 }
 
