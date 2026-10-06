@@ -12,6 +12,7 @@
 class AVoxelChunk;
 class UMaterialInterface;
 class UVoxelWorldSaveGame;
+class UVoxelMainMenuWidget;
 
 
 UCLASS()
@@ -395,6 +396,10 @@ private:
     void UpdateChunkStreaming();
 
     void SetPersistentObjectStateInternal(int64 ObjectId, uint8 State);
+    void ShowMainMenu();
+
+    UPROPERTY()
+    UVoxelMainMenuWidget* MainMenuWidget = nullptr;
 
 
     bool bStreamingInitialized = false;
