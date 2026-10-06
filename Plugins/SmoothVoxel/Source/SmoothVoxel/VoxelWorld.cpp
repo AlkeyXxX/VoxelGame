@@ -790,10 +790,34 @@ bool AVoxelWorld::BreakBlockByRay()
     }
 
 
+    /*
+     * Воду нельзя ломать обычным инструментом.
+     */
+    AVoxelChunk* Chunk =
+        GetChunk(WorldBlockToChunk(WorldBlock));
+
+    if (!Chunk)
+    {
+        return false;
+    }
+
+    const FIntVector LocalBlock =
+        WorldBlockToLocal(WorldBlock);
+
+    const uint8 HitBlock =
+        Chunk->GetBlock(
+            LocalBlock.X,
+            LocalBlock.Y,
+            LocalBlock.Z);
+
+    if (HitBlock == uint8(EVoxelBlock::Water))
+    {
+        return false;
+    }
+
     SetBlockInternal(
         WorldBlock,
         uint8(EVoxelBlock::Air));
-
 
     return true;
 }
