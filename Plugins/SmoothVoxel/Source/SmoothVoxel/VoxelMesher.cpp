@@ -250,7 +250,7 @@ void FVoxelMesher::Build(
                     BlockIndex(X, Y, Z, Size)
                 ];
 
-                if (!IsVoxelSolid(Block))
+                if (Block != uint8(EVoxelBlock::Water) && !IsVoxelSolid(Block))
                 {
                     continue;
                 }
