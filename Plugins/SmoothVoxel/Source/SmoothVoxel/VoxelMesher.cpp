@@ -257,28 +257,8 @@ void FVoxelMesher::Build(
 
                 const float S = VoxelSize;
 
-                FLinearColor BiomeColor = FLinearColor::White;
-
-                if (Input.Biomes.Num() == MaxBlocks)
-                {
-                    switch (Input.Biomes[BlockIndex(X, Y, Z, Size)])
-                    {
-                    case 0: // Plains
-                        BiomeColor = FLinearColor(0.20f, 0.80f, 0.20f, 1.0f);
-                        break;
-                    case 1: // Forest
-                        BiomeColor = FLinearColor(0.05f, 0.35f, 0.08f, 1.0f);
-                        break;
-                    case 2: // Desert
-                        BiomeColor = FLinearColor(0.95f, 0.75f, 0.25f, 1.0f);
-                        break;
-                    case 3: // Mountain
-                        BiomeColor = FLinearColor(0.55f, 0.55f, 0.60f, 1.0f);
-                        break;
-                    default:
-                        break;
-                    }
-                }
+                // DEBUG: force every generated face to red.
+                const FLinearColor BiomeColor = FLinearColor::Red;
 
 
                 /*
