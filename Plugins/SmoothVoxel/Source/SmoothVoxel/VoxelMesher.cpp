@@ -304,7 +304,8 @@ void FVoxelMesher::Build(
                         FVector(0, S, 0),
 
                         FVector(-1, 0, 0),
-                        BiomeColor);
+                        BiomeColor,
+                        false);
                 }
 
 
@@ -324,7 +325,8 @@ void FVoxelMesher::Build(
                         FVector(S, 0, S),
 
                         FVector(1, 0, 0),
-                        BiomeColor);
+                        BiomeColor,
+                        false);
                 }
 
 
@@ -344,7 +346,8 @@ void FVoxelMesher::Build(
                         FVector(0, 0, S),
 
                         FVector(0, -1, 0),
-                        BiomeColor);
+                        BiomeColor,
+                        false);
                 }
 
 
@@ -364,7 +367,8 @@ void FVoxelMesher::Build(
                         FVector(S, S, 0),
 
                         FVector(0, 1, 0),
-                        BiomeColor);
+                        BiomeColor,
+                        false);
                 }
 
 
@@ -384,7 +388,8 @@ void FVoxelMesher::Build(
                         FVector(S, 0, 0),
 
                         FVector(0, 0, -1),
-                        BiomeColor);
+                        BiomeColor,
+                        false);
                 }
 
 
@@ -404,7 +409,8 @@ void FVoxelMesher::Build(
                         FVector(0, S, S),
 
                         FVector(0, 0, 1),
-                        BiomeColor);
+                        BiomeColor,
+                        false);
                 }
             }
         }
