@@ -22,6 +22,8 @@ void UVoxelMainMenuWidget::NativeConstruct()
         BuildMenu();
     }
 
+    SetIsFocusable(true);
+
     if (APlayerController* PC = GetOwningPlayer())
     {
         PC->bShowMouseCursor = true;
@@ -31,7 +33,21 @@ void UVoxelMainMenuWidget::NativeConstruct()
             EMouseLockMode::DoNotLock);
 
         PC->SetInputMode(InputMode);
+        SetKeyboardFocus();
     }
+}
+
+FReply UVoxelMainMenuWidget::NativeOnKeyDown(
+    const FGeometry& InGeometry,
+    const FKeyEvent& InKeyEvent)
+{
+    if (InKeyEvent.GetKey() == EKeys::Escape)
+    {
+        CloseMenu();
+        return FReply::Handled();
+    }
+
+    return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
 }
 
 void UVoxelMainMenuWidget::BuildMenu()
