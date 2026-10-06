@@ -6,7 +6,10 @@
 #include "Kismet/GameplayStatics.h"
 
 bool AVoxelPlayerController::InputKey(
-    const FInputKeyEventArgs& Params)
+    FKey Key,
+    EInputEvent Event,
+    float AmountDepressed,
+    bool bGamepad)
 {
     /*
      * Escape обрабатываем на самом PlayerController.
@@ -17,8 +20,8 @@ bool AVoxelPlayerController::InputKey(
      * Когда игра уже на паузе, Escape должен обрабатываться
      * самим UMG-меню, поэтому здесь ничего не делаем.
      */
-    if (Params.Key == EKeys::Escape &&
-        Params.Event == IE_Pressed)
+    if (Key == EKeys::Escape &&
+        Event == IE_Pressed)
     {
         if (!UGameplayStatics::IsGamePaused(GetWorld()))
         {
@@ -27,7 +30,11 @@ bool AVoxelPlayerController::InputKey(
         }
     }
 
-    return Super::InputKey(Params);
+    return Super::InputKey(
+        Key,
+        Event,
+        AmountDepressed,
+        bGamepad);
 }
 
 void AVoxelPlayerController::HandleEscape()
