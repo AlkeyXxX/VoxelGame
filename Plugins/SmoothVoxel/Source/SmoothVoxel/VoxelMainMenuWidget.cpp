@@ -26,7 +26,18 @@ void UVoxelMainMenuWidget::NativeConstruct()
     {
         PC->bShowMouseCursor = true;
 
-        FInputModeUIOnly InputMode;
+        /*
+         * GameAndUI здесь важен для Escape.
+         *
+         * В UE 4.27 режим UIOnly может полностью забрать
+         * клавиатурный ввод у PlayerController. Нам нужно,
+         * чтобы меню получало UI-ввод, но PlayerController
+         * всё ещё мог обработать Escape и закрыть меню.
+         *
+         * Игра при этом остаётся на паузе.
+         */
+        FInputModeGameAndUI InputMode;
+        InputMode.SetHideCursorDuringCapture(false);
         InputMode.SetLockMouseToViewportBehavior(
             EMouseLockMode::DoNotLock);
 
