@@ -214,6 +214,15 @@ public:
         Category="Voxel|Rendering")
     UMaterialInterface* Material = nullptr;
 
+    /*
+     * Отдельный материал воды.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Rendering")
+    UMaterialInterface* WaterMaterial = nullptr;
+
 
     /*
      * Дальность взаимодействия.
