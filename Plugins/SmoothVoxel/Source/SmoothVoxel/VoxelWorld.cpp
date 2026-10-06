@@ -179,7 +179,22 @@ void AVoxelWorld::ShowMainMenu()
     }
 
     MainMenuWidget->AddToViewport(1000);
+
+    /*
+     * Настраиваем UI input только после AddToViewport().
+     * Так UMG гарантированно получает keyboard focus.
+     */
+    FInputModeUIOnly InputMode;
+    InputMode.SetWidgetToFocus(
+        MainMenuWidget->TakeWidget());
+
+    InputMode.SetLockMouseToViewportBehavior(
+        EMouseLockMode::DoNotLock);
+
+    PC->bShowMouseCursor = true;
     PC->SetPause(true);
+    PC->SetInputMode(InputMode);
+    MainMenuWidget->SetKeyboardFocus();
 }
 
 
