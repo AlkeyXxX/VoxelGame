@@ -224,6 +224,9 @@ void AVoxelWorld::GenerateWorld()
                 Chunk->SetVoxelMaterial(
                     Material);
 
+                Chunk->SetWaterMaterial(
+                    WaterMaterial);
+
 
                 Chunks.Add(
                     Coord,
