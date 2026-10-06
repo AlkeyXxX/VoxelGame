@@ -42,6 +42,4 @@ private:
 
     UFUNCTION()
     void OnSaveGameClicked();
-
-    void CloseMenu();
 };
