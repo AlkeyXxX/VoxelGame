@@ -3,6 +3,7 @@
 #include "VoxelChunk.h"
 #include "VoxelWorldGenerator.h"
 #include "VoxelWorldSaveGame.h"
+#include "VoxelMainMenuWidget.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -119,7 +120,40 @@ void AVoxelWorld::BeginPlay()
     Super::BeginPlay();
 
     GenerateWorld();
-    LoadWorld();
+    ShowMainMenu();
+}
+
+
+
+void AVoxelWorld::ShowMainMenu()
+{
+    if (MainMenuWidget)
+    {
+        return;
+    }
+
+    APlayerController* PC =
+        UGameplayStatics::GetPlayerController(
+            this,
+            0);
+
+    if (!PC)
+    {
+        return;
+    }
+
+    MainMenuWidget =
+        CreateWidget<UVoxelMainMenuWidget>(
+            PC,
+            UVoxelMainMenuWidget::StaticClass());
+
+    if (!MainMenuWidget)
+    {
+        return;
+    }
+
+    MainMenuWidget->AddToViewport(1000);
+    PC->SetPause(true);
 }
 
 
