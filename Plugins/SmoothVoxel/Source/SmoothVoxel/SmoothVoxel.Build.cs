@@ -6,6 +6,10 @@ public class SmoothVoxel : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+		// Заголовки SmoothVoxel лежат прямо в корне модуля.
+		// Делаем этот каталог видимым для зависимых модулей.
+		PublicIncludePaths.Add(ModuleDirectory);
+
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
