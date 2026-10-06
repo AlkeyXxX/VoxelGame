@@ -87,6 +87,15 @@ public:
     void CopyBlockData(
         TArray<uint8>& OutData) const;
 
+    void CopyBiomeData(
+        TArray<uint8>& OutData) const;
+
+    void SetBiome(
+        int32 X,
+        int32 Y,
+        int32 Z,
+        uint8 Biome);
+
     void CopyXMinus(
         TArray<uint8>& OutData) const;
 
@@ -154,6 +163,7 @@ private:
 
 
     TArray<uint8> Blocks;
+    TArray<uint8> Biomes;
 
 
     /*
