@@ -66,6 +66,7 @@ struct FVoxelMeshBuildOutput
 	TArray<int32> Triangles;
 	TArray<FVector> Normals;
 	TArray<FVector2D> UV0;
+	TArray<FLinearColor> VertexColors;
 
 	bool IsEmpty() const
 	{
@@ -97,6 +98,7 @@ private:
 		const FVector& B,
 		const FVector& C,
 		const FVector& D,
-		const FVector& Normal);
+		const FVector& Normal,
+		const FLinearColor& Color);
 };
 
