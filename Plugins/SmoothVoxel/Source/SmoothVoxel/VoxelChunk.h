@@ -121,6 +121,9 @@ public:
     void SetVoxelMaterial(
         UMaterialInterface* InMaterial);
 
+    void SetWaterMaterial(
+        UMaterialInterface* InMaterial);
+
 
     UPROPERTY(
         VisibleAnywhere,
@@ -152,6 +155,12 @@ protected:
         BlueprintReadWrite,
         Category="Voxel")
     UMaterialInterface* Material = nullptr;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel")
+    UMaterialInterface* WaterMaterial = nullptr;
 
 
 private:
