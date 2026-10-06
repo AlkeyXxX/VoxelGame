@@ -128,12 +128,19 @@ void AVoxelWorld::BeginPlay()
 
         if (InputComponent)
         {
+            /*
+             * Перехватываем Escape на уровне VoxelWorld.
+             * Высокий приоритет + BlockInput не даёт стандартному
+             * обработчику редактора/игры забрать клавишу раньше нас.
+             */
+            InputComponent->Priority = 1000;
+            InputComponent->bBlockInput = true;
+
             InputComponent->BindKey(
                 EKeys::Escape,
                 IE_Pressed,
                 this,
                 &AVoxelWorld::ToggleMainMenu);
-
         }
     }
 
