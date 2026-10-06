@@ -134,7 +134,6 @@ void AVoxelWorld::BeginPlay()
                 this,
                 &AVoxelWorld::ToggleMainMenu);
 
-            InputComponent->bExecuteWhenPaused = true;
         }
     }
 
