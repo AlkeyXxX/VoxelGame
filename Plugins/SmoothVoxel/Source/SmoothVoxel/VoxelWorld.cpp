@@ -354,6 +354,12 @@ void AVoxelWorld::GenerateChunkBlocks(
                 }
 
 
+                Chunk->SetBiome(
+                    X,
+                    Y,
+                    Z,
+                    uint8(Biome));
+
                 Chunk->SetBlock(
                     X,
                     Y,
