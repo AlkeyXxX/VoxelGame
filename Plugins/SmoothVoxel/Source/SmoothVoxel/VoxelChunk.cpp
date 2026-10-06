@@ -49,6 +49,7 @@ void AVoxelChunk::InitializeChunk(
         ChunkSize * ChunkSize * ChunkSize;
 
     Blocks.SetNumZeroed(BlockCount);
+    Biomes.SetNumZeroed(BlockCount);
 
 
     if (Material)
@@ -100,6 +101,23 @@ uint8 AVoxelChunk::GetBlock(
 }
 
 
+void AVoxelChunk::SetBiome(
+    int32 X,
+    int32 Y,
+    int32 Z,
+    uint8 Biome)
+{
+    if (X < 0 || X >= ChunkSize ||
+        Y < 0 || Y >= ChunkSize ||
+        Z < 0 || Z >= ChunkSize)
+    {
+        return;
+    }
+
+    Biomes[BlockIndex(X, Y, Z)] = Biome;
+}
+
+
 void AVoxelChunk::SetBlock(
     int32 X,
     int32 Y,
@@ -137,6 +155,13 @@ void AVoxelChunk::CopyBlockData(
     TArray<uint8>& OutData) const
 {
     OutData = Blocks;
+}
+
+
+void AVoxelChunk::CopyBiomeData(
+    TArray<uint8>& OutData) const
+{
+    OutData = Biomes;
 }
 
 
@@ -327,6 +352,7 @@ void AVoxelChunk::RebuildMesh()
 
 
     CopyBlockData(Input.Blocks);
+    CopyBiomeData(Input.Biomes);
 
     Input.Neighbors.Init(ChunkSize);
 
@@ -454,7 +480,7 @@ void AVoxelChunk::ApplyMesh(
         TArray<FVector2D>(),
         TArray<FVector2D>(),
 
-        VertexColors,
+        Output.VertexColors,
 
         Tangents,
 
