@@ -56,6 +56,11 @@ void AVoxelChunk::InitializeChunk(
     {
         Mesh->SetMaterial(0, Material);
     }
+
+    if (WaterMaterial)
+    {
+        Mesh->SetMaterial(1, WaterMaterial);
+    }
 }
 
 
@@ -67,6 +72,18 @@ void AVoxelChunk::SetVoxelMaterial(
     if (Mesh)
     {
         Mesh->SetMaterial(0, Material);
+    }
+}
+
+
+void AVoxelChunk::SetWaterMaterial(
+    UMaterialInterface* InMaterial)
+{
+    WaterMaterial = InMaterial;
+
+    if (Mesh)
+    {
+        Mesh->SetMaterial(1, WaterMaterial);
     }
 }
 
@@ -511,11 +528,11 @@ void AVoxelChunk::ApplyMesh(
             Tangents,
             false);
 
-        if (Material)
+        if (WaterMaterial)
         {
             Mesh->SetMaterial(
                 1,
-                Material);
+                WaterMaterial);
         }
     }
 }
