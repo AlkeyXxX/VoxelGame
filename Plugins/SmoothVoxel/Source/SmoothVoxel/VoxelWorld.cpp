@@ -378,7 +378,9 @@ void AVoxelWorld::GenerateChunkBlocks(
                     X,
                     Y,
                     Z,
-                    uint8(Biome));
+                    Block == uint8(EVoxelBlock::Water)
+                        ? 4
+                        : uint8(Biome));
 
                 Chunk->SetBlock(
                     X,
