@@ -183,6 +183,11 @@ void FVoxelMesher::AddFace(
     Output.UV0.Add(FVector2D(1.0f, 1.0f));
     Output.UV0.Add(FVector2D(0.0f, 1.0f));
 
+    Output.VertexColors.Add(Color);
+    Output.VertexColors.Add(Color);
+    Output.VertexColors.Add(Color);
+    Output.VertexColors.Add(Color);
+
 
     /*
      * Наружная сторона должна быть front face.
@@ -223,6 +228,7 @@ void FVoxelMesher::Build(
     Output.Vertices.Reserve(MaxBlocks * 6 * 4);
     Output.Normals.Reserve(MaxBlocks * 6 * 4);
     Output.UV0.Reserve(MaxBlocks * 6 * 4);
+    Output.VertexColors.Reserve(MaxBlocks * 6 * 4);
     Output.Triangles.Reserve(MaxBlocks * 6 * 6);
 
 
@@ -250,6 +256,29 @@ void FVoxelMesher::Build(
 
                 const float S = VoxelSize;
 
+                FLinearColor BiomeColor = FLinearColor::White;
+
+                if (Input.Biomes.Num() == MaxBlocks)
+                {
+                    switch (Input.Biomes[BlockIndex(X, Y, Z, Size)])
+                    {
+                    case 0: // Plains
+                        BiomeColor = FLinearColor(0.20f, 0.80f, 0.20f, 1.0f);
+                        break;
+                    case 1: // Forest
+                        BiomeColor = FLinearColor(0.05f, 0.35f, 0.08f, 1.0f);
+                        break;
+                    case 2: // Desert
+                        BiomeColor = FLinearColor(0.95f, 0.75f, 0.25f, 1.0f);
+                        break;
+                    case 3: // Mountain
+                        BiomeColor = FLinearColor(0.55f, 0.55f, 0.60f, 1.0f);
+                        break;
+                    default:
+                        break;
+                    }
+                }
+
 
                 /*
                  * X-
@@ -266,7 +295,8 @@ void FVoxelMesher::Build(
                         FVector(0, S, S),
                         FVector(0, S, 0),
 
-                        FVector(-1, 0, 0));
+                        FVector(-1, 0, 0),
+                        BiomeColor);
                 }
 
 
@@ -285,7 +315,8 @@ void FVoxelMesher::Build(
                         FVector(S, S, S),
                         FVector(S, 0, S),
 
-                        FVector(1, 0, 0));
+                        FVector(1, 0, 0),
+                        BiomeColor);
                 }
 
 
@@ -304,7 +335,8 @@ void FVoxelMesher::Build(
                         FVector(S, 0, S),
                         FVector(0, 0, S),
 
-                        FVector(0, -1, 0));
+                        FVector(0, -1, 0),
+                        BiomeColor);
                 }
 
 
@@ -323,7 +355,8 @@ void FVoxelMesher::Build(
                         FVector(S, S, S),
                         FVector(S, S, 0),
 
-                        FVector(0, 1, 0));
+                        FVector(0, 1, 0),
+                        BiomeColor);
                 }
 
 
@@ -342,7 +375,8 @@ void FVoxelMesher::Build(
                         FVector(S, S, 0),
                         FVector(S, 0, 0),
 
-                        FVector(0, 0, -1));
+                        FVector(0, 0, -1),
+                        BiomeColor);
                 }
 
 
@@ -361,7 +395,8 @@ void FVoxelMesher::Build(
                         FVector(S, S, S),
                         FVector(0, S, S),
 
-                        FVector(0, 0, 1));
+                        FVector(0, 0, 1),
+                        BiomeColor);
                 }
             }
         }
