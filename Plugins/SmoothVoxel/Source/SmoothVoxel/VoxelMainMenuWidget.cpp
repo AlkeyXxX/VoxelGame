@@ -34,17 +34,24 @@ bool UVoxelMainMenuWidget::NativeSupportsKeyboardFocus() const
     return true;
 }
 
-FReply UVoxelMainMenuWidget::NativeOnKeyDown(
+FReply UVoxelMainMenuWidget::NativeOnPreviewKeyDown(
     const FGeometry& InGeometry,
     const FKeyEvent& InKeyEvent)
 {
+    /*
+     * Preview получает клавишу раньше дочерних Button-ов,
+     * поэтому Escape работает независимо от того, какая
+     * кнопка сейчас находится в фокусе.
+     */
     if (InKeyEvent.GetKey() == EKeys::Escape)
     {
         CloseMenu();
         return FReply::Handled();
     }
 
-    return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+    return Super::NativeOnPreviewKeyDown(
+        InGeometry,
+        InKeyEvent);
 }
 
 void UVoxelMainMenuWidget::BuildMenu()
