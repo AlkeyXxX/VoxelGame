@@ -13,7 +13,7 @@ class SMOOTHVOXEL_API UVoxelMainMenuWidget : public UUserWidget
 
 protected:
     virtual void NativeConstruct() override;
-    virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+    virtual FReply NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
     virtual bool NativeSupportsKeyboardFocus() const override;
 
 public:
