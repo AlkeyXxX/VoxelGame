@@ -2,6 +2,7 @@
 #include "VoxelWorld.h"
 #include "VoxelChunk.h"
 #include "VoxelWorldGenerator.h"
+#include "VoxelWorldSaveGame.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -118,6 +119,21 @@ void AVoxelWorld::BeginPlay()
     Super::BeginPlay();
 
     GenerateWorld();
+    LoadWorld();
+}
+
+
+void AVoxelWorld::EndPlay(
+    const EEndPlayReason::Type EndPlayReason)
+{
+    /*
+     * Перед выходом из мира сохраняем накопленные изменения.
+     * SaveGame содержит только delta-данные, поэтому для текущего
+     * этапа это маленькая операция.
+     */
+    SaveWorld();
+
+    Super::EndPlay(EndPlayReason);
 }
 
 
@@ -127,6 +143,17 @@ void AVoxelWorld::Tick(
     Super::Tick(DeltaSeconds);
 
     UpdateChunkStreaming();
+
+    if (AutoSaveInterval > 0.0f)
+    {
+        TimeSinceLastAutoSave += DeltaSeconds;
+
+        if (TimeSinceLastAutoSave >= AutoSaveInterval)
+        {
+            TimeSinceLastAutoSave = 0.0f;
+            SaveWorld();
+        }
+    }
 }
 
 
