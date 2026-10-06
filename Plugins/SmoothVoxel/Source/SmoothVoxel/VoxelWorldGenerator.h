@@ -2,77 +2,41 @@
 
 #include "CoreMinimal.h"
 
-/*
- * Настройки процедурной генерации мира.
- *
- * Важно:
- * этот тип не зависит от AVoxelWorld или AVoxelChunk.
- * Благодаря этому генератор можно использовать независимо
- * от размера мира и позже переносить часть работы на worker threads.
- */
-struct FVoxelWorldGenerationSettings
+enum class EVoxelBiome : uint8
 {
-	int32 Seed = 1337;
-	int32 BaseHeight = 12;
-	int32 HeightVariation = 8;
-	float NoiseScale = 0.025f;
+    Plains = 0,
+    Forest,
+    Desert,
+    Mountain
 };
 
+struct FVoxelWorldGenerationSettings
+{
+    int32 Seed = 1337;
+    int32 BaseHeight = 12;
+    int32 HeightVariation = 8;
+    float NoiseScale = 0.025f;
+    float TemperatureScale = 0.006f;
+    float MoistureScale = 0.008f;
+};
 
-/*
- * Базовый генератор данных мира.
- *
- * Сейчас он отвечает только за высоту поверхности.
- *
- * Позже сюда постепенно добавим:
- * - биомы;
- * - воду;
- * - дороги;
- * - POI;
- * - и другие слои генерации.
- *
- * AVoxelWorld при этом останется ответственным за:
- * - chunks;
- * - блоки;
- * - mesh;
- * - взаимодействие с игроком.
- */
 class FVoxelWorldGenerator
 {
 public:
+    FVoxelWorldGenerator();
 
-	FVoxelWorldGenerator();
+    void Configure(const FVoxelWorldGenerationSettings& InSettings);
 
-	/*
-	 * Настроить генератор.
-	 */
-	void Configure(
-		const FVoxelWorldGenerationSettings& InSettings);
+    int32 GetSurfaceHeight(int32 WorldX, int32 WorldY) const;
+    float GetTerrainNoise(int32 WorldX, int32 WorldY) const;
+    float GetTemperature(int32 WorldX, int32 WorldY) const;
+    float GetMoisture(int32 WorldX, int32 WorldY) const;
 
-	/*
-	 * Получить высоту поверхности в глобальной
-	 * координате блока X/Y.
-	 *
-	 * Одна и та же комбинация:
-	 * Seed + WorldX + WorldY
-	 *
-	 * всегда даёт один и тот же результат.
-	 */
-	int32 GetSurfaceHeight(
-		int32 WorldX,
-		int32 WorldY) const;
-
-	/*
-	 * Получить значение terrain noise.
-	 *
-	 * Оставляем этот метод отдельным, потому что позже
-	 * он может пригодиться другим слоям генерации.
-	 */
-	float GetTerrainNoise(
-		int32 WorldX,
-		int32 WorldY) const;
+    EVoxelBiome GetBiome(
+        int32 WorldX,
+        int32 WorldY,
+        int32 SurfaceHeight) const;
 
 private:
-
-	FVoxelWorldGenerationSettings Settings;
+    FVoxelWorldGenerationSettings Settings;
 };
