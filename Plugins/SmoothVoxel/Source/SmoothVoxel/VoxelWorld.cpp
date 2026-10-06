@@ -166,6 +166,13 @@ void AVoxelWorld::GenerateWorld()
 
     Chunks.Empty();
 
+    /*
+     * GenerateWorld() означает полную генерацию мира заново,
+     * поэтому старые runtime-изменения очищаем.
+     * При обычном streaming изменения сюда не попадают.
+     */
+    ModifiedBlocks.Empty();
+
     bStreamingInitialized = false;
     LastStreamingCenter = FIntVector::ZeroValue;
 
@@ -701,6 +708,26 @@ void AVoxelWorld::GenerateChunkBlocks(
                         ? 4
                         : uint8(Biome));
 
+                /*
+                 * Сначала строим обычный процедурный блок.
+                 * Затем накладываем изменение игрока, если
+                 * этот локальный блок уже был изменён ранее.
+                 */
+                const int32 LocalIndex =
+                    X +
+                    Y * ChunkSize +
+                    Z * ChunkSize * ChunkSize;
+
+                if (const TMap<int32, uint8>* ChunkModifications =
+                    ModifiedBlocks.Find(ChunkCoord))
+                {
+                    if (const uint8* ModifiedBlock =
+                        ChunkModifications->Find(LocalIndex))
+                    {
+                        Block = *ModifiedBlock;
+                    }
+                }
+
                 Chunk->SetBlock(
                     X,
                     Y,
@@ -917,6 +944,26 @@ void AVoxelWorld::SetBlockInternal(
         LocalBlock.X,
         LocalBlock.Y,
         LocalBlock.Z,
+        Block);
+
+
+    /*
+     * Сохраняем изменение отдельно от runtime-данных чанка.
+     *
+     * Поэтому после Destroy() чанка streaming не теряет
+     * изменения: при следующем CreateChunk() они будут
+     * наложены поверх процедурной генерации.
+     */
+    const int32 LocalIndex =
+        LocalBlock.X +
+        LocalBlock.Y * ChunkSize +
+        LocalBlock.Z * ChunkSize * ChunkSize;
+
+    TMap<int32, uint8>& ChunkModifications =
+        ModifiedBlocks.FindOrAdd(ChunkCoord);
+
+    ChunkModifications.Add(
+        LocalIndex,
         Block);
 
 
