@@ -448,6 +448,7 @@ void AVoxelChunk::ApplyMesh(
      * Полностью удаляем старую секцию.
      */
     Mesh->ClearMeshSection(0);
+    Mesh->ClearMeshSection(1);
 
 
     /*
@@ -492,6 +493,30 @@ void AVoxelChunk::ApplyMesh(
         Mesh->SetMaterial(
             0,
             Material);
+    }
+
+    if (Output.WaterVertices.Num() > 0 &&
+        Output.WaterTriangles.Num() > 0)
+    {
+        Mesh->CreateMeshSection_LinearColor(
+            1,
+            Output.WaterVertices,
+            Output.WaterTriangles,
+            Output.WaterNormals,
+            Output.WaterUV0,
+            TArray<FVector2D>(),
+            TArray<FVector2D>(),
+            TArray<FVector2D>(),
+            Output.WaterVertexColors,
+            Tangents,
+            false);
+
+        if (Material)
+        {
+            Mesh->SetMaterial(
+                1,
+                Material);
+        }
     }
 }
 
