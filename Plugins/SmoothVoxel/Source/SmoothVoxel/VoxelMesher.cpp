@@ -5,6 +5,18 @@
 
 namespace
 {
+    FORCEINLINE bool IsFaceVisibleInternal(uint8 Block, uint8 NeighborBlock)
+    {
+        const bool bWater = Block == uint8(EVoxelBlock::Water);
+
+        if (bWater)
+        {
+            return NeighborBlock != uint8(EVoxelBlock::Water);
+        }
+
+        return !IsVoxelSolid(NeighborBlock);
+    }
+
     FORCEINLINE int32 BlockIndex(
         int32 X,
         int32 Y,
@@ -34,6 +46,14 @@ namespace
  * Если координата выходит за границу —
  * читаем соответствующий снимок соседнего чанка.
  */
+bool FVoxelMesher::IsFaceVisible(
+    uint8 Block,
+    uint8 NeighborBlock)
+{
+    return IsFaceVisibleInternal(Block, NeighborBlock);
+}
+
+
 uint8 FVoxelMesher::GetBlock(
     const FVoxelMeshBuildInput& Input,
     int32 X,
@@ -298,7 +318,8 @@ void FVoxelMesher::Build(
                 /*
                  * X-
                  */
-                if (!IsVoxelSolid(
+                if (IsFaceVisible(
+                    Block,
                     GetBlock(Input, X - 1, Y, Z)))
                 {
                     AddFace(
@@ -319,7 +340,8 @@ void FVoxelMesher::Build(
                 /*
                  * X+
                  */
-                if (!IsVoxelSolid(
+                if (IsFaceVisible(
+                    Block,
                     GetBlock(Input, X + 1, Y, Z)))
                 {
                     AddFace(
@@ -340,7 +362,8 @@ void FVoxelMesher::Build(
                 /*
                  * Y-
                  */
-                if (!IsVoxelSolid(
+                if (IsFaceVisible(
+                    Block,
                     GetBlock(Input, X, Y - 1, Z)))
                 {
                     AddFace(
@@ -361,7 +384,8 @@ void FVoxelMesher::Build(
                 /*
                  * Y+
                  */
-                if (!IsVoxelSolid(
+                if (IsFaceVisible(
+                    Block,
                     GetBlock(Input, X, Y + 1, Z)))
                 {
                     AddFace(
@@ -382,7 +406,8 @@ void FVoxelMesher::Build(
                 /*
                  * Z-
                  */
-                if (!IsVoxelSolid(
+                if (IsFaceVisible(
+                    Block,
                     GetBlock(Input, X, Y, Z - 1)))
                 {
                     AddFace(
@@ -403,7 +428,8 @@ void FVoxelMesher::Build(
                 /*
                  * Z+
                  */
-                if (!IsVoxelSolid(
+                if (IsFaceVisible(
+                    Block,
                     GetBlock(Input, X, Y, Z + 1)))
                 {
                     AddFace(
