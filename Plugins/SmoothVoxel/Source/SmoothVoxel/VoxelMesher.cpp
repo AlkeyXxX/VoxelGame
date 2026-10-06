@@ -282,6 +282,9 @@ void FVoxelMesher::Build(
                     case 3: // Mountain
                         BiomeColor = FLinearColor(0.55f, 0.55f, 0.60f, 1.0f);
                         break;
+                    case 4: // Water
+                        BiomeColor = FLinearColor(0.05f, 0.35f, 0.85f, 1.0f);
+                        break;
                     default:
                         break;
                     }
