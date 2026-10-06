@@ -185,6 +185,25 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biome")
     float MoistureScale = 0.008f;
 
+    /*
+     * Уровень моря в мировых блоках.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Water")
+    int32 SeaLevel = 10;
+
+    /*
+     * Ширина пляжной зоны в блоках.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Water",
+        meta=(ClampMin="0", ClampMax="8"))
+    int32 BeachWidth = 2;
+
 
     /*
      * Материал voxel mesh.
