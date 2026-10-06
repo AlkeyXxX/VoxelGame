@@ -145,6 +145,7 @@ void UVoxelMainMenuWidget::CloseMenu()
     if (APlayerController* PC = GetOwningPlayer())
     {
         PC->bShowMouseCursor = false;
+        PC->SetPause(false);
 
         FInputModeGameOnly InputMode;
         PC->SetInputMode(InputMode);
