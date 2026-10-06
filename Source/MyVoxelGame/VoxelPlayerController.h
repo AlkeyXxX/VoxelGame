@@ -11,7 +11,10 @@ class MYVOXELGAME_API AVoxelPlayerController : public APlayerController
 
 public:
     virtual bool InputKey(
-        const FInputKeyEventArgs& Params) override;
+        FKey Key,
+        EInputEvent Event,
+        float AmountDepressed = 1.0f,
+        bool bGamepad = false) override;
 
 private:
     void HandleEscape();
