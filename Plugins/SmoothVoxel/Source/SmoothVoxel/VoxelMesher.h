@@ -77,7 +77,8 @@ struct FVoxelMeshBuildOutput
 
 	bool IsEmpty() const
 	{
-		return Vertices.Num() == 0 || Triangles.Num() == 0;
+		return (Vertices.Num() == 0 || Triangles.Num() == 0) &&
+			(WaterVertices.Num() == 0 || WaterTriangles.Num() == 0);
 	}
 };
 
