@@ -92,14 +92,14 @@ public:
      * Количество чанков по каждой оси.
      *
      * Сейчас оставляем текущую модель. В дальнейшем
-     * этот набор будет описывать активную область мира.
+     * этот набор описывает размер генерируемой области мира.
      */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
         Category="Voxel|World",
         meta=(ClampMin="1", ClampMax="256"))
-    int32 WorldSizeX = 4;
+    int32 WorldSizeX = 8;
 
 
     UPROPERTY(
@@ -107,7 +107,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|World",
         meta=(ClampMin="1", ClampMax="256"))
-    int32 WorldSizeY = 4;
+    int32 WorldSizeY = 8;
 
 
     UPROPERTY(
