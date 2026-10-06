@@ -311,29 +311,49 @@ void AVoxelWorld::GenerateChunkBlocks(
 
                 if (WorldZ > Height)
                 {
-                    Block =
-                        uint8(EVoxelBlock::Air);
+                    if (WorldZ <= SeaLevel)
+                    {
+                        Block =
+                            uint8(EVoxelBlock::Water);
+                    }
+                    else
+                    {
+                        Block =
+                            uint8(EVoxelBlock::Air);
+                    }
                 }
                 else if (WorldZ == Height)
                 {
-                    switch (Biome)
+                    const bool bBeach =
+                        Height < SeaLevel &&
+                        Height >= SeaLevel - BeachWidth;
+
+                    if (bBeach)
                     {
-                    case EVoxelBiome::Desert:
                         Block =
                             uint8(EVoxelBlock::Sand);
-                        break;
+                    }
+                    else
+                    {
+                        switch (Biome)
+                        {
+                        case EVoxelBiome::Desert:
+                            Block =
+                                uint8(EVoxelBlock::Sand);
+                            break;
 
-                    case EVoxelBiome::Mountain:
-                        Block =
-                            uint8(EVoxelBlock::Stone);
-                        break;
+                        case EVoxelBiome::Mountain:
+                            Block =
+                                uint8(EVoxelBlock::Stone);
+                            break;
 
-                    case EVoxelBiome::Forest:
-                    case EVoxelBiome::Plains:
-                    default:
-                        Block =
-                            uint8(EVoxelBlock::Grass);
-                        break;
+                        case EVoxelBiome::Forest:
+                        case EVoxelBiome::Plains:
+                        default:
+                            Block =
+                                uint8(EVoxelBlock::Grass);
+                            break;
+                        }
                     }
                 }
                 else if (Biome == EVoxelBiome::Desert &&
