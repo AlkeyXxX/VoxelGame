@@ -24,6 +24,7 @@ public:
     AVoxelWorld();
 
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaSeconds) override;
 
 
     /*
@@ -116,6 +117,44 @@ public:
         Category="Voxel|World",
         meta=(ClampMin="1", ClampMax="32"))
     int32 WorldSizeZ = 1;
+
+
+    /*
+     * Радиус чанков вокруг игрока, которые держим загруженными.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Streaming",
+        meta=(ClampMin="1", ClampMax="16"))
+    int32 StreamingRadius = 3;
+
+
+    /*
+     * Радиус, после которого чанк можно выгрузить.
+     *
+     * Должен быть больше StreamingRadius,
+     * чтобы не было постоянного load/unload на границе.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Streaming",
+        meta=(ClampMin="1", ClampMax="20"))
+    int32 UnloadRadius = 4;
+
+
+    /*
+     * Максимальное количество новых chunks за один Tick.
+     *
+     * Маленькое значение уменьшает скачки FPS.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Streaming",
+        meta=(ClampMin="1", ClampMax="8"))
+    int32 MaxChunksPerTick = 1;
 
 
     /*
@@ -298,5 +337,26 @@ private:
      */
     void RebuildChunkAndNeighbors(
         const FIntVector& ChunkCoord);
+
+
+    /*
+     * Streaming.
+     */
+    bool GetStreamingCenterChunk(
+        FIntVector& OutChunkCoord) const;
+
+    bool IsChunkInsideWorld(
+        const FIntVector& ChunkCoord) const;
+
+    AVoxelChunk* CreateChunk(
+        const FIntVector& ChunkCoord);
+
+    void UpdateChunkStreaming();
+
+
+    bool bStreamingInitialized = false;
+
+    FIntVector LastStreamingCenter =
+        FIntVector::ZeroValue;
 };
 
