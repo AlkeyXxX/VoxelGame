@@ -288,6 +288,9 @@ public:
         Category="Voxel|Player")
     float InteractionDistance = 1000.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|UI")
+    TSubclassOf<UVoxelMainMenuWidget> MainMenuClass;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Save")
     FString SaveSlotName = TEXT("VoxelWorld_Save");
 
