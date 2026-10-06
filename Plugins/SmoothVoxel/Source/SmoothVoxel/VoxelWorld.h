@@ -12,7 +12,6 @@
 class AVoxelChunk;
 class UMaterialInterface;
 class UVoxelWorldSaveGame;
-class UVoxelMainMenuWidget;
 
 
 UCLASS()
@@ -43,9 +42,6 @@ public:
 
     UFUNCTION(BlueprintCallable, Category="Voxel|Save")
     bool LoadWorld();
-
-    UFUNCTION(BlueprintCallable, Category="Voxel|UI")
-    void ToggleMainMenu();
 
 
     /*
@@ -291,9 +287,6 @@ public:
         Category="Voxel|Player")
     float InteractionDistance = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|UI")
-    TSubclassOf<UVoxelMainMenuWidget> MainMenuClass;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Save")
     FString SaveSlotName = TEXT("VoxelWorld_Save");
 
@@ -402,11 +395,6 @@ private:
     void UpdateChunkStreaming();
 
     void SetPersistentObjectStateInternal(int64 ObjectId, uint8 State);
-    void ShowMainMenu();
-
-    UPROPERTY()
-    UVoxelMainMenuWidget* MainMenuWidget = nullptr;
-
 
     bool bStreamingInitialized = false;
 
