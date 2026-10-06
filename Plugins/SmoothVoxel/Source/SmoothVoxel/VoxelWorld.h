@@ -44,6 +44,9 @@ public:
     UFUNCTION(BlueprintCallable, Category="Voxel|Save")
     bool LoadWorld();
 
+    UFUNCTION(BlueprintCallable, Category="Voxel|UI")
+    void ToggleMainMenu();
+
 
     /*
      * Работа с блоками через World Position.
