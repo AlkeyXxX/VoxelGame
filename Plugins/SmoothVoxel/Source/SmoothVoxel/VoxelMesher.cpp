@@ -164,7 +164,8 @@ void FVoxelMesher::AddFace(
     const FVector& B,
     const FVector& C,
     const FVector& D,
-    const FVector& Normal)
+    const FVector& Normal,
+    const FLinearColor& Color)
 {
     const int32 StartIndex = Output.Vertices.Num();
 
