@@ -7,12 +7,20 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Kismet/GameplayStatics.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 
 void UVoxelMainMenuWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
-    BuildMenu();
+    if (WidgetTree && WidgetTree->RootWidget)
+    {
+        // Widget Blueprint owns the visual layout.
+    }
+    else
+    {
+        BuildMenu();
+    }
 
     if (APlayerController* PC = GetOwningPlayer())
     {
