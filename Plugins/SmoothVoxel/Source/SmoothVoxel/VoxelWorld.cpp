@@ -9,6 +9,7 @@
 #include "Engine/Engine.h"
 
 #include "GameFramework/PlayerController.h"
+#include "InputCoreTypes.h"
 
 #include "Kismet/GameplayStatics.h"
 
@@ -120,17 +121,48 @@ void AVoxelWorld::BeginPlay()
     Super::BeginPlay();
 
     GenerateWorld();
+
+    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+    {
+        EnableInput(PC);
+
+        if (InputComponent)
+        {
+            InputComponent->BindKey(
+                EKeys::Escape,
+                IE_Pressed,
+                this,
+                &AVoxelWorld::ToggleMainMenu);
+
+            InputComponent->bExecuteWhenPaused = true;
+        }
+    }
+
     ShowMainMenu();
 }
 
 
 
+void AVoxelWorld::ToggleMainMenu()
+{
+    if (MainMenuWidget && MainMenuWidget->IsInViewport())
+    {
+        MainMenuWidget->CloseMenu();
+        return;
+    }
+
+    ShowMainMenu();
+}
+
+
 void AVoxelWorld::ShowMainMenu()
 {
-    if (MainMenuWidget)
+    if (MainMenuWidget && MainMenuWidget->IsInViewport())
     {
         return;
     }
+
+    MainMenuWidget = nullptr;
 
     APlayerController* PC =
         UGameplayStatics::GetPlayerController(
