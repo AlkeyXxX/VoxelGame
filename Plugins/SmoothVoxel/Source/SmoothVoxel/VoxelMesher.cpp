@@ -165,26 +165,33 @@ void FVoxelMesher::AddFace(
     const FVector& C,
     const FVector& D,
     const FVector& Normal,
-    const FLinearColor& Color)
+    const FLinearColor& Color,
+    bool bWater)
 {
-    const int32 StartIndex = Output.Vertices.Num();
+    TArray<FVector>& Vertices = bWater ? Output.WaterVertices : Output.Vertices;
+    TArray<int32>& Triangles = bWater ? Output.WaterTriangles : Output.Triangles;
+    TArray<FVector>& Normals = bWater ? Output.WaterNormals : Output.Normals;
+    TArray<FVector2D>& UV0 = bWater ? Output.WaterUV0 : Output.UV0;
+    TArray<FLinearColor>& VertexColors = bWater ? Output.WaterVertexColors : Output.VertexColors;
 
-    Output.Vertices.Add(Origin + A);
-    Output.Vertices.Add(Origin + B);
-    Output.Vertices.Add(Origin + C);
-    Output.Vertices.Add(Origin + D);
+    const int32 StartIndex = Vertices.Num();
 
+    Vertices.Add(Origin + A);
+    Vertices.Add(Origin + B);
+    Vertices.Add(Origin + C);
+    Vertices.Add(Origin + D);
+
+    Normals.Add(Normal);
     Output.Normals.Add(Normal);
     Output.Normals.Add(Normal);
     Output.Normals.Add(Normal);
-    Output.Normals.Add(Normal);
 
-    Output.UV0.Add(FVector2D(0.0f, 0.0f));
-    Output.UV0.Add(FVector2D(1.0f, 0.0f));
-    Output.UV0.Add(FVector2D(1.0f, 1.0f));
-    Output.UV0.Add(FVector2D(0.0f, 1.0f));
+    UV0.Add(FVector2D(0.0f, 0.0f));
+    UV0.Add(FVector2D(1.0f, 0.0f));
+    UV0.Add(FVector2D(1.0f, 1.0f));
+    UV0.Add(FVector2D(0.0f, 1.0f));
 
-    Output.VertexColors.Add(Color);
+    VertexColors.Add(Color);
     Output.VertexColors.Add(Color);
     Output.VertexColors.Add(Color);
     Output.VertexColors.Add(Color);
@@ -193,12 +200,12 @@ void FVoxelMesher::AddFace(
     /*
      * Наружная сторона должна быть front face.
      */
-    Output.Triangles.Add(StartIndex + 0);
-    Output.Triangles.Add(StartIndex + 2);
-    Output.Triangles.Add(StartIndex + 1);
+    Triangles.Add(StartIndex + 0);
+    Triangles.Add(StartIndex + 2);
+    Triangles.Add(StartIndex + 1);
 
     Output.Triangles.Add(StartIndex + 0);
-    Output.Triangles.Add(StartIndex + 3);
+    Triangles.Add(StartIndex + 3);
     Output.Triangles.Add(StartIndex + 2);
 }
 
