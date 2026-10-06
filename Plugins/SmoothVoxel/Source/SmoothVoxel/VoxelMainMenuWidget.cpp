@@ -22,23 +22,11 @@ void UVoxelMainMenuWidget::NativeConstruct()
         BuildMenu();
     }
 
-    if (APlayerController* PC = GetOwningPlayer())
-    {
-        PC->bShowMouseCursor = true;
-
-        FInputModeUIOnly InputMode;
-        InputMode.SetLockMouseToViewportBehavior(
-            EMouseLockMode::DoNotLock);
-
-        PC->SetInputMode(InputMode);
-
-        /*
-         * Явно передаём клавиатурный фокус самому меню.
-         * В UE 4.27 это надёжнее, чем рассчитывать на
-         * PlayerController input binding.
-         */
-        SetUserFocus(PC);
-    }
+    /*
+     * Input mode и keyboard focus настраиваются в AVoxelWorld
+     * после AddToViewport(). До этого Slate ещё не гарантирует,
+     * что виджет готов принимать клавиатуру.
+     */
 }
 
 bool UVoxelMainMenuWidget::NativeSupportsKeyboardFocus() const
@@ -192,7 +180,15 @@ void UVoxelMainMenuWidget::CloseMenu()
     if (APlayerController* PC = GetOwningPlayer())
     {
         PC->bShowMouseCursor = false;
+
+        /*
+         * Сначала снимаем паузу, затем возвращаем GameOnly.
+         * Это полностью отдаёт управление обратно персонажу.
+         */
         PC->SetPause(false);
+
+        PC->SetIgnoreMoveInput(false);
+        PC->SetIgnoreLookInput(false);
 
         FInputModeGameOnly InputMode;
         PC->SetInputMode(InputMode);
