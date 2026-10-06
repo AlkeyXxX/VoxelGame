@@ -14,6 +14,19 @@ class SMOOTHVOXEL_API UVoxelMainMenuWidget : public UUserWidget
 protected:
     virtual void NativeConstruct() override;
 
+public:
+    UFUNCTION(BlueprintCallable, Category="Voxel|Menu")
+    void StartNewGame();
+
+    UFUNCTION(BlueprintCallable, Category="Voxel|Menu")
+    void LoadGame();
+
+    UFUNCTION(BlueprintCallable, Category="Voxel|Menu")
+    void SaveGame();
+
+    UFUNCTION(BlueprintCallable, Category="Voxel|Menu")
+    void CloseMenu();
+
 private:
     UButton* NewGameButton = nullptr;
     UButton* LoadGameButton = nullptr;
