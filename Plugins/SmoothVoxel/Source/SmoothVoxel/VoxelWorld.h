@@ -179,6 +179,12 @@ public:
         Category="Voxel|Terrain")
     float NoiseScale = 0.025f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biome")
+    float TemperatureScale = 0.006f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biome")
+    float MoistureScale = 0.008f;
+
 
     /*
      * Материал voxel mesh.
