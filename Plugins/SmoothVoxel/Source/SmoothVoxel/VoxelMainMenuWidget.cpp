@@ -27,7 +27,6 @@ void UVoxelMainMenuWidget::NativeConstruct()
         PC->bShowMouseCursor = true;
 
         FInputModeUIOnly InputMode;
-        InputMode.SetWidgetToFocus(TakeWidget());
         InputMode.SetLockMouseToViewportBehavior(
             EMouseLockMode::DoNotLock);
 
@@ -108,6 +107,11 @@ void UVoxelMainMenuWidget::BuildMenu()
 
 void UVoxelMainMenuWidget::OnNewGameClicked()
 {
+    StartNewGame();
+}
+
+void UVoxelMainMenuWidget::StartNewGame()
+{
     if (AVoxelWorld* VoxelWorld =
         Cast<AVoxelWorld>(
             UGameplayStatics::GetActorOfClass(
@@ -122,6 +126,11 @@ void UVoxelMainMenuWidget::OnNewGameClicked()
 
 void UVoxelMainMenuWidget::OnLoadGameClicked()
 {
+    LoadGame();
+}
+
+void UVoxelMainMenuWidget::LoadGame()
+{
     if (AVoxelWorld* VoxelWorld =
         Cast<AVoxelWorld>(
             UGameplayStatics::GetActorOfClass(
@@ -135,6 +144,11 @@ void UVoxelMainMenuWidget::OnLoadGameClicked()
 }
 
 void UVoxelMainMenuWidget::OnSaveGameClicked()
+{
+    SaveGame();
+}
+
+void UVoxelMainMenuWidget::SaveGame()
 {
     if (AVoxelWorld* VoxelWorld =
         Cast<AVoxelWorld>(
