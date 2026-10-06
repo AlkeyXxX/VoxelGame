@@ -11,6 +11,7 @@
 
 class AVoxelChunk;
 class UMaterialInterface;
+class UVoxelWorldSaveGame;
 
 
 UCLASS()
@@ -25,6 +26,7 @@ public:
 
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 
     /*
@@ -34,6 +36,12 @@ public:
         BlueprintCallable,
         Category="Voxel")
     void GenerateWorld();
+
+    UFUNCTION(BlueprintCallable, Category="Voxel|Save")
+    void SaveWorld();
+
+    UFUNCTION(BlueprintCallable, Category="Voxel|Save")
+    bool LoadWorld();
 
 
     /*
@@ -88,6 +96,13 @@ public:
 
 
 public:
+
+    UFUNCTION(BlueprintCallable, Category="Voxel|Save")
+    void SetPersistentObjectState(int64 ObjectId, uint8 State);
+
+    UFUNCTION(BlueprintPure, Category="Voxel|Save")
+    bool GetPersistentObjectState(int64 ObjectId, uint8& OutState) const;
+
 
     /*
      * Количество чанков по каждой оси.
@@ -272,6 +287,15 @@ public:
         Category="Voxel|Player")
     float InteractionDistance = 1000.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Save")
+    FString SaveSlotName = TEXT("VoxelWorld_Save");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Save")
+    int32 SaveUserIndex = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Save", meta=(ClampMin="0.0"))
+    float AutoSaveInterval = 60.0f;
+
 
 private:
 
@@ -300,11 +324,15 @@ private:
      */
     TMap<FIntVector, TMap<int32, uint8>> ModifiedBlocks;
 
+    TMap<int64, uint8> PersistentObjectStates;
+    float TimeSinceLastAutoSave = 0.0f;
+
 
     /*
      * Настроить генератор из текущих UPROPERTY.
      */
     void ConfigureWorldGenerator();
+    void ApplyLoadedPersistenceToLoadedChunks();
 
 
     /*
@@ -365,6 +393,8 @@ private:
         const FIntVector& ChunkCoord);
 
     void UpdateChunkStreaming();
+
+    void SetPersistentObjectStateInternal(int64 ObjectId, uint8 State);
 
 
     bool bStreamingInitialized = false;
