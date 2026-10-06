@@ -103,7 +103,13 @@ namespace
 
 AVoxelWorld::AVoxelWorld()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    /*
+     * Streaming проверяет позицию игрока каждый кадр,
+     * но сама тяжёлая работа выполняется только
+     * при смене чанка или пока есть недогруженные chunks.
+     */
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f;
 }
 
 
@@ -112,6 +118,15 @@ void AVoxelWorld::BeginPlay()
     Super::BeginPlay();
 
     GenerateWorld();
+}
+
+
+void AVoxelWorld::Tick(
+    float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    UpdateChunkStreaming();
 }
 
 
@@ -132,23 +147,14 @@ void AVoxelWorld::ConfigureWorldGenerator()
 
 void AVoxelWorld::GenerateWorld()
 {
-    UWorld* World = GetWorld();
-
-    if (!World)
-    {
-        return;
-    }
-
-
     /*
-     * Перед генерацией синхронизируем параметры
-     * AVoxelWorld с отдельным world generator.
+     * Синхронизируем параметры генератора.
      */
     ConfigureWorldGenerator();
 
 
     /*
-     * На случай повторного вызова GenerateWorld().
+     * Удаляем только chunks, которые сейчас загружены.
      */
     for (TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
     {
@@ -160,18 +166,281 @@ void AVoxelWorld::GenerateWorld()
 
     Chunks.Empty();
 
+    bStreamingInitialized = false;
+    LastStreamingCenter = FIntVector::ZeroValue;
+
 
     /*
-     * Сначала создаём ВСЕ chunks.
-     *
-     * Это важно, потому что при генерации mesh
-     * сосед уже должен существовать.
+     * Дальше мир создаётся streaming-системой
+     * вокруг игрока небольшими порциями.
      */
-    for (int32 Z = 0; Z < WorldSizeZ; ++Z)
+    UpdateChunkStreaming();
+}
+
+
+bool AVoxelWorld::GetStreamingCenterChunk(
+    FIntVector& OutChunkCoord) const
+{
+    UWorld* World = GetWorld();
+
+    if (!World)
     {
-        for (int32 Y = 0; Y < WorldSizeY; ++Y)
+        return false;
+    }
+
+
+    APawn* PlayerPawn =
+        UGameplayStatics::GetPlayerPawn(
+            World,
+            0);
+
+
+    if (PlayerPawn)
+    {
+        FIntVector PlayerBlock;
+
+        if (WorldToBlock(
+            PlayerPawn->GetActorLocation(),
+            PlayerBlock))
         {
-            for (int32 X = 0; X < WorldSizeX; ++X)
+            OutChunkCoord =
+                WorldBlockToChunk(
+                    PlayerBlock);
+
+            OutChunkCoord.X =
+                FMath::Clamp(
+                    OutChunkCoord.X,
+                    0,
+                    WorldSizeX - 1);
+
+            OutChunkCoord.Y =
+                FMath::Clamp(
+                    OutChunkCoord.Y,
+                    0,
+                    WorldSizeY - 1);
+
+            OutChunkCoord.Z =
+                FMath::Clamp(
+                    OutChunkCoord.Z,
+                    0,
+                    WorldSizeZ - 1);
+
+            return true;
+        }
+    }
+
+
+    /*
+     * Если игрок ещё не появился,
+     * начинаем с центра доступного мира.
+     */
+    OutChunkCoord =
+        FIntVector(
+            WorldSizeX / 2,
+            WorldSizeY / 2,
+            0);
+
+    return true;
+}
+
+
+bool AVoxelWorld::IsChunkInsideWorld(
+    const FIntVector& ChunkCoord) const
+{
+    return
+        ChunkCoord.X >= 0 &&
+        ChunkCoord.X < WorldSizeX &&
+        ChunkCoord.Y >= 0 &&
+        ChunkCoord.Y < WorldSizeY &&
+        ChunkCoord.Z >= 0 &&
+        ChunkCoord.Z < WorldSizeZ;
+}
+
+
+AVoxelChunk* AVoxelWorld::CreateChunk(
+    const FIntVector& ChunkCoord)
+{
+    if (!IsChunkInsideWorld(ChunkCoord))
+    {
+        return nullptr;
+    }
+
+
+    if (AVoxelChunk* Existing =
+        GetChunk(ChunkCoord))
+    {
+        return Existing;
+    }
+
+
+    UWorld* World = GetWorld();
+
+    if (!World)
+    {
+        return nullptr;
+    }
+
+
+    const FVector Location =
+        GetActorLocation() +
+        FVector(
+            ChunkCoord.X * ChunkSize * VoxelSize,
+            ChunkCoord.Y * ChunkSize * VoxelSize,
+            ChunkCoord.Z * ChunkSize * VoxelSize);
+
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Owner = this;
+    SpawnParams.SpawnCollisionHandlingOverride =
+        ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+
+    AVoxelChunk* Chunk =
+        World->SpawnActor<AVoxelChunk>(
+            AVoxelChunk::StaticClass(),
+            Location,
+            FRotator::ZeroRotator,
+            SpawnParams);
+
+
+    if (!Chunk)
+    {
+        return nullptr;
+    }
+
+
+    Chunk->InitializeChunk(
+        this,
+        ChunkCoord);
+
+    Chunk->SetVoxelMaterial(
+        Material);
+
+    Chunk->SetWaterMaterial(
+        WaterMaterial);
+
+
+    Chunks.Add(
+        ChunkCoord,
+        Chunk);
+
+
+    GenerateChunkBlocks(
+        Chunk);
+
+
+    /*
+     * Новый chunk и его уже загруженные соседи
+     * получают корректные границы mesh.
+     */
+    RebuildChunkAndNeighbors(
+        ChunkCoord);
+
+
+    return Chunk;
+}
+
+
+void AVoxelWorld::UpdateChunkStreaming()
+{
+    FIntVector CenterChunk;
+
+    if (!GetStreamingCenterChunk(
+        CenterChunk))
+    {
+        return;
+    }
+
+
+    const bool bCenterChanged =
+        !bStreamingInitialized ||
+        CenterChunk != LastStreamingCenter;
+
+
+    LastStreamingCenter =
+        CenterChunk;
+
+    bStreamingInitialized = true;
+
+
+    /*
+     * Сначала выгружаем слишком далёкие chunks.
+     *
+     * UnloadRadius обычно немного больше
+     * StreamingRadius, чтобы не было дёрганья
+     * при переходе через границу.
+     */
+    TArray<FIntVector> ChunksToUnload;
+
+
+    const int32 EffectiveUnloadRadius =
+        FMath::Max(
+            UnloadRadius,
+            StreamingRadius + 1);
+
+
+    for (const TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
+    {
+        const FIntVector& Coord =
+            Pair.Key;
+
+
+        const int32 DistanceX =
+            FMath::Abs(
+                Coord.X - CenterChunk.X);
+
+        const int32 DistanceY =
+            FMath::Abs(
+                Coord.Y - CenterChunk.Y);
+
+        const int32 DistanceZ =
+            FMath::Abs(
+                Coord.Z - CenterChunk.Z);
+
+
+        if (DistanceX > EffectiveUnloadRadius ||
+            DistanceY > EffectiveUnloadRadius ||
+            DistanceZ > EffectiveUnloadRadius)
+        {
+            ChunksToUnload.Add(
+                Coord);
+        }
+    }
+
+
+    for (const FIntVector& Coord :
+        ChunksToUnload)
+    {
+        AVoxelChunk* Chunk =
+            GetChunk(Coord);
+
+        if (Chunk)
+        {
+            Chunk->Destroy();
+        }
+
+        Chunks.Remove(Coord);
+    }
+
+
+    /*
+     * Если центр не изменился и вокруг уже всё загружено,
+     * здесь практически ничего не делаем.
+     */
+    TArray<FIntVector> Candidates;
+
+
+    for (int32 Z = CenterChunk.Z - StreamingRadius;
+         Z <= CenterChunk.Z + StreamingRadius;
+         ++Z)
+    {
+        for (int32 Y = CenterChunk.Y - StreamingRadius;
+             Y <= CenterChunk.Y + StreamingRadius;
+             ++Y)
+        {
+            for (int32 X = CenterChunk.X - StreamingRadius;
+                 X <= CenterChunk.X + StreamingRadius;
+                 ++X)
             {
                 const FIntVector Coord(
                     X,
@@ -179,86 +448,133 @@ void AVoxelWorld::GenerateWorld()
                     Z);
 
 
-                const FVector Location =
-                    GetActorLocation() +
-                    FVector(
-                        X * ChunkSize * VoxelSize,
-                        Y * ChunkSize * VoxelSize,
-                        Z * ChunkSize * VoxelSize);
-
-
-                FActorSpawnParameters SpawnParams;
-                SpawnParams.Owner = this;
-                SpawnParams.SpawnCollisionHandlingOverride =
-                    ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-
-                AVoxelChunk* Chunk =
-                    World->SpawnActor<AVoxelChunk>(
-                        AVoxelChunk::StaticClass(),
-                        Location,
-                        FRotator::ZeroRotator,
-                        SpawnParams);
-
-
-                if (!Chunk)
+                if (!IsChunkInsideWorld(
+                    Coord))
                 {
                     continue;
                 }
 
 
-                Chunk->SetActorLocation(Location);
-
-
-                /*
-                 * Передаём world + coordinate.
-                 */
-                Chunk->InitializeChunk(
-                    this,
+                Candidates.Add(
                     Coord);
-
-
-                /*
-                 * Материал мира передаём chunk.
-                 */
-                Chunk->SetVoxelMaterial(
-                    Material);
-
-                Chunk->SetWaterMaterial(
-                    WaterMaterial);
-
-
-                Chunks.Add(
-                    Coord,
-                    Chunk);
             }
         }
     }
 
 
     /*
-     * Теперь, когда все chunks существуют,
-     * генерируем блоки.
+     * Ближайшие chunks грузим первыми.
      */
-    for (TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
-    {
-        if (Pair.Value)
+    Candidates.Sort(
+        [&CenterChunk](
+            const FIntVector& A,
+            const FIntVector& B)
         {
-            GenerateChunkBlocks(
-                Pair.Value);
+            const int32 AX =
+                A.X - CenterChunk.X;
+
+            const int32 AY =
+                A.Y - CenterChunk.Y;
+
+            const int32 AZ =
+                A.Z - CenterChunk.Z;
+
+            const int32 BX =
+                B.X - CenterChunk.X;
+
+            const int32 BY =
+                B.Y - CenterChunk.Y;
+
+            const int32 BZ =
+                B.Z - CenterChunk.Z;
+
+
+            const int32 DistanceA =
+                AX * AX +
+                AY * AY +
+                AZ * AZ;
+
+            const int32 DistanceB =
+                BX * BX +
+                BY * BY +
+                BZ * BZ;
+
+
+            return DistanceA < DistanceB;
+        });
+
+
+    int32 LoadedThisTick = 0;
+
+
+    for (const FIntVector& Coord :
+        Candidates)
+    {
+        if (LoadedThisTick >=
+            MaxChunksPerTick)
+        {
+            break;
+        }
+
+
+        if (Chunks.Contains(Coord))
+        {
+            continue;
+        }
+
+
+        if (CreateChunk(Coord))
+        {
+            ++LoadedThisTick;
         }
     }
 
 
     /*
-     * И только после этого строим mesh.
+     * После выгрузки соседний chunk мог потерять
+     * свой соседа. Восстанавливаем видимые границы.
      */
-    for (TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
+    if (ChunksToUnload.Num() > 0)
     {
-        if (Pair.Value)
+        for (const FIntVector& UnloadedCoord :
+            ChunksToUnload)
         {
-            Pair.Value->RebuildMesh();
+            static const FIntVector Directions[] =
+            {
+                FIntVector(-1, 0, 0),
+                FIntVector(1, 0, 0),
+                FIntVector(0, -1, 0),
+                FIntVector(0, 1, 0),
+                FIntVector(0, 0, -1),
+                FIntVector(0, 0, 1)
+            };
+
+
+            for (const FIntVector& Direction :
+                Directions)
+            {
+                const FIntVector NeighborCoord =
+                    UnloadedCoord + Direction;
+
+
+                if (AVoxelChunk* Neighbor =
+                    GetChunk(NeighborCoord))
+                {
+                    Neighbor->RebuildMesh();
+                }
+            }
         }
+    }
+
+
+    /*
+     * Если центр сменился, следующими Tick'ами
+     * продолжаем дозагружать недостающие chunks.
+     */
+    if (!bCenterChanged &&
+        LoadedThisTick == 0)
+    {
+        return;
     }
 }
 
