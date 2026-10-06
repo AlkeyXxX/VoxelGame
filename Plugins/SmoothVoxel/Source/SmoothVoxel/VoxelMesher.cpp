@@ -182,9 +182,9 @@ void FVoxelMesher::AddFace(
     Vertices.Add(Origin + D);
 
     Normals.Add(Normal);
-    Output.Normals.Add(Normal);
-    Output.Normals.Add(Normal);
-    Output.Normals.Add(Normal);
+    Normals.Add(Normal);
+    Normals.Add(Normal);
+    Normals.Add(Normal);
 
     UV0.Add(FVector2D(0.0f, 0.0f));
     UV0.Add(FVector2D(1.0f, 0.0f));
@@ -192,9 +192,9 @@ void FVoxelMesher::AddFace(
     UV0.Add(FVector2D(0.0f, 1.0f));
 
     VertexColors.Add(Color);
-    Output.VertexColors.Add(Color);
-    Output.VertexColors.Add(Color);
-    Output.VertexColors.Add(Color);
+    VertexColors.Add(Color);
+    VertexColors.Add(Color);
+    VertexColors.Add(Color);
 
 
     /*
@@ -204,9 +204,9 @@ void FVoxelMesher::AddFace(
     Triangles.Add(StartIndex + 2);
     Triangles.Add(StartIndex + 1);
 
-    Output.Triangles.Add(StartIndex + 0);
+    Triangles.Add(StartIndex + 0);
     Triangles.Add(StartIndex + 3);
-    Output.Triangles.Add(StartIndex + 2);
+    Triangles.Add(StartIndex + 2);
 }
 
 
