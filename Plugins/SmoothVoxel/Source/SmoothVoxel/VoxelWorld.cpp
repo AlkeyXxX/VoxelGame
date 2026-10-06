@@ -123,6 +123,8 @@ void AVoxelWorld::ConfigureWorldGenerator()
     Settings.BaseHeight = BaseHeight;
     Settings.HeightVariation = HeightVariation;
     Settings.NoiseScale = NoiseScale;
+    Settings.TemperatureScale = TemperatureScale;
+    Settings.MoistureScale = MoistureScale;
 
     WorldGenerator.Configure(Settings);
 }
@@ -298,41 +300,53 @@ void AVoxelWorld::GenerateChunkBlocks(
                         WorldX,
                         WorldY);
 
+                const EVoxelBiome Biome =
+                    WorldGenerator.GetBiome(
+                        WorldX,
+                        WorldY,
+                        Height);
 
                 uint8 Block =
                     uint8(EVoxelBlock::Air);
 
-
-                /*
-                 * Выше поверхности — воздух.
-                 */
                 if (WorldZ > Height)
                 {
                     Block =
                         uint8(EVoxelBlock::Air);
                 }
-
-                /*
-                 * Верхний блок — Grass.
-                 */
                 else if (WorldZ == Height)
                 {
-                    Block =
-                        uint8(EVoxelBlock::Grass);
-                }
+                    switch (Biome)
+                    {
+                    case EVoxelBiome::Desert:
+                        Block =
+                            uint8(EVoxelBlock::Sand);
+                        break;
 
-                /*
-                 * Три блока под Grass — Dirt.
-                 */
+                    case EVoxelBiome::Mountain:
+                        Block =
+                            uint8(EVoxelBlock::Stone);
+                        break;
+
+                    case EVoxelBiome::Forest:
+                    case EVoxelBiome::Plains:
+                    default:
+                        Block =
+                            uint8(EVoxelBlock::Grass);
+                        break;
+                    }
+                }
+                else if (Biome == EVoxelBiome::Desert &&
+                         WorldZ >= Height - 3)
+                {
+                    Block =
+                        uint8(EVoxelBlock::Sand);
+                }
                 else if (WorldZ >= Height - 3)
                 {
                     Block =
                         uint8(EVoxelBlock::Dirt);
                 }
-
-                /*
-                 * Ниже — Stone.
-                 */
                 else
                 {
                     Block =
