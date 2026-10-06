@@ -122,28 +122,11 @@ void AVoxelWorld::BeginPlay()
 
     GenerateWorld();
 
-    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
-    {
-        EnableInput(PC);
-
-        if (InputComponent)
-        {
-            /*
-             * Перехватываем Escape на уровне VoxelWorld.
-             * Высокий приоритет + BlockInput не даёт стандартному
-             * обработчику редактора/игры забрать клавишу раньше нас.
-             */
-            InputComponent->Priority = 1000;
-            InputComponent->bBlockInput = true;
-
-            InputComponent->BindKey(
-                EKeys::Escape,
-                IE_Pressed,
-                this,
-                &AVoxelWorld::ToggleMainMenu);
-        }
-    }
-
+    /*
+     * VoxelWorld не должен владеть Player Input.
+     * Escape обрабатывается отдельным PlayerController,
+     * поэтому обычные W/A/S/D и mouse input остаются нетронутыми.
+     */
     ShowMainMenu();
 }
 
