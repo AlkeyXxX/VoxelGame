@@ -4,9 +4,9 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 
 #include "VoxelTypes.h"
+#include "VoxelBlockLibrary.generated.h"
 
 class UDataTable;
-#include "VoxelBlockLibrary.generated.h"
 
 /*
  * Единый реестр параметров стандартных voxel-блоков.
