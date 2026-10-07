@@ -65,6 +65,11 @@ public:
         EVoxelBlock Block);
 
     UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
+    static EVoxelBlock GetBlockDropFromTable(
+        const UDataTable* DataTable,
+        EVoxelBlock Block);
+
+    UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
     static bool IsLiquidBlock(
         EVoxelBlock Block);
 
