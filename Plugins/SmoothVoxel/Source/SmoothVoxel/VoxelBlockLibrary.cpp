@@ -244,6 +244,15 @@ EVoxelBlock UVoxelBlockLibrary::GetBlockDrop(
     return GetBlockDefinition(Block).DropBlock;
 }
 
+EVoxelBlock UVoxelBlockLibrary::GetBlockDropFromTable(
+    const UDataTable* DataTable,
+    EVoxelBlock Block)
+{
+    return GetBlockDefinitionFromTable(
+        DataTable,
+        Block).DropBlock;
+}
+
 bool UVoxelBlockLibrary::IsLiquidBlock(
     EVoxelBlock Block)
 {
