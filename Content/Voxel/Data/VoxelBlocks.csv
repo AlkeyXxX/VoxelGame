@@ -1,0 +1,8 @@
+Name,Block,DisplayName,Durability,bIsSolid,bCanBreak,bCanPlace,bIsLiquid,DropBlock,MaterialSlot,BreakSound,PlaceSound,Material
+Air,Air,Воздух,0.0,False,False,False,False,Air,Default,,,
+Grass,Grass,Трава,1.0,True,True,True,False,Grass,Default,,,
+Dirt,Dirt,Земля,1.0,True,True,True,False,Dirt,Default,,,
+Stone,Stone,Камень,3.0,True,True,True,False,Stone,Default,,,
+Sand,Sand,Песок,0.75,True,True,True,False,Sand,Default,,,
+Wood,Wood,Дерево,2.5,True,True,True,False,Wood,Default,,,
+Water,Water,Вода,0.0,False,False,False,True,Air,Water,,,
