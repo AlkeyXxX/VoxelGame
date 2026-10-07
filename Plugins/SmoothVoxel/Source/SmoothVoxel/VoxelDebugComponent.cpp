@@ -12,7 +12,7 @@
 
 namespace
 {
-    bool GetCenterScreenRay(
+    bool GetDebugCenterScreenRay(
         APlayerController* PC,
         FVector& OutStart,
         FVector& OutDirection)
@@ -334,7 +334,7 @@ void UVoxelDebugComponent::RefreshDebugData()
     FVector Start;
     FVector Direction;
 
-    if (!GetCenterScreenRay(
+    if (!GetDebugCenterScreenRay(
         PC,
         Start,
         Direction))
