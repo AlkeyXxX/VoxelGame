@@ -286,9 +286,73 @@ void UVoxelInventoryComponent::SetSelectedSlot(
     BroadcastInventoryChanged();
 }
 
+void UVoxelInventoryComponent::SelectSlotByNumber(
+    int32 SlotNumber)
+{
+    EnsureSlotArray();
+
+    if (SlotNumber < 1 ||
+        SlotNumber > Slots.Num())
+    {
+        return;
+    }
+
+    SetSelectedSlot(
+        SlotNumber - 1);
+}
+
+void UVoxelInventoryComponent::SelectNextSlot()
+{
+    EnsureSlotArray();
+
+    if (Slots.Num() <= 0)
+    {
+        return;
+    }
+
+    const int32 NewIndex =
+        (SelectedSlot + 1) % Slots.Num();
+
+    SetSelectedSlot(
+        NewIndex);
+}
+
+void UVoxelInventoryComponent::SelectPreviousSlot()
+{
+    EnsureSlotArray();
+
+    if (Slots.Num() <= 0)
+    {
+        return;
+    }
+
+    const int32 NewIndex =
+        (SelectedSlot - 1 + Slots.Num()) %
+        Slots.Num();
+
+    SetSelectedSlot(
+        NewIndex);
+}
+
 int32 UVoxelInventoryComponent::GetSelectedSlot() const
 {
     return SelectedSlot;
+}
+
+int32 UVoxelInventoryComponent::GetSelectedSlotNumber() const
+{
+    if (Slots.Num() <= 0)
+    {
+        return 0;
+    }
+
+    const int32 SafeIndex =
+        FMath::Clamp(
+            SelectedSlot,
+            0,
+            Slots.Num() - 1);
+
+    return SafeIndex + 1;
 }
 
 EVoxelBlock UVoxelInventoryComponent::GetSelectedBlock() const
