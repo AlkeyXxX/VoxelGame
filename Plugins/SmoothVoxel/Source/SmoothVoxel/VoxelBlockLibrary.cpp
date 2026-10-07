@@ -1,5 +1,7 @@
 #include "VoxelBlockLibrary.h"
 
+#include "Engine/DataTable.h"
+
 namespace
 {
     FVoxelBlockDefinition MakeBlock(
@@ -26,6 +28,38 @@ namespace
         Definition.MaterialSlot = MaterialSlot;
 
         return Definition;
+    }
+}
+
+namespace
+{
+    FName GetBlockRowName(
+        EVoxelBlock Block)
+    {
+        switch (Block)
+        {
+        case EVoxelBlock::Grass:
+            return TEXT("Grass");
+
+        case EVoxelBlock::Dirt:
+            return TEXT("Dirt");
+
+        case EVoxelBlock::Stone:
+            return TEXT("Stone");
+
+        case EVoxelBlock::Sand:
+            return TEXT("Sand");
+
+        case EVoxelBlock::Wood:
+            return TEXT("Wood");
+
+        case EVoxelBlock::Water:
+            return TEXT("Water");
+
+        case EVoxelBlock::Air:
+        default:
+            return TEXT("Air");
+        }
     }
 }
 
@@ -121,6 +155,38 @@ FVoxelBlockDefinition UVoxelBlockLibrary::GetBlockDefinition(
     }
 }
 
+FVoxelBlockDefinition UVoxelBlockLibrary::GetBlockDefinitionFromTable(
+    const UDataTable* DataTable,
+    EVoxelBlock Block)
+{
+    if (DataTable)
+    {
+        const FName RowName =
+            GetBlockRowName(Block);
+
+        static const FString ContextString =
+            TEXT("VoxelBlockLibrary");
+
+        if (const FVoxelBlockDefinition* Row =
+            DataTable->FindRow<FVoxelBlockDefinition>(
+                RowName,
+                ContextString,
+                false))
+        {
+            if (Row->Block == Block)
+            {
+                return *Row;
+            }
+        }
+    }
+
+    /*
+     * Если таблица не назначена или строка отсутствует,
+     * используем встроенное описание.
+     */
+    return GetBlockDefinition(Block);
+}
+
 FText UVoxelBlockLibrary::GetBlockDisplayName(
     EVoxelBlock Block)
 {
@@ -133,16 +199,43 @@ float UVoxelBlockLibrary::GetBlockDurability(
     return GetBlockDefinition(Block).Durability;
 }
 
+float UVoxelBlockLibrary::GetBlockDurabilityFromTable(
+    const UDataTable* DataTable,
+    EVoxelBlock Block)
+{
+    return GetBlockDefinitionFromTable(
+        DataTable,
+        Block).Durability;
+}
+
 bool UVoxelBlockLibrary::CanBreakBlock(
     EVoxelBlock Block)
 {
     return GetBlockDefinition(Block).bCanBreak;
 }
 
+bool UVoxelBlockLibrary::CanBreakBlockFromTable(
+    const UDataTable* DataTable,
+    EVoxelBlock Block)
+{
+    return GetBlockDefinitionFromTable(
+        DataTable,
+        Block).bCanBreak;
+}
+
 bool UVoxelBlockLibrary::CanPlaceBlock(
     EVoxelBlock Block)
 {
     return GetBlockDefinition(Block).bCanPlace;
+}
+
+bool UVoxelBlockLibrary::CanPlaceBlockFromTable(
+    const UDataTable* DataTable,
+    EVoxelBlock Block)
+{
+    return GetBlockDefinitionFromTable(
+        DataTable,
+        Block).bCanPlace;
 }
 
 EVoxelBlock UVoxelBlockLibrary::GetBlockDrop(
