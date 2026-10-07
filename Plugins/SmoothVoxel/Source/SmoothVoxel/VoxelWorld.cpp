@@ -1456,35 +1456,49 @@ bool AVoxelWorld::BreakBlockByRay()
         return false;
     }
 
+    const EVoxelBlock DropBlock =
+        UVoxelBlockLibrary::GetBlockDropFromTable(
+            BlockDataTable,
+            HitBlock);
+
+    APawn* PlayerPawn =
+        UGameplayStatics::GetPlayerPawn(
+            GetWorld(),
+            0);
+
+    UVoxelInventoryComponent* Inventory = nullptr;
+
+    if (PlayerPawn)
+    {
+        Inventory =
+            PlayerPawn->FindComponentByClass<
+                UVoxelInventoryComponent>();
+    }
+
+    /*
+     * Если у блока есть дроп и inventory установлен,
+     * сначала убеждаемся, что предмет можно подобрать.
+     * Тогда блок не исчезнет впустую при заполненном hotbar.
+     */
+    if (Inventory &&
+        DropBlock != EVoxelBlock::Air &&
+        !Inventory->CanAddBlock(
+            DropBlock,
+            1))
+    {
+        return false;
+    }
+
     SetBlockInternal(
         WorldBlock,
         uint8(EVoxelBlock::Air));
 
-    /*
-     * Подбираем дроп сломанного блока, если у игрока
-     * уже установлен UVoxelInventoryComponent.
-     */
-    if (APawn* PlayerPawn =
-        UGameplayStatics::GetPlayerPawn(
-            GetWorld(),
-            0))
+    if (Inventory &&
+        DropBlock != EVoxelBlock::Air)
     {
-        if (UVoxelInventoryComponent* Inventory =
-            PlayerPawn->FindComponentByClass<
-                UVoxelInventoryComponent>())
-        {
-            const EVoxelBlock DropBlock =
-                UVoxelBlockLibrary::GetBlockDropFromTable(
-                    BlockDataTable,
-                    HitBlock);
-
-            if (DropBlock != EVoxelBlock::Air)
-            {
-                Inventory->AddBlock(
-                    DropBlock,
-                    1);
-            }
-        }
+        Inventory->AddBlock(
+            DropBlock,
+            1);
     }
 
     return true;
