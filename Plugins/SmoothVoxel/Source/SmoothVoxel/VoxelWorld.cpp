@@ -618,6 +618,105 @@ void AVoxelWorld::UpdateChunkStreaming()
 /*
  * Генерация terrain.
  */
+bool AVoxelWorld::GetBlockDebugInfoAtWorld(
+    const FVector& WorldPosition,
+    EVoxelBlock& OutBlock,
+    FIntVector& OutWorldBlock,
+    FIntVector& OutLocalBlock,
+    FIntVector& OutChunkCoord) const
+{
+    if (!WorldToBlock(
+            WorldPosition,
+            OutWorldBlock))
+    {
+        return false;
+    }
+
+    OutChunkCoord =
+        WorldBlockToChunk(
+            OutWorldBlock);
+
+    OutLocalBlock =
+        WorldBlockToLocal(
+            OutWorldBlock);
+
+    const AVoxelChunk* const* ChunkPtr =
+        Chunks.Find(
+            OutChunkCoord);
+
+    if (!ChunkPtr || !*ChunkPtr)
+    {
+        OutBlock = EVoxelBlock::Air;
+        return false;
+    }
+
+    OutBlock =
+        static_cast<EVoxelBlock>(
+            (*ChunkPtr)->GetBlock(
+                OutLocalBlock.X,
+                OutLocalBlock.Y,
+                OutLocalBlock.Z));
+
+    return true;
+}
+
+void AVoxelWorld::GetTerrainDebugInfo(
+    int32 WorldX,
+    int32 WorldY,
+    int32& OutSurfaceHeight,
+    float& OutTerrainNoise,
+    float& OutTemperature,
+    float& OutMoisture,
+    FString& OutBiomeName) const
+{
+    OutSurfaceHeight =
+        WorldGenerator.GetSurfaceHeight(
+            WorldX,
+            WorldY);
+
+    OutTerrainNoise =
+        WorldGenerator.GetTerrainNoise(
+            WorldX,
+            WorldY);
+
+    OutTemperature =
+        WorldGenerator.GetTemperature(
+            WorldX,
+            WorldY);
+
+    OutMoisture =
+        WorldGenerator.GetMoisture(
+            WorldX,
+            WorldY);
+
+    const EVoxelBiome Biome =
+        WorldGenerator.GetBiome(
+            WorldX,
+            WorldY,
+            OutSurfaceHeight);
+
+    switch (Biome)
+    {
+    case EVoxelBiome::Forest:
+        OutBiomeName = TEXT("Forest");
+        break;
+
+    case EVoxelBiome::Desert:
+        OutBiomeName = TEXT("Desert");
+        break;
+
+    case EVoxelBiome::Mountain:
+        OutBiomeName = TEXT("Mountain");
+        break;
+
+    case EVoxelBiome::Plains:
+    default:
+        OutBiomeName = TEXT("Plains");
+        break;
+    }
+}
+
+
 void AVoxelWorld::GenerateChunkBlocks(
     AVoxelChunk* Chunk)
 {
