@@ -42,8 +42,9 @@ namespace
             OutDirection);
     }
 
+    template<typename T>
     FString SoftObjectPathToString(
-        const TSoftObjectPtr<UObject>& Asset)
+        const TSoftObjectPtr<T>& Asset)
     {
         return Asset.ToSoftObjectPath().ToString();
     }
@@ -471,7 +472,7 @@ void UVoxelDebugComponent::RefreshDebugData()
     OnDebugDataUpdated.Broadcast(DebugData);
 }
 
-const FVoxelDebugData& UVoxelDebugComponent::GetDebugData() const
+FVoxelDebugData UVoxelDebugComponent::GetDebugData() const
 {
     return DebugData;
 }
