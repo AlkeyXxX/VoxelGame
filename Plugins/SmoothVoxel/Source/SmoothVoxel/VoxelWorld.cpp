@@ -1496,6 +1496,27 @@ bool AVoxelWorld::BreakBlockByRay()
  */
 bool AVoxelWorld::PlaceBlockByRay()
 {
+    /*
+     * Старый Blueprint-вызов остаётся совместимым.
+     *
+     * Если на игроке есть inventory, берём блок из выбранного
+     * слота. Если компонента ещё нет, для обратной совместимости
+     * используем прежний Dirt.
+     */
+    if (APawn* PlayerPawn =
+        UGameplayStatics::GetPlayerPawn(
+            GetWorld(),
+            0))
+    {
+        if (UVoxelInventoryComponent* Inventory =
+            PlayerPawn->FindComponentByClass<
+                UVoxelInventoryComponent>())
+        {
+            return PlaceBlockByRayWithType(
+                Inventory->GetSelectedBlock());
+        }
+    }
+
     return PlaceBlockByRayWithType(
         EVoxelBlock::Dirt);
 }
