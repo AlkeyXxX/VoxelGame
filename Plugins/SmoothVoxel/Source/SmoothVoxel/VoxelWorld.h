@@ -78,6 +78,13 @@ public:
     bool PlaceBlockByRay();
 
 
+    UFUNCTION(
+        BlueprintCallable,
+        Category="Voxel")
+    bool PlaceBlockByRayWithType(
+        EVoxelBlock BlockToPlace);
+
+
     /*
      * Получение чанка.
      *
