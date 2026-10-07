@@ -12,6 +12,7 @@
 class AVoxelChunk;
 class UMaterialInterface;
 class UVoxelWorldSaveGame;
+class UDataTable;
 
 
 UCLASS()
@@ -286,6 +287,18 @@ public:
         BlueprintReadWrite,
         Category="Voxel|Player")
     float InteractionDistance = 1000.0f;
+
+    /*
+     * Таблица свойств блоков.
+     *
+     * Если не назначена, используются встроенные значения
+     * из UVoxelBlockLibrary.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Blocks")
+    UDataTable* BlockDataTable = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Save")
     FString SaveSlotName = TEXT("VoxelWorld_Save");
