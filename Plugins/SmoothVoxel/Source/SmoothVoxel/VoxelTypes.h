@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/DataTable.h"
 #include "VoxelTypes.generated.h"
 
 class UMaterialInterface;
@@ -26,9 +27,15 @@ enum class EVoxelBlock : uint8
  * звуков и визуальных материалов.
  */
 USTRUCT(BlueprintType)
-struct SMOOTHVOXEL_API FVoxelBlockDefinition
+struct SMOOTHVOXEL_API FVoxelBlockDefinition : public FTableRowBase
 {
     GENERATED_BODY()
+
+    /*
+     * FVoxelBlockDefinition является строкой DataTable.
+     * Row Name должен совпадать с именем EVoxelBlock:
+     * Air, Grass, Dirt, Stone, Sand, Wood, Water.
+     */
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Block")
     EVoxelBlock Block = EVoxelBlock::Air;
