@@ -286,32 +286,80 @@ void FVoxelMesher::Build(
 
                 const float S = VoxelSize;
 
-                FLinearColor BiomeColor = bWater
-                    ? FLinearColor(0.05f, 0.35f, 0.85f, 1.0f)
-                    : FLinearColor::White;
+                /*
+                 * Сейчас используем понятные preview/debug-цвета
+                 * именно по типу блока, а не по биому.
+                 *
+                 * Благодаря этому Grass всегда выглядит как Grass,
+                 * Dirt как Dirt и т.д. независимо от того,
+                 * в каком биоме находится блок.
+                 *
+                 * Позже эти Vertex Colors можно заменить
+                 * полноценными block-specific материалами без
+                 * изменения логики генерации.
+                 */
+                FLinearColor BlockColor =
+                    FLinearColor::White;
 
-                if (!bWater && Input.Biomes.Num() == MaxBlocks)
+                switch (static_cast<EVoxelBlock>(Block))
                 {
-                    switch (Input.Biomes[BlockIndex(X, Y, Z, Size)])
-                    {
-                    case 0: // Plains
-                        BiomeColor = FLinearColor(0.20f, 0.80f, 0.20f, 1.0f);
-                        break;
-                    case 1: // Forest
-                        BiomeColor = FLinearColor(0.05f, 0.35f, 0.08f, 1.0f);
-                        break;
-                    case 2: // Desert
-                        BiomeColor = FLinearColor(0.95f, 0.75f, 0.25f, 1.0f);
-                        break;
-                    case 3: // Mountain
-                        BiomeColor = FLinearColor(0.55f, 0.55f, 0.60f, 1.0f);
-                        break;
-                    case 4: // Water
-                        BiomeColor = FLinearColor(0.05f, 0.35f, 0.85f, 1.0f);
-                        break;
-                    default:
-                        break;
-                    }
+                case EVoxelBlock::Grass:
+                    BlockColor =
+                        FLinearColor(
+                            0.20f,
+                            0.65f,
+                            0.12f,
+                            1.0f);
+                    break;
+
+                case EVoxelBlock::Dirt:
+                    BlockColor =
+                        FLinearColor(
+                            0.45f,
+                            0.25f,
+                            0.10f,
+                            1.0f);
+                    break;
+
+                case EVoxelBlock::Stone:
+                    BlockColor =
+                        FLinearColor(
+                            0.50f,
+                            0.52f,
+                            0.56f,
+                            1.0f);
+                    break;
+
+                case EVoxelBlock::Sand:
+                    BlockColor =
+                        FLinearColor(
+                            0.85f,
+                            0.72f,
+                            0.42f,
+                            1.0f);
+                    break;
+
+                case EVoxelBlock::Wood:
+                    BlockColor =
+                        FLinearColor(
+                            0.58f,
+                            0.32f,
+                            0.12f,
+                            1.0f);
+                    break;
+
+                case EVoxelBlock::Water:
+                    BlockColor =
+                        FLinearColor(
+                            0.05f,
+                            0.35f,
+                            0.85f,
+                            1.0f);
+                    break;
+
+                case EVoxelBlock::Air:
+                default:
+                    break;
                 }
 
 
@@ -332,7 +380,7 @@ void FVoxelMesher::Build(
                         FVector(0, S, 0),
 
                         FVector(-1, 0, 0),
-                        BiomeColor,
+                        BlockColor,
                         bWater);
                 }
 
@@ -354,7 +402,7 @@ void FVoxelMesher::Build(
                         FVector(S, 0, S),
 
                         FVector(1, 0, 0),
-                        BiomeColor,
+                        BlockColor,
                         bWater);
                 }
 
@@ -376,7 +424,7 @@ void FVoxelMesher::Build(
                         FVector(0, 0, S),
 
                         FVector(0, -1, 0),
-                        BiomeColor,
+                        BlockColor,
                         bWater);
                 }
 
@@ -398,7 +446,7 @@ void FVoxelMesher::Build(
                         FVector(S, S, 0),
 
                         FVector(0, 1, 0),
-                        BiomeColor,
+                        BlockColor,
                         bWater);
                 }
 
@@ -420,7 +468,7 @@ void FVoxelMesher::Build(
                         FVector(S, 0, 0),
 
                         FVector(0, 0, -1),
-                        BiomeColor,
+                        BlockColor,
                         bWater);
                 }
 
@@ -442,7 +490,7 @@ void FVoxelMesher::Build(
                         FVector(0, S, S),
 
                         FVector(0, 0, 1),
-                        BiomeColor,
+                        BlockColor,
                         bWater);
                 }
             }
