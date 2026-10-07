@@ -52,6 +52,49 @@ void UVoxelInventoryComponent::EnsureSlotArray()
     }
 }
 
+bool UVoxelInventoryComponent::CanAddBlock(
+    EVoxelBlock Block,
+    int32 Quantity) const
+{
+    if (Block == EVoxelBlock::Air ||
+        Quantity <= 0)
+    {
+        return false;
+    }
+
+    const int32 StackSize =
+        FMath::Max(1, MaxStackSize);
+
+    int32 Capacity = 0;
+
+    /*
+     * Считаем свободное место сначала в существующих стаках,
+     * затем в пустых слотах.
+     */
+    for (const FVoxelInventorySlot& Slot : Slots)
+    {
+        if (Slot.Block == Block &&
+            Slot.Quantity > 0)
+        {
+            Capacity +=
+                FMath::Max(
+                    0,
+                    StackSize - Slot.Quantity);
+        }
+        else if (Slot.IsEmpty())
+        {
+            Capacity += StackSize;
+        }
+
+        if (Capacity >= Quantity)
+        {
+            return true;
+        }
+    }
+
+    return Capacity >= Quantity;
+}
+
 int32 UVoxelInventoryComponent::AddBlock(
     EVoxelBlock Block,
     int32 Quantity)
