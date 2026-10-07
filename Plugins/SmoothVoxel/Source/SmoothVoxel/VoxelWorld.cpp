@@ -3,6 +3,7 @@
 #include "VoxelChunk.h"
 #include "VoxelWorldGenerator.h"
 #include "VoxelWorldSaveGame.h"
+#include "VoxelBlockLibrary.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -1426,9 +1427,6 @@ bool AVoxelWorld::BreakBlockByRay()
     }
 
 
-    /*
-     * Воду нельзя ломать обычным инструментом.
-     */
     AVoxelChunk* Chunk =
         GetChunk(WorldBlockToChunk(WorldBlock));
 
@@ -1440,13 +1438,17 @@ bool AVoxelWorld::BreakBlockByRay()
     const FIntVector LocalBlock =
         WorldBlockToLocal(WorldBlock);
 
-    const uint8 HitBlock =
-        Chunk->GetBlock(
-            LocalBlock.X,
-            LocalBlock.Y,
-            LocalBlock.Z);
+    const EVoxelBlock HitBlock =
+        static_cast<EVoxelBlock>(
+            Chunk->GetBlock(
+                LocalBlock.X,
+                LocalBlock.Y,
+                LocalBlock.Z));
 
-    if (HitBlock == uint8(EVoxelBlock::Water))
+    /*
+     * Вся игровая логика блока теперь смотрит в единый реестр.
+     */
+    if (!UVoxelBlockLibrary::CanBreakBlock(HitBlock))
     {
         return false;
     }
@@ -1555,14 +1557,22 @@ bool AVoxelWorld::PlaceBlockByRay()
 
 
     /*
-     * Пока ставим Dirt.
+     * Пока выбран блок Dirt.
      *
-     * Позже сюда подключим выбранный
-     * игроком тип блока.
+     * Позже hotbar будет передавать сюда выбранный тип,
+     * а проверка CanPlaceBlock останется той же.
      */
+    const EVoxelBlock BlockToPlace =
+        EVoxelBlock::Dirt;
+
+    if (!UVoxelBlockLibrary::CanPlaceBlock(BlockToPlace))
+    {
+        return false;
+    }
+
     SetBlockInternal(
         WorldBlock,
-        uint8(EVoxelBlock::Dirt));
+        uint8(BlockToPlace));
 
 
     return true;
