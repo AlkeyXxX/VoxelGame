@@ -4,6 +4,8 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 
 #include "VoxelTypes.h"
+
+class UDataTable;
 #include "VoxelBlockLibrary.generated.h"
 
 /*
@@ -23,6 +25,11 @@ public:
         EVoxelBlock Block);
 
     UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
+    static FVoxelBlockDefinition GetBlockDefinitionFromTable(
+        const UDataTable* DataTable,
+        EVoxelBlock Block);
+
+    UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
     static FText GetBlockDisplayName(
         EVoxelBlock Block);
 
@@ -31,11 +38,26 @@ public:
         EVoxelBlock Block);
 
     UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
+    static float GetBlockDurabilityFromTable(
+        const UDataTable* DataTable,
+        EVoxelBlock Block);
+
+    UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
     static bool CanBreakBlock(
         EVoxelBlock Block);
 
     UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
+    static bool CanBreakBlockFromTable(
+        const UDataTable* DataTable,
+        EVoxelBlock Block);
+
+    UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
     static bool CanPlaceBlock(
+        EVoxelBlock Block);
+
+    UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
+    static bool CanPlaceBlockFromTable(
+        const UDataTable* DataTable,
         EVoxelBlock Block);
 
     UFUNCTION(BlueprintPure, Category="Voxel|Blocks")
