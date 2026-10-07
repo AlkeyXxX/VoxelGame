@@ -205,7 +205,7 @@ public:
     void RefreshDebugData();
 
     UFUNCTION(BlueprintPure, Category="Voxel|Debug")
-    const FVoxelDebugData& GetDebugData() const;
+    FVoxelDebugData GetDebugData() const;
 
 private:
     UPROPERTY()
