@@ -1448,7 +1448,9 @@ bool AVoxelWorld::BreakBlockByRay()
     /*
      * Вся игровая логика блока теперь смотрит в единый реестр.
      */
-    if (!UVoxelBlockLibrary::CanBreakBlock(HitBlock))
+    if (!UVoxelBlockLibrary::CanBreakBlockFromTable(
+        BlockDataTable,
+        HitBlock))
     {
         return false;
     }
@@ -1565,7 +1567,9 @@ bool AVoxelWorld::PlaceBlockByRay()
     const EVoxelBlock BlockToPlace =
         EVoxelBlock::Dirt;
 
-    if (!UVoxelBlockLibrary::CanPlaceBlock(BlockToPlace))
+    if (!UVoxelBlockLibrary::CanPlaceBlockFromTable(
+        BlockDataTable,
+        BlockToPlace))
     {
         return false;
     }
