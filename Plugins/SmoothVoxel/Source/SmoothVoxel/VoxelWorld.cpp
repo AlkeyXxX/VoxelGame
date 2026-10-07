@@ -4,6 +4,7 @@
 #include "VoxelWorldGenerator.h"
 #include "VoxelWorldSaveGame.h"
 #include "VoxelBlockLibrary.h"
+#include "VoxelInventoryComponent.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -1459,6 +1460,33 @@ bool AVoxelWorld::BreakBlockByRay()
         WorldBlock,
         uint8(EVoxelBlock::Air));
 
+    /*
+     * Подбираем дроп сломанного блока, если у игрока
+     * уже установлен UVoxelInventoryComponent.
+     */
+    if (APawn* PlayerPawn =
+        UGameplayStatics::GetPlayerPawn(
+            GetWorld(),
+            0))
+    {
+        if (UVoxelInventoryComponent* Inventory =
+            PlayerPawn->FindComponentByClass<
+                UVoxelInventoryComponent>())
+        {
+            const EVoxelBlock DropBlock =
+                UVoxelBlockLibrary::GetBlockDropFromTable(
+                    BlockDataTable,
+                    HitBlock);
+
+            if (DropBlock != EVoxelBlock::Air)
+            {
+                Inventory->AddBlock(
+                    DropBlock,
+                    1);
+            }
+        }
+    }
+
     return true;
 }
 
@@ -1468,21 +1496,58 @@ bool AVoxelWorld::BreakBlockByRay()
  */
 bool AVoxelWorld::PlaceBlockByRay()
 {
+    return PlaceBlockByRayWithType(
+        EVoxelBlock::Dirt);
+}
+
+
+bool AVoxelWorld::PlaceBlockByRayWithType(
+    EVoxelBlock BlockToPlace)
+{
     APlayerController* PC =
         UGameplayStatics::GetPlayerController(
             this,
             0);
-
 
     if (!PC)
     {
         return false;
     }
 
+    if (!UVoxelBlockLibrary::CanPlaceBlockFromTable(
+        BlockDataTable,
+        BlockToPlace))
+    {
+        return false;
+    }
+
+    APawn* PlayerPawn =
+        UGameplayStatics::GetPlayerPawn(
+            GetWorld(),
+            0);
+
+    UVoxelInventoryComponent* Inventory = nullptr;
+
+    if (PlayerPawn)
+    {
+        Inventory =
+            PlayerPawn->FindComponentByClass<
+                UVoxelInventoryComponent>();
+    }
+
+    /*
+     * Если inventory подключён, выбранный слот обязан
+     * содержать тот же блок, который мы ставим.
+     */
+    if (Inventory &&
+        (Inventory->GetSelectedBlock() != BlockToPlace ||
+         Inventory->GetSelectedQuantity() <= 0))
+    {
+        return false;
+    }
 
     FVector Start;
     FVector Direction;
-
 
     if (!GetCenterScreenRay(
         PC,
@@ -1492,22 +1557,17 @@ bool AVoxelWorld::PlaceBlockByRay()
         return false;
     }
 
-
     const FVector End =
         Start +
         Direction * InteractionDistance;
 
-
     FHitResult Hit;
-
 
     FCollisionQueryParams Params(
         SCENE_QUERY_STAT(VoxelPlace),
         true);
 
-
     Params.AddIgnoredActor(this);
-
 
     const bool bHit =
         GetWorld()->LineTraceSingleByChannel(
@@ -1517,38 +1577,26 @@ bool AVoxelWorld::PlaceBlockByRay()
             ECC_Visibility,
             Params);
 
-
     if (!bHit)
     {
         return false;
     }
 
-
     AVoxelChunk* HitChunk =
         Cast<AVoxelChunk>(
             Hit.GetActor());
-
 
     if (!HitChunk)
     {
         return false;
     }
 
-
-    /*
-     * Двигаемся наружу от грани.
-     *
-     * 0.51 * VoxelSize гарантированно
-     * переводит точку в соседнюю клетку.
-     */
     const FVector PlacePoint =
         Hit.ImpactPoint +
         Hit.ImpactNormal *
         (VoxelSize * 0.51f);
 
-
     FIntVector WorldBlock;
-
 
     if (!WorldToBlock(
         PlacePoint,
@@ -1557,19 +1605,31 @@ bool AVoxelWorld::PlaceBlockByRay()
         return false;
     }
 
+    const FIntVector LocalBlock =
+        WorldBlockToLocal(WorldBlock);
+
+    AVoxelChunk* TargetChunk =
+        GetChunk(
+            WorldBlockToChunk(
+                WorldBlock));
+
+    if (!TargetChunk)
+    {
+        return false;
+    }
 
     /*
-     * Пока выбран блок Dirt.
-     *
-     * Позже hotbar будет передавать сюда выбранный тип,
-     * а проверка CanPlaceBlock останется той же.
+     * Не перезаписываем существующий твёрдый блок.
+     * Воду также не считаем свободным местом для строительства.
      */
-    const EVoxelBlock BlockToPlace =
-        EVoxelBlock::Dirt;
+    const EVoxelBlock ExistingBlock =
+        static_cast<EVoxelBlock>(
+            TargetChunk->GetBlock(
+                LocalBlock.X,
+                LocalBlock.Y,
+                LocalBlock.Z));
 
-    if (!UVoxelBlockLibrary::CanPlaceBlockFromTable(
-        BlockDataTable,
-        BlockToPlace))
+    if (ExistingBlock != EVoxelBlock::Air)
     {
         return false;
     }
@@ -1578,7 +1638,10 @@ bool AVoxelWorld::PlaceBlockByRay()
         WorldBlock,
         uint8(BlockToPlace));
 
+    if (Inventory)
+    {
+        Inventory->RemoveFromSelectedSlot(1);
+    }
 
     return true;
 }
-
