@@ -83,8 +83,31 @@ public:
     void SetSelectedSlot(
         int32 NewSelectedSlot);
 
+    /*
+     * Выбор слота по привычному для игрока номеру 1..9.
+     * Внутри inventory индексы остаются 0..8.
+     */
+    UFUNCTION(BlueprintCallable, Category="Voxel|Inventory")
+    void SelectSlotByNumber(
+        int32 SlotNumber);
+
+    /*
+     * Переключение с циклическим переходом через края hotbar.
+     */
+    UFUNCTION(BlueprintCallable, Category="Voxel|Inventory")
+    void SelectNextSlot();
+
+    UFUNCTION(BlueprintCallable, Category="Voxel|Inventory")
+    void SelectPreviousSlot();
+
     UFUNCTION(BlueprintPure, Category="Voxel|Inventory")
     int32 GetSelectedSlot() const;
+
+    /*
+     * Номер слота для UI/отладки: 1..SlotCount.
+     */
+    UFUNCTION(BlueprintPure, Category="Voxel|Inventory")
+    int32 GetSelectedSlotNumber() const;
 
     UFUNCTION(BlueprintPure, Category="Voxel|Inventory")
     EVoxelBlock GetSelectedBlock() const;
