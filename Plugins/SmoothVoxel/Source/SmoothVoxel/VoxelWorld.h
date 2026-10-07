@@ -102,6 +102,39 @@ public:
         const FIntVector& ChunkCoord,
         FVoxelNeighborData& OutData) const;
 
+    /*
+     * Debug helpers.
+     *
+     * Эти функции не меняют состояние мира. Они дают debug-компоненту
+     * доступ к уже существующим данным без дублирования логики
+     * преобразования координат и генерации terrain/biome.
+     */
+    bool GetBlockDebugInfoAtWorld(
+        const FVector& WorldPosition,
+        EVoxelBlock& OutBlock,
+        FIntVector& OutWorldBlock,
+        FIntVector& OutLocalBlock,
+        FIntVector& OutChunkCoord) const;
+
+    int32 GetLoadedChunkCount() const
+    {
+        return Chunks.Num();
+    }
+
+    const FIntVector& GetStreamingCenterChunkDebug() const
+    {
+        return LastStreamingCenter;
+    }
+
+    void GetTerrainDebugInfo(
+        int32 WorldX,
+        int32 WorldY,
+        int32& OutSurfaceHeight,
+        float& OutTerrainNoise,
+        float& OutTemperature,
+        float& OutMoisture,
+        FString& OutBiomeName) const;
+
 
 public:
 
