@@ -65,6 +65,11 @@ public:
         EVoxelBlock Block,
         int32 Quantity);
 
+    UFUNCTION(BlueprintPure, Category="Voxel|Inventory")
+    bool CanAddBlock(
+        EVoxelBlock Block,
+        int32 Quantity) const;
+
     UFUNCTION(BlueprintCallable, Category="Voxel|Inventory")
     int32 RemoveBlock(
         EVoxelBlock Block,
