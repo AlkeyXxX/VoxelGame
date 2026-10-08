@@ -211,7 +211,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|Streaming",
         meta=(ClampMin="1", ClampMax="20"))
-    int32 UnloadRadius = 18;
+    int32 UnloadRadius = 6;
 
 
     /*
