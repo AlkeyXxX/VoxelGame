@@ -20,6 +20,13 @@ struct FVoxelNeighborData
 	TArray<uint8> ZMinus;
 	TArray<uint8> ZPlus;
 
+	TArray<uint8> XMinusStructure;
+	TArray<uint8> XPlusStructure;
+	TArray<uint8> YMinusStructure;
+	TArray<uint8> YPlusStructure;
+	TArray<uint8> ZMinusStructure;
+	TArray<uint8> ZPlusStructure;
+
 	void Init(int32 Size)
 	{
 		const int32 Count = Size * Size;
@@ -32,6 +39,13 @@ struct FVoxelNeighborData
 
 		ZMinus.SetNumZeroed(Count);
 		ZPlus.SetNumZeroed(Count);
+
+		XMinusStructure.SetNumZeroed(Count);
+		XPlusStructure.SetNumZeroed(Count);
+		YMinusStructure.SetNumZeroed(Count);
+		YPlusStructure.SetNumZeroed(Count);
+		ZMinusStructure.SetNumZeroed(Count);
+		ZPlusStructure.SetNumZeroed(Count);
 	}
 };
 
@@ -102,6 +116,13 @@ private:
 		int32 X,
 		int32 Y,
 		int32 Z);
+
+	static uint8 GetCubicNeighborBlock(
+		const FVoxelMeshBuildInput& Input,
+		int32 X,
+		int32 Y,
+		int32 Z,
+		bool bCurrentWater);
 
 	static void AddFace(
 		FVoxelMeshBuildOutput& Output,
