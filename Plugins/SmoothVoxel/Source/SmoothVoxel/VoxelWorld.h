@@ -338,6 +338,46 @@ public:
     int32 SeaLevel = 10;
 
     /*
+     * Ширина пляжной зоны в блоках.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Water",
+        meta=(ClampMin="0", ClampMax="8"))
+    int32 BeachWidth = 2;
+
+
+    /*
+     * Материал voxel mesh.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Rendering")
+    UMaterialInterface* Material = nullptr;
+
+    /*
+     * Отдельный материал воды.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Rendering")
+    UMaterialInterface* WaterMaterial = nullptr;
+
+
+    /*
+     * Дальность взаимодействия.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Player")
+    float InteractionDistance = 1000.0f;
+
+
+    /*
      * Таблица свойств блоков.
      *
      * Если не назначена, используются встроенные значения
