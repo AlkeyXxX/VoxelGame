@@ -49,6 +49,20 @@ public:
         int32 Y,
         int32 Z) const;
 
+    void SetBaseBlock(
+        int32 X,
+        int32 Y,
+        int32 Z,
+        uint8 Block);
+
+    void SetModificationFlag(
+        int32 X,
+        int32 Y,
+        int32 Z,
+        bool bModified);
+
+    void ClearModificationFlags();
+
     void SetBlock(
         int32 X,
         int32 Y,
@@ -93,6 +107,9 @@ public:
         TArray<uint8>& OutData) const;
 
     void CopyBiomeData(
+        TArray<uint8>& OutData) const;
+
+    void CopyModificationFlags(
         TArray<uint8>& OutData) const;
 
     void SetBiome(
