@@ -124,6 +124,13 @@ private:
 		int32 Y,
 		int32 Z);
 
+	static uint8 GetCubicNeighborBlock(
+		const FVoxelMeshBuildInput& Input,
+		int32 X,
+		int32 Y,
+		int32 Z,
+		bool bCurrentWater);
+
 	static void AddFace(
 		FVoxelMeshBuildOutput& Output,
 		const FVector& Origin,
