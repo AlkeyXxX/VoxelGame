@@ -214,32 +214,17 @@ bool FVoxelMesher::IsWaterShoreSideVisible(
             Z,
             true);
 
-    if (NeighborBlock == uint8(EVoxelBlock::Air))
-    {
-        return true;
-    }
-
-    if (NeighborBlock == uint8(EVoxelBlock::Water))
-    {
-        return false;
-    }
-
     /*
-     * Если над твёрдым берегом уже воздух, гладкая MC-поверхность
-     * может оставить часть верхней боковой грани воды открытой.
+     * Для воды боковая поверхность должна существовать
+     * и рядом с твёрдым берегом.
+     *
+     * Гладкая MC-поверхность берега сама закроет ту часть
+     * водной грани, которая находится внутри грунта через depth test.
+     * Оставшаяся верхняя часть закроет треугольные клинья
+     * между водой и съезжающим на один блок берегом.
      */
-    const uint8 AboveNeighborBlock =
-        GetCubicNeighborBlock(
-            Input,
-            X + OffsetX,
-            Y + OffsetY,
-            Z + 1,
-            true);
-
-    return AboveNeighborBlock ==
-        uint8(EVoxelBlock::Air);
+    return NeighborBlock != uint8(EVoxelBlock::Water);
 }
-
 
 uint8 FVoxelMesher::GetBlock(
     const FVoxelMeshBuildInput& Input,
