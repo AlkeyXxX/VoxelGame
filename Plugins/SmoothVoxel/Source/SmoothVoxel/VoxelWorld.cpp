@@ -725,6 +725,7 @@ void AVoxelWorld::GenerateChunkBlocks(
         return;
     }
 
+    Chunk->ClearModificationFlags();
 
     const FIntVector ChunkCoord =
         Chunk->GetChunkCoord();
@@ -846,6 +847,14 @@ void AVoxelWorld::GenerateChunkBlocks(
                     Y * ChunkSize +
                     Z * ChunkSize * ChunkSize;
 
+                Chunk->SetBaseBlock(
+                    X,
+                    Y,
+                    Z,
+                    Block);
+
+                bool bModified = false;
+
                 if (const TMap<int32, uint8>* ChunkModifications =
                     ModifiedBlocks.Find(ChunkCoord))
                 {
@@ -853,8 +862,15 @@ void AVoxelWorld::GenerateChunkBlocks(
                         ChunkModifications->Find(LocalIndex))
                     {
                         Block = *ModifiedBlock;
+                        bModified = true;
                     }
                 }
+
+                Chunk->SetModificationFlag(
+                    X,
+                    Y,
+                    Z,
+                    bModified);
 
                 Chunk->SetBlock(
                     X,
@@ -1148,6 +1164,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyXPlus(
             OutData.XMinus);
+        Neighbor->CopyXPlusStructure(
+            OutData.XMinusStructure);
     }
 
 
@@ -1160,6 +1178,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyXMinus(
             OutData.XPlus);
+        Neighbor->CopyXMinusStructure(
+            OutData.XPlusStructure);
     }
 
 
@@ -1172,6 +1192,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyYPlus(
             OutData.YMinus);
+        Neighbor->CopyYPlusStructure(
+            OutData.YMinusStructure);
     }
 
 
@@ -1184,6 +1206,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyYMinus(
             OutData.YPlus);
+        Neighbor->CopyYMinusStructure(
+            OutData.YPlusStructure);
     }
 
 
@@ -1196,6 +1220,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyZPlus(
             OutData.ZMinus);
+        Neighbor->CopyZPlusStructure(
+            OutData.ZMinusStructure);
     }
 
 
@@ -1208,6 +1234,64 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyZMinus(
             OutData.ZPlus);
+        Neighbor->CopyZMinusStructure(
+            OutData.ZPlusStructure);
+    }
+}
+
+
+/*
+ * Expanded block snapshot for Marching Cubes.
+ * The smooth field deliberately excludes player-modified cells so
+ * construction blocks stay on the separate cubic layer.
+ * Local block coordinates range from [-1, Size].
+ */
+void AVoxelWorld::BuildMarchingCubesData(
+    const FIntVector& ChunkCoord,
+    FVoxelMarchingCubesBuildInput& OutData) const
+{
+    OutData.Init(ChunkSize);
+    OutData.VoxelSize = VoxelSize;
+
+    const int32 Side = ChunkSize + 2;
+
+    for (int32 Z = -1; Z <= ChunkSize; ++Z)
+    {
+        for (int32 Y = -1; Y <= ChunkSize; ++Y)
+        {
+            for (int32 X = -1; X <= ChunkSize; ++X)
+            {
+                const FIntVector WorldBlock(
+                    ChunkCoord.X * ChunkSize + X,
+                    ChunkCoord.Y * ChunkSize + Y,
+                    ChunkCoord.Z * ChunkSize + Z);
+
+                const FIntVector NeighborChunkCoord =
+                    WorldBlockToChunk(WorldBlock);
+
+                const FIntVector LocalBlock =
+                    WorldBlockToLocal(WorldBlock);
+
+                uint8 Block =
+                    uint8(EVoxelBlock::Air);
+
+                if (const AVoxelChunk* Chunk =
+                    Chunks.FindRef(NeighborChunkCoord))
+                {
+                    Block = Chunk->GetTerrainBlock(
+                        LocalBlock.X,
+                        LocalBlock.Y,
+                        LocalBlock.Z);
+                }
+
+                const int32 Index =
+                    (X + 1) +
+                    (Y + 1) * Side +
+                    (Z + 1) * Side * Side;
+
+                OutData.Blocks[Index] = Block;
+            }
+        }
     }
 }
 
@@ -1317,6 +1401,12 @@ void AVoxelWorld::SetBlockInternal(
         LocalBlock.Z,
         Block);
 
+    Chunk->SetModificationFlag(
+        LocalBlock.X,
+        LocalBlock.Y,
+        LocalBlock.Z,
+        true);
+
 
     /*
      * Сохраняем изменение отдельно от runtime-данных чанка.
@@ -1401,38 +1491,28 @@ void AVoxelWorld::SetBlockAtWorld(
 void AVoxelWorld::RebuildChunkAndNeighbors(
     const FIntVector& ChunkCoord)
 {
-    static const FIntVector Directions[] =
+    /*
+     * Marching Cubes density nodes near a chunk corner can depend on
+     * modified cells in diagonal neighbour chunks. Rebuild the complete
+     * 3x3x3 neighbourhood after an edit so the smooth field stays local
+     * and consistent.
+     */
+    for (int32 Z = -1; Z <= 1; ++Z)
     {
-        FIntVector(0, 0, 0),
-
-        FIntVector(-1, 0, 0),
-        FIntVector(1, 0, 0),
-
-        FIntVector(0, -1, 0),
-        FIntVector(0, 1, 0),
-
-        FIntVector(0, 0, -1),
-        FIntVector(0, 0, 1)
-    };
-
-
-    for (const FIntVector& Direction : Directions)
-    {
-        const FIntVector TargetCoord =
-            ChunkCoord + Direction;
-
-
-        AVoxelChunk* Chunk =
-            GetChunk(TargetCoord);
-
-
-        if (Chunk)
+        for (int32 Y = -1; Y <= 1; ++Y)
         {
-            Chunk->RebuildMesh();
+            for (int32 X = -1; X <= 1; ++X)
+            {
+                if (AVoxelChunk* Chunk =
+                    GetChunk(
+                        ChunkCoord + FIntVector(X, Y, Z)))
+                {
+                    Chunk->RebuildMesh();
+                }
+            }
         }
     }
 }
-
 
 /*
  * Разрушение блока через ray из центра экрана.
