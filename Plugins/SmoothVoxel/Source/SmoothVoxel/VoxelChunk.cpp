@@ -208,6 +208,13 @@ void AVoxelChunk::CopyBiomeData(
 }
 
 
+void AVoxelChunk::CopyModificationFlags(
+    TArray<uint8>& OutData) const
+{
+    OutData = ModificationFlags;
+}
+
+
 void CopyStructureFace(
     const TArray<uint8>& Flags,
     TArray<uint8>& OutData,
