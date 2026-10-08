@@ -201,7 +201,7 @@ public:
 
     /* Частота обновления дальней LOD-зоны при перемещении по чанкам. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="8"))
-    int32 LODUpdateChunkInterval = 2;
+    int32 LODUpdateChunkInterval = 1;
 
     /* Сколько обычных чанков объединяем в один дальний terrain tile. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="2", ClampMax="8"))
@@ -219,7 +219,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|Streaming",
         meta=(ClampMin="1", ClampMax="20"))
-    int32 UnloadRadius = 6;
+    int32 UnloadRadius = 3;
 
 
     /*
