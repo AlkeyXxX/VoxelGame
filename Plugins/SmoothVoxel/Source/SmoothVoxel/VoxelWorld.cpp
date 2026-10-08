@@ -252,6 +252,8 @@ void AVoxelWorld::ConfigureWorldGenerator()
         FMath::Max(1, WorldSizeX * ChunkSize);
     Settings.WorldBlocksY =
         FMath::Max(1, WorldSizeY * ChunkSize);
+    Settings.MaxTerrainHeight =
+        FMath::Max(1, WorldSizeZ * ChunkSize - 3);
     Settings.BaseHeight = BaseHeight;
     Settings.HeightVariation = HeightVariation;
     Settings.NoiseScale = NoiseScale;
