@@ -575,33 +575,26 @@ void AVoxelWorld::UpdateChunkStreaming()
         for (const FIntVector& UnloadedCoord :
             ChunksToUnload)
         {
-            static const FIntVector Directions[] =
+            for (int32 Z = -1; Z <= 1; ++Z)
             {
-                FIntVector(-1, 0, 0),
-                FIntVector(1, 0, 0),
-                FIntVector(0, -1, 0),
-                FIntVector(0, 1, 0),
-                FIntVector(0, 0, -1),
-                FIntVector(0, 0, 1)
-            };
-
-
-            for (const FIntVector& Direction :
-                Directions)
-            {
-                const FIntVector NeighborCoord =
-                    UnloadedCoord + Direction;
-
-
-                if (AVoxelChunk* Neighbor =
-                    GetChunk(NeighborCoord))
+                for (int32 Y = -1; Y <= 1; ++Y)
                 {
-                    Neighbor->RebuildMesh();
+                    for (int32 X = -1; X <= 1; ++X)
+                    {
+                        const FIntVector NeighborCoord =
+                            UnloadedCoord +
+                            FIntVector(X, Y, Z);
+
+                        if (AVoxelChunk* Neighbor =
+                            GetChunk(NeighborCoord))
+                        {
+                            Neighbor->RebuildMesh();
+                        }
+                    }
                 }
             }
         }
     }
-
 
     /*
      * Если центр сменился, следующими Tick'ами
@@ -725,6 +718,7 @@ void AVoxelWorld::GenerateChunkBlocks(
         return;
     }
 
+    Chunk->ClearModificationFlags();
 
     const FIntVector ChunkCoord =
         Chunk->GetChunkCoord();
@@ -846,6 +840,18 @@ void AVoxelWorld::GenerateChunkBlocks(
                     Y * ChunkSize +
                     Z * ChunkSize * ChunkSize;
 
+                /*
+                 * Сохраняем процедурную базу отдельно.
+                 * Surface Nets видит её, пока клетка не была изменена игроком.
+                 */
+                Chunk->SetBaseBlock(
+                    X,
+                    Y,
+                    Z,
+                    Block);
+
+                bool bModified = false;
+
                 if (const TMap<int32, uint8>* ChunkModifications =
                     ModifiedBlocks.Find(ChunkCoord))
                 {
@@ -853,8 +859,15 @@ void AVoxelWorld::GenerateChunkBlocks(
                         ChunkModifications->Find(LocalIndex))
                     {
                         Block = *ModifiedBlock;
+                        bModified = true;
                     }
                 }
+
+                Chunk->SetModificationFlag(
+                    X,
+                    Y,
+                    Z,
+                    bModified);
 
                 Chunk->SetBlock(
                     X,
@@ -1213,6 +1226,74 @@ void AVoxelWorld::BuildNeighborData(
 
 
 /*
+ * Формируем расширенный snapshot для Surface Nets.
+ *
+ * Базовый terrain берём отдельно от player modifications:
+ * modified cells становятся Air в smooth field, а сам modified
+ * block затем попадает в cubic construction layer.
+ *
+ * Диапазон локальных block coordinates: [-1, Size + 1].
+ * Этого хватает для node density и одного слоя соседних cells,
+ * которые нужны для бесшовной стыковки Surface Nets между chunks.
+ */
+void AVoxelWorld::BuildSurfaceNetsData(
+    const FIntVector& ChunkCoord,
+    FVoxelSurfaceNetsBuildInput& OutData) const
+{
+    OutData.Init(ChunkSize);
+    OutData.VoxelSize = VoxelSize;
+
+    const int32 Side = ChunkSize + 3;
+
+    for (int32 Z = -1; Z <= ChunkSize + 1; ++Z)
+    {
+        for (int32 Y = -1; Y <= ChunkSize + 1; ++Y)
+        {
+            for (int32 X = -1; X <= ChunkSize + 1; ++X)
+            {
+                const FIntVector WorldBlock(
+                    ChunkCoord.X * ChunkSize + X,
+                    ChunkCoord.Y * ChunkSize + Y,
+                    ChunkCoord.Z * ChunkSize + Z);
+
+                const FIntVector NeighborChunkCoord =
+                    WorldBlockToChunk(WorldBlock);
+
+                const FIntVector LocalBlock =
+                    WorldBlockToLocal(WorldBlock);
+
+                uint8 Block =
+                    uint8(EVoxelBlock::Air);
+
+                if (AVoxelChunk* const* ChunkPtr =
+                    Chunks.Find(NeighborChunkCoord))
+                {
+                    if (*ChunkPtr)
+                    {
+                        Block = (*ChunkPtr)->GetTerrainBlock(
+                            LocalBlock.X,
+                            LocalBlock.Y,
+                            LocalBlock.Z);
+                    }
+                }
+
+                const int32 ArrayX = X + 1;
+                const int32 ArrayY = Y + 1;
+                const int32 ArrayZ = Z + 1;
+
+                const int32 Index =
+                    ArrayX +
+                    ArrayY * Side +
+                    ArrayZ * Side * Side;
+
+                OutData.Blocks[Index] = Block;
+            }
+        }
+    }
+}
+
+
+/*
  * World position -> world block.
  */
 bool AVoxelWorld::WorldToBlock(
@@ -1317,6 +1398,12 @@ void AVoxelWorld::SetBlockInternal(
         LocalBlock.Z,
         Block);
 
+    Chunk->SetModificationFlag(
+        LocalBlock.X,
+        LocalBlock.Y,
+        LocalBlock.Z,
+        true);
+
 
     /*
      * Сохраняем изменение отдельно от runtime-данных чанка.
@@ -1401,38 +1488,29 @@ void AVoxelWorld::SetBlockAtWorld(
 void AVoxelWorld::RebuildChunkAndNeighbors(
     const FIntVector& ChunkCoord)
 {
-    static const FIntVector Directions[] =
+    /*
+     * Surface Nets uses halo cells around chunk borders, so a block
+     * change can affect diagonal neighbours too. Rebuild the complete
+     * 3x3x3 neighbourhood to keep the extracted surface coherent.
+     */
+    for (int32 Z = -1; Z <= 1; ++Z)
     {
-        FIntVector(0, 0, 0),
-
-        FIntVector(-1, 0, 0),
-        FIntVector(1, 0, 0),
-
-        FIntVector(0, -1, 0),
-        FIntVector(0, 1, 0),
-
-        FIntVector(0, 0, -1),
-        FIntVector(0, 0, 1)
-    };
-
-
-    for (const FIntVector& Direction : Directions)
-    {
-        const FIntVector TargetCoord =
-            ChunkCoord + Direction;
-
-
-        AVoxelChunk* Chunk =
-            GetChunk(TargetCoord);
-
-
-        if (Chunk)
+        for (int32 Y = -1; Y <= 1; ++Y)
         {
-            Chunk->RebuildMesh();
+            for (int32 X = -1; X <= 1; ++X)
+            {
+                const FIntVector TargetCoord =
+                    ChunkCoord + FIntVector(X, Y, Z);
+
+                if (AVoxelChunk* Chunk =
+                    GetChunk(TargetCoord))
+                {
+                    Chunk->RebuildMesh();
+                }
+            }
         }
     }
 }
-
 
 /*
  * Разрушение блока через ray из центра экрана.
