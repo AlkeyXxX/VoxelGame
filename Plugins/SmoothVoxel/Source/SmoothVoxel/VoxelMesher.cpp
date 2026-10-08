@@ -198,6 +198,49 @@ uint8 FVoxelMesher::GetCubicNeighborBlock(
 }
 
 
+bool FVoxelMesher::IsWaterShoreSideVisible(
+    const FVoxelMeshBuildInput& Input,
+    int32 X,
+    int32 Y,
+    int32 Z,
+    int32 OffsetX,
+    int32 OffsetY)
+{
+    const uint8 NeighborBlock =
+        GetCubicNeighborBlock(
+            Input,
+            X + OffsetX,
+            Y + OffsetY,
+            Z,
+            true);
+
+    if (NeighborBlock == uint8(EVoxelBlock::Air))
+    {
+        return true;
+    }
+
+    if (NeighborBlock == uint8(EVoxelBlock::Water))
+    {
+        return false;
+    }
+
+    /*
+     * Если над твёрдым берегом уже воздух, гладкая MC-поверхность
+     * может оставить часть верхней боковой грани воды открытой.
+     */
+    const uint8 AboveNeighborBlock =
+        GetCubicNeighborBlock(
+            Input,
+            X + OffsetX,
+            Y + OffsetY,
+            Z + 1,
+            true);
+
+    return AboveNeighborBlock ==
+        uint8(EVoxelBlock::Air);
+}
+
+
 uint8 FVoxelMesher::GetBlock(
     const FVoxelMeshBuildInput& Input,
     int32 X,
@@ -597,12 +640,21 @@ void FVoxelMesher::Build(
                 /*
                  * X-
                  */
-                if (IsFaceVisible(
-                    Block,
-                    GetCubicNeighborBlock(
-                        Input,
-                        X - 1, Y, Z,
-                        bWater)))
+                if (
+                    bWater
+                        ? IsWaterShoreSideVisible(
+                            Input,
+                            X,
+                            Y,
+                            Z,
+                            -1,
+                            0)
+                        : IsFaceVisible(
+                            Block,
+                            GetCubicNeighborBlock(
+                                Input,
+                                X - 1, Y, Z,
+                                bWater)))
                 {
                     AddFace(
                         Output,
@@ -624,12 +676,21 @@ void FVoxelMesher::Build(
                 /*
                  * X+
                  */
-                if (IsFaceVisible(
-                    Block,
-                    GetCubicNeighborBlock(
-                        Input,
-                        X + 1, Y, Z,
-                        bWater)))
+                if (
+                    bWater
+                        ? IsWaterShoreSideVisible(
+                            Input,
+                            X,
+                            Y,
+                            Z,
+                            1,
+                            0)
+                        : IsFaceVisible(
+                            Block,
+                            GetCubicNeighborBlock(
+                                Input,
+                                X + 1, Y, Z,
+                                bWater)))
                 {
                     AddFace(
                         Output,
@@ -651,12 +712,21 @@ void FVoxelMesher::Build(
                 /*
                  * Y-
                  */
-                if (IsFaceVisible(
-                    Block,
-                    GetCubicNeighborBlock(
-                        Input,
-                        X, Y - 1, Z,
-                        bWater)))
+                if (
+                    bWater
+                        ? IsWaterShoreSideVisible(
+                            Input,
+                            X,
+                            Y,
+                            Z,
+                            0,
+                            -1)
+                        : IsFaceVisible(
+                            Block,
+                            GetCubicNeighborBlock(
+                                Input,
+                                X, Y - 1, Z,
+                                bWater)))
                 {
                     AddFace(
                         Output,
@@ -678,12 +748,21 @@ void FVoxelMesher::Build(
                 /*
                  * Y+
                  */
-                if (IsFaceVisible(
-                    Block,
-                    GetCubicNeighborBlock(
-                        Input,
-                        X, Y + 1, Z,
-                        bWater)))
+                if (
+                    bWater
+                        ? IsWaterShoreSideVisible(
+                            Input,
+                            X,
+                            Y,
+                            Z,
+                            0,
+                            1)
+                        : IsFaceVisible(
+                            Block,
+                            GetCubicNeighborBlock(
+                                Input,
+                                X, Y + 1, Z,
+                                bWater)))
                 {
                     AddFace(
                         Output,
