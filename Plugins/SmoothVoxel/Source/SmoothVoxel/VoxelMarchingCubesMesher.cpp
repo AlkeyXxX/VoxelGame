@@ -10,7 +10,7 @@ namespace
 {
     constexpr float IsoLevel = 0.5f;
 
-    FORCEINLINE int32 BlockIndex(
+    FORCEINLINE int32 MarchingCubesBlockIndex(
         int32 X,
         int32 Y,
         int32 Z,
@@ -251,7 +251,7 @@ uint8 FVoxelMarchingCubesMesher::GetBlock(
     }
 
     return Input.Blocks[
-        BlockIndex(
+        MarchingCubesBlockIndex(
             X,
             Y,
             Z,
