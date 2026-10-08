@@ -49,6 +49,9 @@ struct FVoxelWorldGenerationSettings
     int32 WorldBlocksX = 4096;
     int32 WorldBlocksY = 4096;
 
+    /* Highest generated surface block; configured from vertical world size. */
+    int32 MaxTerrainHeight = 61;
+
     int32 BaseHeight = 12;
     int32 HeightVariation = 8;
     float NoiseScale = 0.025f;
