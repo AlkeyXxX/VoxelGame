@@ -172,6 +172,117 @@ uint8 FVoxelMesher::GetBlock(
 }
 
 
+uint8 FVoxelMesher::GetCubicNeighborBlock(
+    const FVoxelMeshBuildInput& Input,
+    int32 X,
+    int32 Y,
+    int32 Z,
+    bool bCurrentWater)
+{
+    const int32 Size = Input.Size;
+
+    if (X >= 0 && X < Size &&
+        Y >= 0 && Y < Size &&
+        Z >= 0 && Z < Size)
+    {
+        const int32 Index =
+            BlockIndex(X, Y, Z, Size);
+
+        if (bCurrentWater)
+        {
+            return Input.Blocks[Index];
+        }
+
+        if (Input.StructureFlags.Num() == Size * Size * Size &&
+            Input.StructureFlags[Index] != 0)
+        {
+            return Input.Blocks[Index];
+        }
+
+        return uint8(EVoxelBlock::Air);
+    }
+
+    if (bCurrentWater)
+    {
+        if (X < 0 && Y >= 0 && Y < Size && Z >= 0 && Z < Size)
+        {
+            return Input.Neighbors.XMinus[SideIndex(Y, Z, Size)];
+        }
+
+        if (X >= Size && Y >= 0 && Y < Size && Z >= 0 && Z < Size)
+        {
+            return Input.Neighbors.XPlus[SideIndex(Y, Z, Size)];
+        }
+
+        if (Y < 0 && X >= 0 && X < Size && Z >= 0 && Z < Size)
+        {
+            return Input.Neighbors.YMinus[SideIndex(X, Z, Size)];
+        }
+
+        if (Y >= Size && X >= 0 && X < Size && Z >= 0 && Z < Size)
+        {
+            return Input.Neighbors.YPlus[SideIndex(X, Z, Size)];
+        }
+
+        if (Z < 0 && X >= 0 && X < Size && Y >= 0 && Y < Size)
+        {
+            return Input.Neighbors.ZMinus[SideIndex(X, Y, Size)];
+        }
+
+        if (Z >= Size && X >= 0 && X < Size && Y >= 0 && Y < Size)
+        {
+            return Input.Neighbors.ZPlus[SideIndex(X, Y, Size)];
+        }
+
+        return uint8(EVoxelBlock::Air);
+    }
+
+    if (X < 0 && Y >= 0 && Y < Size && Z >= 0 && Z < Size)
+    {
+        return Input.Neighbors.XMinusStructure[SideIndex(Y, Z, Size)] != 0
+            ? Input.Neighbors.XMinus[SideIndex(Y, Z, Size)]
+            : uint8(EVoxelBlock::Air);
+    }
+
+    if (X >= Size && Y >= 0 && Y < Size && Z >= 0 && Z < Size)
+    {
+        return Input.Neighbors.XPlusStructure[SideIndex(Y, Z, Size)] != 0
+            ? Input.Neighbors.XPlus[SideIndex(Y, Z, Size)]
+            : uint8(EVoxelBlock::Air);
+    }
+
+    if (Y < 0 && X >= 0 && X < Size && Z >= 0 && Z < Size)
+    {
+        return Input.Neighbors.YMinusStructure[SideIndex(X, Z, Size)] != 0
+            ? Input.Neighbors.YMinus[SideIndex(X, Z, Size)]
+            : uint8(EVoxelBlock::Air);
+    }
+
+    if (Y >= Size && X >= 0 && X < Size && Z >= 0 && Z < Size)
+    {
+        return Input.Neighbors.YPlusStructure[SideIndex(X, Z, Size)] != 0
+            ? Input.Neighbors.YPlus[SideIndex(X, Z, Size)]
+            : uint8(EVoxelBlock::Air);
+    }
+
+    if (Z < 0 && X >= 0 && X < Size && Y >= 0 && Y < Size)
+    {
+        return Input.Neighbors.ZMinusStructure[SideIndex(X, Y, Size)] != 0
+            ? Input.Neighbors.ZMinus[SideIndex(X, Y, Size)]
+            : uint8(EVoxelBlock::Air);
+    }
+
+    if (Z >= Size && X >= 0 && X < Size && Y >= 0 && Y < Size)
+    {
+        return Input.Neighbors.ZPlusStructure[SideIndex(X, Y, Size)] != 0
+            ? Input.Neighbors.ZPlus[SideIndex(X, Y, Size)]
+            : uint8(EVoxelBlock::Air);
+    }
+
+    return uint8(EVoxelBlock::Air);
+}
+
+
 /*
  * Добавляет одну квадратную грань.
  *
@@ -384,7 +495,7 @@ void FVoxelMesher::Build(
                  */
                 if (IsFaceVisible(
                     Block,
-                    GetBlock(Input, X - 1, Y, Z)))
+                    GetCubicNeighborBlock(Input, X - 1, Y, Z, bWater)))
                 {
                     AddFace(
                         Output,
@@ -406,7 +517,7 @@ void FVoxelMesher::Build(
                  */
                 if (IsFaceVisible(
                     Block,
-                    GetBlock(Input, X + 1, Y, Z)))
+                    GetCubicNeighborBlock(Input, X + 1, Y, Z, bWater)))
                 {
                     AddFace(
                         Output,
@@ -428,7 +539,7 @@ void FVoxelMesher::Build(
                  */
                 if (IsFaceVisible(
                     Block,
-                    GetBlock(Input, X, Y - 1, Z)))
+                    GetCubicNeighborBlock(Input, X, Y - 1, Z, bWater)))
                 {
                     AddFace(
                         Output,
@@ -450,7 +561,7 @@ void FVoxelMesher::Build(
                  */
                 if (IsFaceVisible(
                     Block,
-                    GetBlock(Input, X, Y + 1, Z)))
+                    GetCubicNeighborBlock(Input, X, Y + 1, Z, bWater)))
                 {
                     AddFace(
                         Output,
@@ -470,9 +581,10 @@ void FVoxelMesher::Build(
                 /*
                  * Z-
                  */
-                if (IsFaceVisible(
-                    Block,
-                    GetBlock(Input, X, Y, Z - 1)))
+                if (!bWater &&
+                    IsFaceVisible(
+                        Block,
+                        GetCubicNeighborBlock(Input, X, Y, Z - 1, bWater)))
                 {
                     AddFace(
                         Output,
@@ -494,7 +606,7 @@ void FVoxelMesher::Build(
                  */
                 if (IsFaceVisible(
                     Block,
-                    GetBlock(Input, X, Y, Z + 1)))
+                    GetCubicNeighborBlock(Input, X, Y, Z + 1, bWater)))
                 {
                     AddFace(
                         Output,
@@ -513,23 +625,5 @@ void FVoxelMesher::Build(
         }
     }
 
-    /*
-     * Surface Nets currently places the extracted terrain surface one
-     * voxel lower than the legacy block boundary. The water volume still
-     * uses the old block-space convention, so shift only the rendered
-     * water geometry down by one voxel to make it meet the smooth shore.
-     */
-    if (Output.WaterVertices.Num() > 0)
-    {
-        const FVector WaterOffset(
-            0.0f,
-            0.0f,
-            -VoxelSize);
-
-        for (FVector& Vertex : Output.WaterVertices)
-        {
-            Vertex += WaterOffset;
-        }
-    }
 }
 
