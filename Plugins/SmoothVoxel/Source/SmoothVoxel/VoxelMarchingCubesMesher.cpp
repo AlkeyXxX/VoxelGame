@@ -279,11 +279,10 @@ uint8 FVoxelMarchingCubesMesher::GetBlock(
 
 
 float FVoxelMarchingCubesMesher::GetDensity(
-    const TArray<uint8>& SolidSamples,
+    const FVoxelMarchingCubesBuildInput& Input,
     int32 X,
     int32 Y,
-    int32 Z,
-    int32 Size)
+    int32 Z)
 {
     float Sum = 0.0f;
 
@@ -293,17 +292,18 @@ float FVoxelMarchingCubesMesher::GetDensity(
         {
             for (int32 DX = 0; DX <= 1; ++DX)
             {
-                /*
-                 * SolidSamples use the same shifted coordinate system as
-                 * the density grid: world/block coordinate + 1.
-                 */
-                Sum +=
-                    SolidSamples[
-                        DensityIndex(
-                            X + DX,
-                            Y + DY,
-                            Z + DZ,
-                            Size)];
+                const EVoxelBlock Block =
+                    static_cast<EVoxelBlock>(
+                        GetBlock(
+                            Input,
+                            X - 1 + DX,
+                            Y - 1 + DY,
+                            Z - 1 + DZ));
+
+                if (IsVoxelSolid(Block))
+                {
+                    Sum += 1.0f;
+                }
             }
         }
     }
@@ -414,67 +414,23 @@ void FVoxelMarchingCubesMesher::Build(
 
     const int32 NodeSide = Size + 2;
 
-    const int32 NodeCount =
-        NodeSide * NodeSide * NodeSide;
-
-    TArray<uint8> SolidSamples;
-    SolidSamples.SetNumUninitialized(
-        NodeCount);
-
     TArray<float> Densities;
     Densities.SetNumUninitialized(
-        NodeCount);
+        NodeSide * NodeSide * NodeSide);
 
-    /*
-     * Build a compact binary solid field once. MC density evaluation
-     * then becomes eight direct byte reads per node.
-     */
     for (int32 Z = 0; Z < NodeSide; ++Z)
     {
         for (int32 Y = 0; Y < NodeSide; ++Y)
         {
             for (int32 X = 0; X < NodeSide; ++X)
             {
-                const uint8 Block =
-                    GetBlock(
-                        Input,
-                        X - 1,
-                        Y - 1,
-                        Z - 1);
-
-                SolidSamples[
-                    DensityIndex(
-                        X,
-                        Y,
-                        Z,
-                        Size)] =
-                    IsVoxelSolid(
-                        static_cast<EVoxelBlock>(Block))
-                        ? 1
-                        : 0;
-            }
-        }
-    }
-
-    /*
-     * Density nodes used by the MC cells are [0, Size] inclusive.
-     * The extra NodeSide element is only the support sample needed
-     * by GetDensity at the upper boundary.
-     */
-    for (int32 Z = 0; Z <= Size; ++Z)
-    {
-        for (int32 Y = 0; Y <= Size; ++Y)
-        {
-            for (int32 X = 0; X <= Size; ++X)
-            {
                 Densities[
                     DensityIndex(X, Y, Z, Size)] =
                     GetDensity(
-                        SolidSamples,
+                        Input,
                         X,
                         Y,
-                        Z,
-                        Size);
+                        Z);
             }
         }
     }
