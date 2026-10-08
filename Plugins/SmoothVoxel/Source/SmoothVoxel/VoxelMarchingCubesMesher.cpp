@@ -456,11 +456,16 @@ void FVoxelMarchingCubesMesher::Build(
         }
     }
 
-    for (int32 Z = 0; Z < NodeSide; ++Z)
+    /*
+     * Density nodes used by the MC cells are [0, Size] inclusive.
+     * The extra NodeSide element is only the support sample needed
+     * by GetDensity at the upper boundary.
+     */
+    for (int32 Z = 0; Z <= Size; ++Z)
     {
-        for (int32 Y = 0; Y < NodeSide; ++Y)
+        for (int32 Y = 0; Y <= Size; ++Y)
         {
-            for (int32 X = 0; X < NodeSide; ++X)
+            for (int32 X = 0; X <= Size; ++X)
             {
                 Densities[
                     DensityIndex(X, Y, Z, Size)] =
