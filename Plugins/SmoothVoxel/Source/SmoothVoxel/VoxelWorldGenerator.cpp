@@ -41,9 +41,83 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
             BaseNoise * static_cast<float>(Settings.HeightVariation));
 
     /*
+     * Широкая маска плато.
+     *
+     * Второй низкочастотный шум определяет большие области,
+     * где рельеф должен быть спокойнее и пригоднее для POI.
+     */
+    const FVector2D PlateauSamplePosition(
+        (WorldX - Settings.Seed * 53) * Settings.PlateauScale,
+        (WorldY + Settings.Seed * 71) * Settings.PlateauScale);
+
+    const float PlateauNoise =
+        FMath::PerlinNoise2D(PlateauSamplePosition);
+
+    const float PlateauValue =
+        FMath::Clamp(
+            PlateauNoise * 0.5f + 0.5f,
+            0.0f,
+            1.0f);
+
+    /*
+     * Формируем большие зоны плато только в достаточно
+     * спокойной части рельефа. На подходе к горам эффект
+     * автоматически ослабевает.
+     */
+    const float PlateauCoverage =
+        FMath::Clamp(
+            (PlateauValue - 0.30f) / 0.45f,
+            0.0f,
+            1.0f);
+
+    const float MountainStart =
+        Settings.BaseHeight +
+        static_cast<float>(Settings.HeightVariation) * 0.70f;
+
+    const float MountainProtection =
+        FMath::Clamp(
+            (MountainStart + 2.0f -
+             static_cast<float>(BaseTerrainHeight)) / 5.0f,
+            0.0f,
+            1.0f);
+
+    const float PlateauMask =
+        PlateauCoverage *
+        MountainProtection *
+        FMath::Clamp(
+            Settings.PlateauStrength,
+            0.0f,
+            1.0f);
+
+    const int32 PlateauStep =
+        FMath::Max(
+            Settings.PlateauHeightStep,
+            1);
+
+    const int32 PlateauHeight =
+        Settings.BaseHeight +
+        FMath::RoundToInt(
+            static_cast<float>(
+                BaseTerrainHeight -
+                Settings.BaseHeight) /
+            static_cast<float>(PlateauStep)) *
+        PlateauStep;
+
+    const float PlateauBlendedHeight =
+        FMath::Lerp(
+            static_cast<float>(BaseTerrainHeight),
+            static_cast<float>(PlateauHeight),
+            PlateauMask);
+
+    const int32 FlattenedBaseHeight =
+        FMath::RoundToInt(
+            PlateauBlendedHeight);
+
+    /*
      * Мелкий шум не должен создавать отдельные островки
-     * в явно низкой местности. Чем ближе базовый рельеф
-     * к уровню моря, тем сильнее деталь затухает.
+     * в явно низкой местности. На плато он дополнительно
+     * приглушается, чтобы поверхность оставалась пригодной
+     * для размещения POI.
      */
     const float DetailWeight =
         FMath::Clamp(
@@ -51,19 +125,20 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
                 BaseTerrainHeight -
                 (Settings.SeaLevel - 3)) / 6.0f,
             0.0f,
-            1.0f);
+            1.0f) *
+        (1.0f - PlateauMask * 0.85f);
 
     int32 Height =
-        BaseTerrainHeight +
+        FlattenedBaseHeight +
         FMath::RoundToInt(
             DetailNoise *
             static_cast<float>(Settings.DetailHeightVariation) *
             DetailWeight);
 
     /*
-     * Если крупный рельеф находится на уровне моря или ниже,
-     * детальный шум не может поднять отдельную колонку
-     * выше водной поверхности и создать остров внутри озера.
+     * Низкий рельеф остаётся ниже уровня воды,
+     * поэтому мелкий шум не создаёт отдельные островки
+     * внутри озера.
      */
     if (BaseTerrainHeight <= Settings.SeaLevel)
     {
