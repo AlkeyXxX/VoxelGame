@@ -27,35 +27,10 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
 {
     const float Noise = GetTerrainNoise(WorldX, WorldY);
 
-    const float DetailNoise =
-        FMath::PerlinNoise2D(
-            FVector2D(
-                (WorldX + Settings.Seed * 29) * Settings.DetailNoiseScale,
-                (WorldY - Settings.Seed * 31) * Settings.DetailNoiseScale));
-
-    float DetailAmplitude =
-        Settings.DetailHeightVariation;
-
-    /*
-     * Deserts stay relatively flat, while mountain terrain keeps the
-     * full detail amplitude for a more broken silhouette.
-     */
-    const float Temperature =
-        GetTemperature(WorldX, WorldY);
-    const float Moisture =
-        GetMoisture(WorldX, WorldY);
-
-    if (Temperature > 0.62f && Moisture < 0.42f)
-    {
-        DetailAmplitude *= 0.45f;
-    }
-
     int32 Height =
         Settings.BaseHeight +
         FMath::RoundToInt(
-            Noise * static_cast<float>(Settings.HeightVariation)) +
-        FMath::RoundToInt(
-            DetailNoise * DetailAmplitude);
+            Noise * static_cast<float>(Settings.HeightVariation));
 
     return FMath::Max(Height, 1);
 }
@@ -85,54 +60,6 @@ float FVoxelWorldGenerator::GetMoisture(
 
     return FMath::Clamp(Noise * 0.5f + 0.5f, 0.0f, 1.0f);
 }
-
-
-bool FVoxelWorldGenerator::IsCave(
-    int32 WorldX,
-    int32 WorldY,
-    int32 WorldZ,
-    int32 SurfaceHeight) const
-{
-    if (WorldZ <= 1 ||
-        WorldZ >= SurfaceHeight - Settings.CaveMinDepth)
-    {
-        return false;
-    }
-
-    const float X =
-        (WorldX + Settings.Seed * 113) *
-        Settings.CaveNoiseScale;
-
-    const float Y =
-        (WorldY - Settings.Seed * 71) *
-        Settings.CaveNoiseScale;
-
-    const float Z =
-        (WorldZ + Settings.Seed * 43) *
-        Settings.CaveNoiseScale;
-
-    const float NoiseA =
-        FMath::PerlinNoise3D(
-            FVector(X, Y, Z));
-
-    const float NoiseB =
-        FMath::PerlinNoise3D(
-            FVector(
-                X * 1.73f + 17.0f,
-                Y * 1.73f - 11.0f,
-                Z * 1.73f + 5.0f));
-
-    /*
-     * The sum of absolute noises forms elongated tunnel-like regions
-     * instead of large spherical holes.
-     */
-    const float CaveValue =
-        FMath::Abs(NoiseA) +
-        FMath::Abs(NoiseB);
-
-    return CaveValue < Settings.CaveThreshold;
-}
-
 
 EVoxelBiome FVoxelWorldGenerator::GetBiome(
     int32 WorldX,
