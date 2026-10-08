@@ -44,6 +44,11 @@ public:
         int32 Y,
         int32 Z) const;
 
+    uint8 GetTerrainBlock(
+        int32 X,
+        int32 Y,
+        int32 Z) const;
+
     void SetBlock(
         int32 X,
         int32 Y,
@@ -114,6 +119,13 @@ public:
     void CopyZPlus(
         TArray<uint8>& OutData) const;
 
+    void CopyXMinusStructure(TArray<uint8>& OutData) const;
+    void CopyXPlusStructure(TArray<uint8>& OutData) const;
+    void CopyYMinusStructure(TArray<uint8>& OutData) const;
+    void CopyYPlusStructure(TArray<uint8>& OutData) const;
+    void CopyZMinusStructure(TArray<uint8>& OutData) const;
+    void CopyZPlusStructure(TArray<uint8>& OutData) const;
+
 
     /*
      * Материал.
@@ -172,7 +184,9 @@ private:
 
 
     TArray<uint8> Blocks;
+    TArray<uint8> BaseBlocks;
     TArray<uint8> Biomes;
+    TArray<uint8> ModificationFlags;
 
 
     /*
