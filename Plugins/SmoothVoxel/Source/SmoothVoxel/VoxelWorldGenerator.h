@@ -38,13 +38,6 @@ struct FVoxelWorldGenerationSettings
 
     int32 SeaLevel = 10;
 
-    bool bEnableCaves = true;
-    float CaveNoiseScale = 0.045f;
-    float CaveSecondaryScale = 0.09f;
-    float CaveThreshold = 0.62f;
-    float CaveSecondaryThreshold = 0.10f;
-    int32 CaveMinDepth = 5;
-
     float TemperatureScale = 0.006f;
     float MoistureScale = 0.008f;
 };
@@ -57,12 +50,6 @@ public:
     void Configure(const FVoxelWorldGenerationSettings& InSettings);
 
     int32 GetSurfaceHeight(int32 WorldX, int32 WorldY) const;
-
-    bool IsCave(
-        int32 WorldX,
-        int32 WorldY,
-        int32 WorldZ,
-        int32 SurfaceHeight) const;
 
     float GetTerrainNoise(int32 WorldX, int32 WorldY) const;
     float GetTemperature(int32 WorldX, int32 WorldY) const;
