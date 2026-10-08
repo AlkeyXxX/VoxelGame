@@ -6,24 +6,6 @@
 namespace
 {
     constexpr float WaterSurfaceInsetFraction = 0.08f;
-    constexpr float WaterWaveAmplitudeFraction = 0.02f;
-    constexpr float WaterWaveScale = 0.0015f;
-    constexpr float WaterShoreFoamWidthFraction = 0.18f;
-    constexpr float WaterShoreFoamLiftFraction = 0.006f;
-
-    FORCEINLINE float GetWaterWaveOffset(
-        const FVector& WorldPosition,
-        float VoxelSize)
-    {
-        const FVector2D NoisePosition(
-            WorldPosition.X * WaterWaveScale,
-            WorldPosition.Y * WaterWaveScale);
-
-        return
-            FMath::PerlinNoise2D(NoisePosition) *
-            VoxelSize *
-            WaterWaveAmplitudeFraction;
-    }
 
     FORCEINLINE bool IsFaceVisibleInternal(uint8 Block, uint8 NeighborBlock)
     {
@@ -331,54 +313,6 @@ uint8 FVoxelMesher::GetBlock(
  *
  * Вершины идут так, чтобы нормаль смотрела наружу.
  */
-void AddWaterShoreStrip(
-    FVoxelMeshBuildOutput& Output,
-    const FVector& Origin,
-    const FVector& A,
-    const FVector& B,
-    const FVector& C,
-    const FVector& D,
-    const FVector& Normal,
-    const FLinearColor& Color)
-{
-    TArray<FVector>& Vertices = Output.WaterVertices;
-    TArray<int32>& Triangles = Output.WaterTriangles;
-    TArray<FVector>& Normals = Output.WaterNormals;
-    TArray<FVector2D>& UV0 = Output.WaterUV0;
-    TArray<FLinearColor>& VertexColors = Output.WaterVertexColors;
-
-    const int32 StartIndex = Vertices.Num();
-
-    Vertices.Add(Origin + A);
-    Vertices.Add(Origin + B);
-    Vertices.Add(Origin + C);
-    Vertices.Add(Origin + D);
-
-    Normals.Add(Normal);
-    Normals.Add(Normal);
-    Normals.Add(Normal);
-    Normals.Add(Normal);
-
-    UV0.Add(FVector2D(0.0f, 0.0f));
-    UV0.Add(FVector2D(1.0f, 0.0f));
-    UV0.Add(FVector2D(1.0f, 1.0f));
-    UV0.Add(FVector2D(0.0f, 1.0f));
-
-    VertexColors.Add(Color);
-    VertexColors.Add(Color);
-    VertexColors.Add(Color);
-    VertexColors.Add(Color);
-
-    Triangles.Add(StartIndex + 0);
-    Triangles.Add(StartIndex + 2);
-    Triangles.Add(StartIndex + 1);
-
-    Triangles.Add(StartIndex + 0);
-    Triangles.Add(StartIndex + 3);
-    Triangles.Add(StartIndex + 2);
-}
-
-
 void FVoxelMesher::AddFace(
     FVoxelMeshBuildOutput& Output,
     const FVector& Origin,
@@ -495,76 +429,10 @@ void FVoxelMesher::Build(
 
 
                 const float S = VoxelSize;
-
-                const FVector WorldCorner00 =
-                    Input.WorldOrigin + FVector(
-                        X * S,
-                        Y * S,
-                        0.0f);
-
-                const FVector WorldCorner10 =
-                    WorldCorner00 + FVector(S, 0.0f, 0.0f);
-
-                const FVector WorldCorner11 =
-                    WorldCorner00 + FVector(S, S, 0.0f);
-
-                const FVector WorldCorner01 =
-                    WorldCorner00 + FVector(0.0f, S, 0.0f);
-
-                const float WaterBaseTop =
-                    S * (1.0f - WaterSurfaceInsetFraction);
-
-                const float WaterTop00 =
+                const float WaterTop =
                     bWater
-                        ? WaterBaseTop + GetWaterWaveOffset(
-                            WorldCorner00,
-                            S)
+                        ? S * (1.0f - WaterSurfaceInsetFraction)
                         : S;
-
-                const float WaterTop10 =
-                    bWater
-                        ? WaterBaseTop + GetWaterWaveOffset(
-                            WorldCorner10,
-                            S)
-                        : S;
-
-                const float WaterTop11 =
-                    bWater
-                        ? WaterBaseTop + GetWaterWaveOffset(
-                            WorldCorner11,
-                            S)
-                        : S;
-
-                const float WaterTop01 =
-                    bWater
-                        ? WaterBaseTop + GetWaterWaveOffset(
-                            WorldCorner01,
-                            S)
-                        : S;
-
-                const float FoamWidth =
-                    bWater
-                        ? S * WaterShoreFoamWidthFraction
-                        : 0.0f;
-
-                const float FoamLift =
-                    bWater
-                        ? S * WaterShoreFoamLiftFraction
-                        : 0.0f;
-
-                const FLinearColor WaterShoreColor(
-                    0.55f,
-                    0.82f,
-                    1.0f,
-                    0.92f);
-
-                const FVector WaterTopNormal =
-                    bWater
-                        ? FVector(
-                            -(WaterTop10 - WaterTop00) / S,
-                            -(WaterTop01 - WaterTop00) / S,
-                            1.0f).GetSafeNormal()
-                        : FVector(0.0f, 0.0f, 1.0f);
 
                 /*
                  * Сейчас используем понятные preview/debug-цвета
@@ -658,8 +526,8 @@ void FVoxelMesher::Build(
                         Origin,
 
                         FVector(0, 0, 0),
-                        FVector(0, 0, WaterTop00),
-                        FVector(0, S, WaterTop01),
+                        FVector(0, 0, WaterTop),
+                        FVector(0, S, WaterTop),
                         FVector(0, S, 0),
 
                         FVector(-1, 0, 0),
@@ -684,8 +552,8 @@ void FVoxelMesher::Build(
 
                         FVector(S, 0, 0),
                         FVector(S, S, 0),
-                        FVector(S, S, WaterTop11),
-                        FVector(S, 0, WaterTop10),
+                        FVector(S, S, WaterTop),
+                        FVector(S, 0, WaterTop),
 
                         FVector(1, 0, 0),
                         BlockColor,
@@ -709,8 +577,8 @@ void FVoxelMesher::Build(
 
                         FVector(0, 0, 0),
                         FVector(S, 0, 0),
-                        FVector(S, 0, WaterTop10),
-                        FVector(0, 0, WaterTop00),
+                        FVector(S, 0, WaterTop),
+                        FVector(0, 0, WaterTop),
 
                         FVector(0, -1, 0),
                         BlockColor,
@@ -733,8 +601,8 @@ void FVoxelMesher::Build(
                         Origin,
 
                         FVector(0, S, 0),
-                        FVector(0, S, WaterTop01),
-                        FVector(S, S, WaterTop11),
+                        FVector(0, S, WaterTop),
+                        FVector(S, S, WaterTop),
                         FVector(S, S, 0),
 
                         FVector(0, 1, 0),
@@ -782,85 +650,14 @@ void FVoxelMesher::Build(
                         Output,
                         Origin,
 
-                        FVector(0, 0, WaterTop00),
-                        FVector(S, 0, WaterTop10),
-                        FVector(S, S, WaterTop11),
-                        FVector(0, S, WaterTop01),
+                        FVector(0, 0, WaterTop),
+                        FVector(S, 0, WaterTop),
+                        FVector(S, S, WaterTop),
+                        FVector(0, S, WaterTop),
 
-                        WaterTopNormal,
+                        FVector(0, 0, 1),
                         BlockColor,
                         bWater);
-
-                    if (bWater)
-                    {
-                        const uint8 XMinusBlock =
-                            GetCubicNeighborBlock(
-                                Input, X - 1, Y, Z, true);
-
-                        if (IsVoxelSolid(XMinusBlock))
-                        {
-                            AddWaterShoreStrip(
-                                Output,
-                                Origin,
-                                FVector(0.0f, 0.0f, WaterTop00 + FoamLift),
-                                FVector(FoamWidth, 0.0f, WaterTop10 + FoamLift),
-                                FVector(FoamWidth, S, WaterTop11 + FoamLift),
-                                FVector(0.0f, S, WaterTop01 + FoamLift),
-                                WaterTopNormal,
-                                WaterShoreColor);
-                        }
-
-                        const uint8 XPlusBlock =
-                            GetCubicNeighborBlock(
-                                Input, X + 1, Y, Z, true);
-
-                        if (IsVoxelSolid(XPlusBlock))
-                        {
-                            AddWaterShoreStrip(
-                                Output,
-                                Origin,
-                                FVector(S - FoamWidth, 0.0f, WaterTop00 + FoamLift),
-                                FVector(S, 0.0f, WaterTop10 + FoamLift),
-                                FVector(S, S, WaterTop11 + FoamLift),
-                                FVector(S - FoamWidth, S, WaterTop01 + FoamLift),
-                                WaterTopNormal,
-                                WaterShoreColor);
-                        }
-
-                        const uint8 YMinusBlock =
-                            GetCubicNeighborBlock(
-                                Input, X, Y - 1, Z, true);
-
-                        if (IsVoxelSolid(YMinusBlock))
-                        {
-                            AddWaterShoreStrip(
-                                Output,
-                                Origin,
-                                FVector(0.0f, 0.0f, WaterTop00 + FoamLift),
-                                FVector(S, 0.0f, WaterTop10 + FoamLift),
-                                FVector(S, FoamWidth, WaterTop11 + FoamLift),
-                                FVector(0.0f, FoamWidth, WaterTop01 + FoamLift),
-                                WaterTopNormal,
-                                WaterShoreColor);
-                        }
-
-                        const uint8 YPlusBlock =
-                            GetCubicNeighborBlock(
-                                Input, X, Y + 1, Z, true);
-
-                        if (IsVoxelSolid(YPlusBlock))
-                        {
-                            AddWaterShoreStrip(
-                                Output,
-                                Origin,
-                                FVector(0.0f, S - FoamWidth, WaterTop00 + FoamLift),
-                                FVector(S, S - FoamWidth, WaterTop10 + FoamLift),
-                                FVector(S, S, WaterTop11 + FoamLift),
-                                FVector(0.0f, S, WaterTop01 + FoamLift),
-                                WaterTopNormal,
-                                WaterShoreColor);
-                        }
-                    }
                 }
             }
         }
