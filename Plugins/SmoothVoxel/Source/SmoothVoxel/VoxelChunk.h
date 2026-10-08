@@ -86,6 +86,9 @@ public:
      */
     void RebuildLODMesh(int32 DownsampleFactor);
 
+    /* Меняет LOD только при фактическом переходе между уровнями. */
+    void SetLODLevel(int32 LODLevel);
+
 
     /*
      * Информация о чанке.
