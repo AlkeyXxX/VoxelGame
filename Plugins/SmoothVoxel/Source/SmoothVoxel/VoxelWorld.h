@@ -189,11 +189,11 @@ public:
         BlueprintReadWrite,
         Category="Voxel|Streaming",
         meta=(ClampMin="1", ClampMax="16"))
-    int32 StreamingRadius = 4;
+    int32 StreamingRadius = 3;
 
     /* Дальность LOD1 в чанках. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="32"))
-    int32 LOD1Radius = 8;
+    int32 LOD1Radius = 6;
 
     /* Дальность LOD2 в чанках. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="64"))
@@ -527,7 +527,10 @@ private:
     bool bUnderwaterEffectActive = false;
 
     UPROPERTY()
-    TMap<FIntVector, UProceduralMeshComponent*> FarLODTiles;
+    UProceduralMeshComponent* FarLOD1Mesh = nullptr;
+
+    UPROPERTY()
+    UProceduralMeshComponent* FarLOD2Mesh = nullptr;
 
     uint32 FarLODGenerationVersion = 0;
     FIntVector LastFarLODCenter = FIntVector::ZeroValue;
