@@ -518,6 +518,7 @@ private:
     bool bUnderwaterEffectActive = false;
 
     bool bDebugFlyMode = false;
+    bool bDebugFlyBoost = false;
     float DebugFlyVerticalInput = 0.0f;
 
     UFUNCTION()
@@ -527,6 +528,8 @@ private:
     void DebugFlyUpReleased();
     void DebugFlyDownPressed();
     void DebugFlyDownReleased();
+    void DebugFlyBoostPressed();
+    void DebugFlyBoostReleased();
     void ApplyDebugFlySettings(bool bEnable);
 };
 
