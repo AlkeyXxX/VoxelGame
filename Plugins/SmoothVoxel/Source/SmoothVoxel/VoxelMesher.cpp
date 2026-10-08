@@ -5,7 +5,15 @@
 
 namespace
 {
-    constexpr float WaterSurfaceInsetFraction = 0.08f;
+    /*
+     * Маленький отступ от верхней границы блока.
+     *
+     * Большой отступ создавал треугольные просветы у берега:
+     * MC-поверхность могла оказаться чуть выше водной плоскости.
+     * 2% сохраняют аккуратный край, но почти полностью убирают
+     * этот зазор.
+     */
+    constexpr float WaterSurfaceInsetFraction = 0.02f;
 
     FORCEINLINE bool IsFaceVisibleInternal(uint8 Block, uint8 NeighborBlock)
     {
