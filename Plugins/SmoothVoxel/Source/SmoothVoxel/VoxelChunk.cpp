@@ -614,11 +614,24 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
     const int32 LODSize =
         FMath::Max(1, SourceSize / DownsampleFactor);
 
+    const int32 SourceSide = SourceSize + 2;
     const float EffectiveVoxelSize =
         VoxelSize * DownsampleFactor;
 
-    TArray<uint8> SourceBlocks;
-    CopyBlockData(SourceBlocks);
+    /*
+     * Получаем тот же expanded snapshot, который используется
+     * обычным smooth Marching Cubes. Это важно для границ чанка.
+     */
+    FVoxelMarchingCubesBuildInput SourceSmoothInput;
+    SourceSmoothInput.Init(SourceSize);
+    SourceSmoothInput.VoxelSize = VoxelSize;
+
+    if (World)
+    {
+        World->BuildMarchingCubesData(
+            ChunkCoord,
+            SourceSmoothInput);
+    }
 
     TWeakObjectPtr<AVoxelChunk> WeakThis(this);
 
@@ -627,46 +640,39 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
 
         [
             WeakThis,
-            SourceBlocks = MoveTemp(SourceBlocks),
+            SourceSmoothInput = MoveTemp(SourceSmoothInput),
             SourceSize,
+            SourceSide,
             LODSize,
             DownsampleFactor,
             EffectiveVoxelSize,
             LocalVersion
         ]() mutable
         {
-            FVoxelMeshBuildInput Input;
-
-            Input.Size = LODSize;
-            Input.VoxelSize = EffectiveVoxelSize;
-            Input.Neighbors.Init(LODSize);
+            FVoxelMarchingCubesBuildInput SmoothInput;
+            SmoothInput.Init(LODSize);
+            SmoothInput.VoxelSize = EffectiveVoxelSize;
 
             /*
-             * WorldOrigin нужен только для UV воды.
-             * Получаем его на Game Thread безопаснее, поэтому для LOD
-             * он не используется в геометрии.
+             * Coarse samples берутся из исходного smooth field.
+             * В отличие от старого варианта, результат снова проходит
+             * через Marching Cubes, поэтому дальняя поверхность остаётся
+             * сглаженной.
              */
-            Input.WorldOrigin = FVector::ZeroVector;
-
-            Input.Blocks.SetNumZeroed(
-                LODSize * LODSize * LODSize);
-
             auto SourceIndex =
-                [SourceSize](int32 X, int32 Y, int32 Z)
+                [SourceSide](int32 X, int32 Y, int32 Z)
                 {
-                    return X +
-                        Y * SourceSize +
-                        Z * SourceSize * SourceSize;
+                    return
+                        (X + 1) +
+                        (Y + 1) * SourceSide +
+                        (Z + 1) * SourceSide * SourceSide;
                 };
 
             auto IsSolid =
                 [](uint8 Block)
                 {
-                    const EVoxelBlock Type =
-                        static_cast<EVoxelBlock>(Block);
-
-                    return Type != EVoxelBlock::Air &&
-                           Type != EVoxelBlock::Water;
+                    return IsVoxelSolid(
+                        static_cast<EVoxelBlock>(Block));
                 };
 
             auto Priority =
@@ -684,16 +690,36 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
                     }
                 };
 
-            for (int32 Z = 0; Z < LODSize; ++Z)
+            /*
+             * Из каждого coarse voxel берём representative block
+             * из исходного объёма factor^3. Solid-majority сохраняет
+             * форму поверхности лучше, чем один центральный sample.
+             *
+             * Координаты LOD Input также включают support [-1, Size],
+             * поэтому граница сохраняется.
+             */
+            for (int32 Z = -1; Z <= LODSize; ++Z)
             {
-                for (int32 Y = 0; Y < LODSize; ++Y)
+                for (int32 Y = -1; Y <= LODSize; ++Y)
                 {
-                    for (int32 X = 0; X < LODSize; ++X)
+                    for (int32 X = -1; X <= LODSize; ++X)
                     {
+                        int32 SolidCount = 0;
+                        int32 TotalCount = 0;
+
                         uint8 BestBlock =
                             uint8(EVoxelBlock::Air);
 
                         int32 BestPriority = 0;
+
+                        const int32 BaseX =
+                            X * DownsampleFactor;
+
+                        const int32 BaseY =
+                            Y * DownsampleFactor;
+
+                        const int32 BaseZ =
+                            Z * DownsampleFactor;
 
                         for (int32 OZ = 0; OZ < DownsampleFactor; ++OZ)
                         {
@@ -702,24 +728,36 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
                                 for (int32 OX = 0; OX < DownsampleFactor; ++OX)
                                 {
                                     const int32 SX =
-                                        FMath::Min(
-                                            X * DownsampleFactor + OX,
-                                            SourceSize - 1);
+                                        FMath::Clamp(
+                                            BaseX + OX,
+                                            -1,
+                                            SourceSize);
 
                                     const int32 SY =
-                                        FMath::Min(
-                                            Y * DownsampleFactor + OY,
-                                            SourceSize - 1);
+                                        FMath::Clamp(
+                                            BaseY + OY,
+                                            -1,
+                                            SourceSize);
 
                                     const int32 SZ =
-                                        FMath::Min(
-                                            Z * DownsampleFactor + OZ,
-                                            SourceSize - 1);
+                                        FMath::Clamp(
+                                            BaseZ + OZ,
+                                            -1,
+                                            SourceSize);
 
                                     const uint8 Block =
-                                        SourceBlocks[
+                                        SourceSmoothInput.Blocks[
                                             SourceIndex(
-                                                SX, SY, SZ)];
+                                                SX,
+                                                SY,
+                                                SZ)];
+
+                                    ++TotalCount;
+
+                                    if (IsSolid(Block))
+                                    {
+                                        ++SolidCount;
+                                    }
 
                                     const int32 P =
                                         Priority(Block);
@@ -733,23 +771,128 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
                             }
                         }
 
-                        Input.Blocks[
-                            X +
-                            Y * LODSize +
-                            Z * LODSize * LODSize] =
-                            BestBlock;
+                        /*
+                         * Majority threshold prevents isolated tiny
+                         * distant features from surviving at full strength.
+                         */
+                        const uint8 CoarseBlock =
+                            SolidCount * 2 >= TotalCount
+                                ? (BestBlock == uint8(EVoxelBlock::Water)
+                                    ? uint8(EVoxelBlock::Stone)
+                                    : BestBlock)
+                                : uint8(EVoxelBlock::Air);
+
+                        SmoothInput.Blocks[
+                            (X + 1) +
+                            (Y + 1) * (LODSize + 2) +
+                            (Z + 1) * (LODSize + 2) * (LODSize + 2)] =
+                            CoarseBlock;
                     }
                 }
             }
 
-            /*
-             * Упрощённые LOD-чанки не строят collision.
-             */
             FVoxelMeshBuildOutput Output;
 
-            FVoxelMesher::Build(
-                Input,
+            FVoxelMarchingCubesMesher::Build(
+                SmoothInput,
                 Output);
+
+            /*
+             * Вода остаётся отдельной дешёвой cubic surface.
+             * Для неё используем тот же coarse sampling, но только
+             * water cells, чтобы не дублировать solid terrain.
+             */
+            FVoxelMeshBuildInput WaterInput;
+            WaterInput.Size = LODSize;
+            WaterInput.VoxelSize = EffectiveVoxelSize;
+            WaterInput.WorldOrigin =
+                FVector::ZeroVector;
+            WaterInput.Neighbors.Init(LODSize);
+            WaterInput.Blocks.SetNumZeroed(
+                LODSize * LODSize * LODSize);
+
+            const int32 LODSide = LODSize + 2;
+
+            auto IsWaterAtSource =
+                [&SourceSmoothInput, SourceSide, &SourceIndex](int32 SX, int32 SY, int32 SZ)
+                {
+                    const int32 CX =
+                        FMath::Clamp(SX, -1, SourceSize);
+                    const int32 CY =
+                        FMath::Clamp(SY, -1, SourceSize);
+                    const int32 CZ =
+                        FMath::Clamp(SZ, -1, SourceSize);
+
+                    return SourceSmoothInput.Blocks[
+                        SourceIndex(CX, CY, CZ)] ==
+                        uint8(EVoxelBlock::Water);
+                };
+
+            for (int32 Z = 0; Z < LODSize; ++Z)
+            {
+                for (int32 Y = 0; Y < LODSize; ++Y)
+                {
+                    for (int32 X = 0; X < LODSize; ++X)
+                    {
+                        bool bFoundWater = false;
+
+                        const int32 BaseX =
+                            X * DownsampleFactor;
+                        const int32 BaseY =
+                            Y * DownsampleFactor;
+                        const int32 BaseZ =
+                            Z * DownsampleFactor;
+
+                        for (int32 OZ = 0; OZ < DownsampleFactor && !bFoundWater; ++OZ)
+                        {
+                            for (int32 OY = 0; OY < DownsampleFactor && !bFoundWater; ++OY)
+                            {
+                                for (int32 OX = 0; OX < DownsampleFactor; ++OX)
+                                {
+                                    if (IsWaterAtSource(
+                                            BaseX + OX,
+                                            BaseY + OY,
+                                            BaseZ + OZ))
+                                    {
+                                        bFoundWater = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (bFoundWater)
+                        {
+                            WaterInput.Blocks[
+                                X +
+                                Y * LODSize +
+                                Z * LODSize * LODSize] =
+                                uint8(EVoxelBlock::Water);
+                        }
+                    }
+                }
+            }
+
+            FVoxelMeshBuildOutput WaterOutput;
+
+            FVoxelMesher::Build(
+                WaterInput,
+                WaterOutput);
+
+            Output.WaterVertices =
+                MoveTemp(WaterOutput.WaterVertices);
+
+            Output.WaterTriangles =
+                MoveTemp(WaterOutput.WaterTriangles);
+
+            Output.WaterNormals =
+                MoveTemp(WaterOutput.WaterNormals);
+
+            Output.WaterUV0 =
+                MoveTemp(WaterOutput.WaterUV0);
+
+            Output.WaterVertexColors =
+                MoveTemp(WaterOutput.WaterVertexColors);
 
             AsyncTask(
                 ENamedThreads::GameThread,
@@ -772,6 +915,8 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
                 });
         });
 }
+
+
 
 
 void AVoxelChunk::ApplyMesh(
