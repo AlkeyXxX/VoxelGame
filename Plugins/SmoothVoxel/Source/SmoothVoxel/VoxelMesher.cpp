@@ -198,34 +198,6 @@ uint8 FVoxelMesher::GetCubicNeighborBlock(
 }
 
 
-bool FVoxelMesher::IsWaterShoreSideVisible(
-    const FVoxelMeshBuildInput& Input,
-    int32 X,
-    int32 Y,
-    int32 Z,
-    int32 OffsetX,
-    int32 OffsetY)
-{
-    const uint8 NeighborBlock =
-        GetCubicNeighborBlock(
-            Input,
-            X + OffsetX,
-            Y + OffsetY,
-            Z,
-            true);
-
-    /*
-     * Для воды боковая поверхность должна существовать
-     * и рядом с твёрдым берегом.
-     *
-     * Гладкая MC-поверхность берега сама закроет ту часть
-     * водной грани, которая находится внутри грунта через depth test.
-     * Оставшаяся верхняя часть закроет треугольные клинья
-     * между водой и съезжающим на один блок берегом.
-     */
-    return NeighborBlock != uint8(EVoxelBlock::Water);
-}
-
 uint8 FVoxelMesher::GetBlock(
     const FVoxelMeshBuildInput& Input,
     int32 X,
@@ -477,6 +449,70 @@ void FVoxelMesher::AddFace(
 }
 
 
+void FVoxelMesher::AddWaterSurfaceQuad(
+    FVoxelMeshBuildOutput& Output,
+    const FVector& A,
+    const FVector& B,
+    const FVector& C,
+    const FVector& D,
+    const FLinearColor& Color,
+    const FVector& WorldOrigin,
+    float VoxelSize)
+{
+    const int32 StartIndex =
+        Output.WaterVertices.Num();
+
+    Output.WaterVertices.Add(A);
+    Output.WaterVertices.Add(B);
+    Output.WaterVertices.Add(C);
+    Output.WaterVertices.Add(D);
+
+    const FVector Normal(0.0f, 0.0f, 1.0f);
+
+    Output.WaterNormals.Add(Normal);
+    Output.WaterNormals.Add(Normal);
+    Output.WaterNormals.Add(Normal);
+    Output.WaterNormals.Add(Normal);
+
+    const float SafeVoxelSize =
+        FMath::Max(VoxelSize, 1.0f);
+
+    const FVector WorldA = WorldOrigin + A;
+    const FVector WorldB = WorldOrigin + B;
+    const FVector WorldC = WorldOrigin + C;
+    const FVector WorldD = WorldOrigin + D;
+
+    Output.WaterUV0.Add(FVector2D(
+        WorldA.X / SafeVoxelSize,
+        WorldA.Y / SafeVoxelSize));
+
+    Output.WaterUV0.Add(FVector2D(
+        WorldB.X / SafeVoxelSize,
+        WorldB.Y / SafeVoxelSize));
+
+    Output.WaterUV0.Add(FVector2D(
+        WorldC.X / SafeVoxelSize,
+        WorldC.Y / SafeVoxelSize));
+
+    Output.WaterUV0.Add(FVector2D(
+        WorldD.X / SafeVoxelSize,
+        WorldD.Y / SafeVoxelSize));
+
+    Output.WaterVertexColors.Add(Color);
+    Output.WaterVertexColors.Add(Color);
+    Output.WaterVertexColors.Add(Color);
+    Output.WaterVertexColors.Add(Color);
+
+    Output.WaterTriangles.Add(StartIndex + 0);
+    Output.WaterTriangles.Add(StartIndex + 2);
+    Output.WaterTriangles.Add(StartIndex + 1);
+
+    Output.WaterTriangles.Add(StartIndex + 0);
+    Output.WaterTriangles.Add(StartIndex + 3);
+    Output.WaterTriangles.Add(StartIndex + 2);
+}
+
+
 void FVoxelMesher::Build(
     const FVoxelMeshBuildInput& Input,
     FVoxelMeshBuildOutput& Output)
@@ -625,21 +661,12 @@ void FVoxelMesher::Build(
                 /*
                  * X-
                  */
-                if (
-                    bWater
-                        ? IsWaterShoreSideVisible(
-                            Input,
-                            X,
-                            Y,
-                            Z,
-                            -1,
-                            0)
-                        : IsFaceVisible(
-                            Block,
-                            GetCubicNeighborBlock(
-                                Input,
-                                X - 1, Y, Z,
-                                bWater)))
+                if (IsFaceVisible(
+                    Block,
+                    GetCubicNeighborBlock(
+                        Input,
+                        X - 1, Y, Z,
+                        bWater)))
                 {
                     AddFace(
                         Output,
@@ -661,21 +688,12 @@ void FVoxelMesher::Build(
                 /*
                  * X+
                  */
-                if (
-                    bWater
-                        ? IsWaterShoreSideVisible(
-                            Input,
-                            X,
-                            Y,
-                            Z,
-                            1,
-                            0)
-                        : IsFaceVisible(
-                            Block,
-                            GetCubicNeighborBlock(
-                                Input,
-                                X + 1, Y, Z,
-                                bWater)))
+                if (IsFaceVisible(
+                    Block,
+                    GetCubicNeighborBlock(
+                        Input,
+                        X + 1, Y, Z,
+                        bWater)))
                 {
                     AddFace(
                         Output,
@@ -697,21 +715,12 @@ void FVoxelMesher::Build(
                 /*
                  * Y-
                  */
-                if (
-                    bWater
-                        ? IsWaterShoreSideVisible(
-                            Input,
-                            X,
-                            Y,
-                            Z,
-                            0,
-                            -1)
-                        : IsFaceVisible(
-                            Block,
-                            GetCubicNeighborBlock(
-                                Input,
-                                X, Y - 1, Z,
-                                bWater)))
+                if (IsFaceVisible(
+                    Block,
+                    GetCubicNeighborBlock(
+                        Input,
+                        X, Y - 1, Z,
+                        bWater)))
                 {
                     AddFace(
                         Output,
@@ -733,21 +742,12 @@ void FVoxelMesher::Build(
                 /*
                  * Y+
                  */
-                if (
-                    bWater
-                        ? IsWaterShoreSideVisible(
-                            Input,
-                            X,
-                            Y,
-                            Z,
-                            0,
-                            1)
-                        : IsFaceVisible(
-                            Block,
-                            GetCubicNeighborBlock(
-                                Input,
-                                X, Y + 1, Z,
-                                bWater)))
+                if (IsFaceVisible(
+                    Block,
+                    GetCubicNeighborBlock(
+                        Input,
+                        X, Y + 1, Z,
+                        bWater)))
                 {
                     AddFace(
                         Output,
@@ -795,31 +795,192 @@ void FVoxelMesher::Build(
 
                 /*
                  * Z+
+                 *
+                 * Верхняя поверхность воды строится отдельным
+                 * непрерывным проходом ниже Build().
                  */
-                if (IsFaceVisible(
-                    Block,
-                    GetCubicNeighborBlock(
-                        Input,
-                        X, Y, Z + 1,
-                        bWater)))
+                if (!bWater &&
+                    IsFaceVisible(
+                        Block,
+                        GetCubicNeighborBlock(
+                            Input,
+                            X, Y, Z + 1,
+                            false)))
                 {
                     AddFace(
                         Output,
                         Origin,
 
-                        FVector(0, 0, WaterTop),
-                        FVector(S, 0, WaterTop),
-                        FVector(S, S, WaterTop),
-                        FVector(0, S, WaterTop),
+                        FVector(0, 0, S),
+                        FVector(S, 0, S),
+                        FVector(S, S, S),
+                        FVector(0, S, S),
 
                         FVector(0, 0, 1),
                         BlockColor,
-                        bWater,
+                        false,
                         Input.WorldOrigin,
                         VoxelSize);
                 }
             }
         }
     }
+    /*
+     * Separate Water Surface Mask.
+     *
+     * One entry per X/Y column. The value is the highest water
+     * block whose upper side is open to air. That gives us one
+     * continuous horizontal water surface per water body.
+     */
+    TArray<int32> WaterSurfaceMask;
+    WaterSurfaceMask.SetNumUninitialized(Size * Size);
+
+    for (int32 Y = 0; Y < Size; ++Y)
+    {
+        for (int32 X = 0; X < Size; ++X)
+        {
+            int32 TopWaterZ = -1;
+
+            for (int32 Z = Size - 1; Z >= 0; --Z)
+            {
+                const uint8 Block =
+                    Input.Blocks[
+                        BlockIndex(X, Y, Z, Size)];
+
+                if (Block != uint8(EVoxelBlock::Water))
+                {
+                    continue;
+                }
+
+                const uint8 Above =
+                    GetCubicNeighborBlock(
+                        Input,
+                        X,
+                        Y,
+                        Z + 1,
+                        true);
+
+                if (Above ==
+                    uint8(EVoxelBlock::Air))
+                {
+                    TopWaterZ = Z;
+                    break;
+                }
+            }
+
+            WaterSurfaceMask[
+                X + Y * Size] = TopWaterZ;
+        }
+    }
+
+    /*
+     * Build the actual water surface from the mask.
+     *
+     * Shore extension goes underneath adjacent MC terrain.
+     * The terrain mesh remains in front of this area in the
+     * depth buffer, while the extension closes the triangular
+     * geometric gaps at one-block shoreline steps.
+     */
+    const float WaterSurfaceZOffset =
+        VoxelSize * (1.0f - WaterSurfaceInsetFraction);
+
+    const float ShoreExtension =
+        VoxelSize * 0.35f;
+
+    const FLinearColor WaterSurfaceColor(
+        0.05f,
+        0.35f,
+        0.85f,
+        1.0f);
+
+    for (int32 Y = 0; Y < Size; ++Y)
+    {
+        for (int32 X = 0; X < Size; ++X)
+        {
+            const int32 TopWaterZ =
+                WaterSurfaceMask[
+                    X + Y * Size];
+
+            if (TopWaterZ < 0)
+            {
+                continue;
+            }
+
+            const auto IsSolidShore =
+                [&](int32 NX, int32 NY)
+                {
+                    const uint8 SameLevel =
+                        GetCubicNeighborBlock(
+                            Input,
+                            NX,
+                            NY,
+                            TopWaterZ,
+                            true);
+
+                    if (IsVoxelSolid(SameLevel))
+                    {
+                        return true;
+                    }
+
+                    const uint8 OneLevelAbove =
+                        GetCubicNeighborBlock(
+                            Input,
+                            NX,
+                            NY,
+                            TopWaterZ + 1,
+                            true);
+
+                    return IsVoxelSolid(
+                        OneLevelAbove);
+                };
+
+            const float LocalX0 =
+                IsSolidShore(X - 1, Y)
+                    ? -ShoreExtension
+                    : 0.0f;
+
+            const float LocalX1 =
+                IsSolidShore(X + 1, Y)
+                    ? VoxelSize + ShoreExtension
+                    : VoxelSize;
+
+            const float LocalY0 =
+                IsSolidShore(X, Y - 1)
+                    ? -ShoreExtension
+                    : 0.0f;
+
+            const float LocalY1 =
+                IsSolidShore(X, Y + 1)
+                    ? VoxelSize + ShoreExtension
+                    : VoxelSize;
+
+            const float SurfaceZ =
+                TopWaterZ * VoxelSize +
+                WaterSurfaceZOffset;
+
+            AddWaterSurfaceQuad(
+                Output,
+                FVector(
+                    X * VoxelSize + LocalX0,
+                    Y * VoxelSize + LocalY0,
+                    SurfaceZ),
+                FVector(
+                    X * VoxelSize + LocalX1,
+                    Y * VoxelSize + LocalY0,
+                    SurfaceZ),
+                FVector(
+                    X * VoxelSize + LocalX1,
+                    Y * VoxelSize + LocalY1,
+                    SurfaceZ),
+                FVector(
+                    X * VoxelSize + LocalX0,
+                    Y * VoxelSize + LocalY1,
+                    SurfaceZ),
+                WaterSurfaceColor,
+                Input.WorldOrigin,
+                VoxelSize);
+        }
+    }
+
 }
 
