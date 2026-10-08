@@ -495,7 +495,7 @@ void AVoxelWorld::UpdateChunkStreaming()
     const int32 EffectiveUnloadRadius =
         FMath::Max(
             UnloadRadius,
-            StreamingRadius + 1);
+            StreamingRadius);
 
     TArray<FIntVector> ChunksToUnload;
 
@@ -2450,13 +2450,13 @@ void AVoxelWorld::UpdateFarLOD(
     ScheduleLOD(
         FarLOD1Mesh,
         2,
-        StreamingRadius,
+        StreamingRadius + 1,
         LOD1Radius);
 
     ScheduleLOD(
         FarLOD2Mesh,
         4,
-        LOD1Radius,
+        LOD1Radius + 1,
         LOD2Radius);
 }
 
