@@ -2212,6 +2212,75 @@ void AVoxelWorld::ClearFarLOD()
 }
 
 
+
+void AVoxelWorld::ClearFarLOD()
+{
+    ++FarLODGenerationVersion;
+
+    if (FarLOD1Mesh)
+    {
+        FarLOD1Mesh->DestroyComponent();
+        FarLOD1Mesh = nullptr;
+    }
+
+    if (FarLOD2Mesh)
+    {
+        FarLOD2Mesh->DestroyComponent();
+        FarLOD2Mesh = nullptr;
+    }
+
+    bFarLODInitialized = false;
+    LastFarLODCenter = FIntVector::ZeroValue;
+}
+
+
+namespace
+{
+    UProceduralMeshComponent* CreateFarLODMeshComponent(
+        AVoxelWorld* Owner,
+        const TCHAR* Name,
+        UMaterialInterface* Material,
+        UMaterialInterface* WaterMaterial)
+    {
+        if (!Owner)
+        {
+            return nullptr;
+        }
+
+        UProceduralMeshComponent* Mesh =
+            NewObject<UProceduralMeshComponent>(
+                Owner,
+                Name);
+
+        if (!Mesh)
+        {
+            return nullptr;
+        }
+
+        Mesh->SetMobility(
+            EComponentMobility::Static);
+
+        Mesh->SetCollisionEnabled(
+            ECollisionEnabled::NoCollision);
+
+        Mesh->SetGenerateOverlapEvents(
+            false);
+
+        Mesh->SetMaterial(
+            0,
+            Material);
+
+        Mesh->SetMaterial(
+            1,
+            WaterMaterial);
+
+        Mesh->RegisterComponent();
+
+        return Mesh;
+    }
+}
+
+
 void AVoxelWorld::UpdateFarLOD(
     const FIntVector& CenterChunk)
 {
@@ -2220,234 +2289,66 @@ void AVoxelWorld::UpdateFarLOD(
     const uint32 LocalGeneration =
         FarLODGenerationVersion;
 
-    const int32 TileChunkSize =
-        FMath::Clamp(
-            LODTileChunkSize,
-            2,
-            8);
-
-    const int32 TileCountX =
-        FMath::DivideAndRoundUp(
-            WorldSizeX,
-            TileChunkSize);
-
-    const int32 TileCountY =
-        FMath::DivideAndRoundUp(
-            WorldSizeY,
-            TileChunkSize);
-
-    TSet<FIntVector> DesiredTiles;
-
-    for (int32 TileY = 0; TileY < TileCountY; ++TileY)
+    if (!FarLOD1Mesh)
     {
-        for (int32 TileX = 0; TileX < TileCountX; ++TileX)
+        FarLOD1Mesh =
+            CreateFarLODMeshComponent(
+                this,
+                TEXT("FarLOD1"),
+                Material,
+                WaterMaterial);
+    }
+
+    if (!FarLOD2Mesh)
+    {
+        FarLOD2Mesh =
+            CreateFarLODMeshComponent(
+                this,
+                TEXT("FarLOD2"),
+                Material,
+                WaterMaterial);
+    }
+
+    if (!FarLOD1Mesh || !FarLOD2Mesh)
+    {
+        return;
+    }
+
+    /*
+     * The actual worker jobs are scheduled separately below so each
+     * lambda carries the corresponding mesh/version safely.
+     */
+    auto Schedule =
+        [
+            this,
+            WeakWorld,
+            LocalGeneration
+        ](
+            UProceduralMeshComponent* Mesh,
+            int32 SampleStep,
+            int32 InnerRadius,
+            int32 OuterRadius)
         {
-            const int32 MinX =
-                TileX * TileChunkSize;
-
-            const int32 MaxX =
-                FMath::Min(
-                    WorldSizeX - 1,
-                    MinX + TileChunkSize - 1);
-
-            const int32 MinY =
-                TileY * TileChunkSize;
-
-            const int32 MaxY =
-                FMath::Min(
-                    WorldSizeY - 1,
-                    MinY + TileChunkSize - 1);
-
-            auto DistanceToRange =
-                [](int32 Value, int32 MinValue, int32 MaxValue)
-                {
-                    if (Value < MinValue)
-                    {
-                        return MinValue - Value;
-                    }
-
-                    if (Value > MaxValue)
-                    {
-                        return Value - MaxValue;
-                    }
-
-                    return 0;
-                };
-
-            const int32 MinDX =
-                DistanceToRange(
-                    CenterChunk.X,
-                    MinX,
-                    MaxX);
-
-            const int32 MinDY =
-                DistanceToRange(
-                    CenterChunk.Y,
-                    MinY,
-                    MaxY);
-
-            const int32 MinDistance =
-                FMath::Max(MinDX, MinDY);
-
-            const int32 MaxDX =
-                FMath::Max(
-                    FMath::Abs(
-                        MinX - CenterChunk.X),
-                    FMath::Abs(
-                        MaxX - CenterChunk.X));
-
-            const int32 MaxDY =
-                FMath::Max(
-                    FMath::Abs(
-                        MinY - CenterChunk.Y),
-                    FMath::Abs(
-                        MaxY - CenterChunk.Y));
-
-            const int32 MaxDistance =
-                FMath::Max(MaxDX, MaxDY);
-
-            int32 LODLevel = 0;
-
-            /*
-             * Pick the LOD whose ring actually intersects this tile.
-             * LOD1 gets priority on the shared 4-8 boundary.
-             */
-            const bool bIntersectsLOD1 =
-                MaxDistance > StreamingRadius &&
-                MinDistance <= LOD1Radius;
-
-            const bool bIntersectsLOD2 =
-                MaxDistance > LOD1Radius &&
-                MinDistance <= LOD2Radius;
-
-            if (bIntersectsLOD1)
-            {
-                LODLevel = 1;
-            }
-            else if (bIntersectsLOD2)
-            {
-                LODLevel = 2;
-            }
-
-            if (LODLevel == 0)
-            {
-                continue;
-            }
-
-            const FIntVector TileCoord(
-                TileX,
-                TileY,
-                0);
-
-            DesiredTiles.Add(TileCoord);
-
-            UProceduralMeshComponent* Mesh =
-                FarLODTiles.FindRef(TileCoord);
-
             if (!Mesh)
             {
-                Mesh =
-                    NewObject<UProceduralMeshComponent>(
-                        this,
-                        *FString::Printf(
-                            TEXT("FarLODTile_%d_%d"),
-                            TileX,
-                            TileY));
-
-                if (!Mesh)
-                {
-                    continue;
-                }
-
-                Mesh->SetMobility(
-                    EComponentMobility::Static);
-
-                Mesh->bUseAsyncCooking = false;
-
-                Mesh->SetCollisionEnabled(
-                    ECollisionEnabled::NoCollision);
-
-                Mesh->SetGenerateOverlapEvents(false);
-
-                Mesh->RegisterComponent();
-
-                Mesh->SetMaterial(
-                    0,
-                    Material);
-
-                Mesh->SetMaterial(
-                    1,
-                    WaterMaterial);
-
-                FarLODTiles.Add(
-                    TileCoord,
-                    Mesh);
+                return;
             }
 
-            Mesh->SetMaterial(
-                0,
-                Material);
-
-            Mesh->SetMaterial(
-                1,
-                WaterMaterial);
-
-            const FVoxelWorldGenerator GeneratorCopy =
-                WorldGenerator;
-
             FVoxelTerrainLODBuildInput BuildInput;
-            BuildInput.Generator =
-                GeneratorCopy;
-            BuildInput.WorldSizeX =
-                WorldSizeX;
-            BuildInput.WorldSizeY =
-                WorldSizeY;
-            BuildInput.ChunkSize =
-                ChunkSize;
-            BuildInput.VoxelSize =
-                VoxelSize;
-            BuildInput.BeachWidth =
-                BeachWidth;
-            BuildInput.SeaLevel =
-                SeaLevel;
-            BuildInput.CenterChunk =
-                CenterChunk;
-            BuildInput.TileCoord =
-                TileCoord;
-            BuildInput.TileChunkSize =
-                TileChunkSize;
 
-            const bool bUseLOD1 =
-                LODLevel == 1;
-
-            BuildInput.SampleStep =
-                bUseLOD1 ? 2 : 4;
-
-            BuildInput.InnerRadiusChunks =
-                bUseLOD1
-                    ? StreamingRadius
-                    : LOD1Radius;
-
-            BuildInput.OuterRadiusChunks =
-                bUseLOD1
-                    ? LOD1Radius
-                    : LOD2Radius;
-
-            const int32 TileBlocks =
-                TileChunkSize * ChunkSize;
-
-            const FVector MeshLocation =
-                GetActorLocation() +
-                FVector(
-                    TileCoord.X * TileBlocks * VoxelSize,
-                    TileCoord.Y * TileBlocks * VoxelSize,
-                    0.0f);
-
-            Mesh->SetWorldLocation(
-                MeshLocation);
+            BuildInput.Generator = WorldGenerator;
+            BuildInput.WorldSizeX = WorldSizeX;
+            BuildInput.WorldSizeY = WorldSizeY;
+            BuildInput.ChunkSize = ChunkSize;
+            BuildInput.VoxelSize = VoxelSize;
+            BuildInput.BeachWidth = BeachWidth;
+            BuildInput.SeaLevel = SeaLevel;
+            BuildInput.CenterChunk = CenterChunk;
+            BuildInput.SampleStep = SampleStep;
+            BuildInput.InnerRadiusChunks = InnerRadius;
+            BuildInput.OuterRadiusChunks = OuterRadius;
 
             TWeakObjectPtr<UProceduralMeshComponent> WeakMesh(Mesh);
-            TWeakObjectPtr<AVoxelWorld> WeakWorld(this);
 
             Async(
                 EAsyncExecution::ThreadPool,
@@ -2473,10 +2374,10 @@ void AVoxelWorld::UpdateFarLOD(
                             LocalGeneration
                         ]() mutable
                         {
-                            if (!WeakMesh.IsValid() ||
-                                !WeakWorld.IsValid() ||
+                            if (!WeakWorld.IsValid() ||
                                 WeakWorld->FarLODGenerationVersion !=
-                                    LocalGeneration)
+                                    LocalGeneration ||
+                                !WeakMesh.IsValid())
                             {
                                 return;
                             }
@@ -2527,33 +2428,17 @@ void AVoxelWorld::UpdateFarLOD(
                             }
                         });
                 });
-        }
-    }
+        };
 
-    TArray<FIntVector> TilesToRemove;
+    Schedule(
+        FarLOD1Mesh,
+        2,
+        StreamingRadius,
+        LOD1Radius);
 
-    for (const TPair<FIntVector, UProceduralMeshComponent*>& Pair :
-        FarLODTiles)
-    {
-        if (!DesiredTiles.Contains(Pair.Key))
-        {
-            TilesToRemove.Add(
-                Pair.Key);
-        }
-    }
-
-    for (const FIntVector& TileCoord :
-        TilesToRemove)
-    {
-        if (UProceduralMeshComponent** MeshPtr =
-                FarLODTiles.Find(TileCoord))
-        {
-            if (*MeshPtr)
-            {
-                (*MeshPtr)->DestroyComponent();
-            }
-        }
-
-        FarLODTiles.Remove(TileCoord);
-    }
+    Schedule(
+        FarLOD2Mesh,
+        4,
+        LOD1Radius,
+        LOD2Radius);
 }
