@@ -4,7 +4,7 @@
 
 #include "VoxelWorld.h"
 
-#include "Engine/PlayerStart.h"
+#include "GameFramework/PlayerStart.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 
