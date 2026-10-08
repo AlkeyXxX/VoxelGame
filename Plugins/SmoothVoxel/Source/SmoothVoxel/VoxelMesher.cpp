@@ -634,6 +634,24 @@ void FVoxelMesher::Build(
                             1.0f);
                     break;
 
+                case EVoxelBlock::Sandstone:
+                    BlockColor =
+                        FLinearColor(
+                            0.72f,
+                            0.38f,
+                            0.22f,
+                            1.0f);
+                    break;
+
+                case EVoxelBlock::Snow:
+                    BlockColor =
+                        FLinearColor(
+                            0.94f,
+                            0.97f,
+                            1.0f,
+                            1.0f);
+                    break;
+
                 case EVoxelBlock::Wood:
                     BlockColor =
                         FLinearColor(
