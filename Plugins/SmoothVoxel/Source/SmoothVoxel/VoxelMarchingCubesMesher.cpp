@@ -181,6 +181,25 @@ namespace
         return Gradient;
     }
 
+    int32 GetSurfaceMaterialPriority(uint8 Block)
+    {
+        switch (static_cast<EVoxelBlock>(Block))
+        {
+        case EVoxelBlock::Grass:
+            return 5;
+        case EVoxelBlock::Sand:
+            return 4;
+        case EVoxelBlock::Dirt:
+            return 3;
+        case EVoxelBlock::Stone:
+            return 2;
+        case EVoxelBlock::Wood:
+            return 1;
+        default:
+            return 0;
+        }
+    }
+
     FVector EdgePosition(
         int32 Edge,
         int32 X,
@@ -350,7 +369,11 @@ uint8 FVoxelMarchingCubesMesher::GetRepresentativeBlock(
                     continue;
                 }
 
-                if (!bFound || SampleZ > BestZ)
+                if (!bFound ||
+                    SampleZ > BestZ ||
+                    (SampleZ == BestZ &&
+                     GetSurfaceMaterialPriority(Block) >
+                         GetSurfaceMaterialPriority(BestBlock)))
                 {
                     bFound = true;
                     BestZ = SampleZ;
@@ -662,8 +685,8 @@ void FVoxelMarchingCubesMesher::Build(
                         const uint8 RepresentativeBlock =
                             GetRepresentativeBlock(
                                 Input,
-                                X,
-                                Y,
+                                FMath::FloorToInt(Position.X),
+                                FMath::FloorToInt(Position.Y),
                                 MaterialBlockZ);
 
                         Output.UV0.Add(
