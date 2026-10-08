@@ -13,7 +13,11 @@ namespace
 
         if (bWater)
         {
-            return NeighborBlock != uint8(EVoxelBlock::Water);
+            /*
+             * Water only renders faces toward open air.
+             * Faces against solid terrain/structures are internal surfaces.
+             */
+            return NeighborBlock == uint8(EVoxelBlock::Air);
         }
 
         return !IsVoxelSolid(NeighborBlock);
