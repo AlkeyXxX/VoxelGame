@@ -854,41 +854,42 @@ void AVoxelWorld::GenerateChunkBlocks(
     const FIntVector ChunkCoord =
         Chunk->GetChunkCoord();
 
-
-    for (int32 Z = 0; Z < ChunkSize; ++Z)
+    /*
+     * Height, biome and landform depend only on global X/Y.
+     * Calculate them once per column, not once for every Z block.
+     * This cuts repeated Perlin calls during chunk creation by roughly
+     * ChunkSize times without changing generated block results.
+     */
+    for (int32 Y = 0; Y < ChunkSize; ++Y)
     {
-        for (int32 Y = 0; Y < ChunkSize; ++Y)
+        for (int32 X = 0; X < ChunkSize; ++X)
         {
-            for (int32 X = 0; X < ChunkSize; ++X)
+            const int32 WorldX =
+                ChunkCoord.X * ChunkSize + X;
+
+            const int32 WorldY =
+                ChunkCoord.Y * ChunkSize + Y;
+
+            const int32 Height =
+                WorldGenerator.GetSurfaceHeight(
+                    WorldX,
+                    WorldY);
+
+            const EVoxelBiome Biome =
+                WorldGenerator.GetBiome(
+                    WorldX,
+                    WorldY,
+                    Height);
+
+            const EVoxelLandform Landform =
+                WorldGenerator.GetLandform(
+                    WorldX,
+                    WorldY);
+
+            for (int32 Z = 0; Z < ChunkSize; ++Z)
             {
-                /*
-                 * Глобальная координата блока.
-                 */
-                const int32 WorldX =
-                    ChunkCoord.X * ChunkSize + X;
-
-                const int32 WorldY =
-                    ChunkCoord.Y * ChunkSize + Y;
-
                 const int32 WorldZ =
                     ChunkCoord.Z * ChunkSize + Z;
-
-
-                const int32 Height =
-                    WorldGenerator.GetSurfaceHeight(
-                        WorldX,
-                        WorldY);
-
-                const EVoxelBiome Biome =
-                    WorldGenerator.GetBiome(
-                        WorldX,
-                        WorldY,
-                        Height);
-
-                const EVoxelLandform Landform =
-                    WorldGenerator.GetLandform(
-                        WorldX,
-                        WorldY);
 
                 uint8 Block =
                     uint8(EVoxelBlock::Air);
@@ -925,16 +926,10 @@ void AVoxelWorld::GenerateChunkBlocks(
                     }
                     else if (Landform == EVoxelLandform::Mountains)
                     {
-                        if (Biome == EVoxelBiome::Desert)
-                        {
-                            Block =
-                                uint8(EVoxelBlock::Sandstone);
-                        }
-                        else
-                        {
-                            Block =
-                                uint8(EVoxelBlock::Stone);
-                        }
+                        Block =
+                            Biome == EVoxelBiome::Desert
+                                ? uint8(EVoxelBlock::Sandstone)
+                                : uint8(EVoxelBlock::Stone);
                     }
                     else if (Biome == EVoxelBiome::Desert)
                     {
@@ -977,7 +972,6 @@ void AVoxelWorld::GenerateChunkBlocks(
                         uint8(EVoxelBlock::Stone);
                 }
 
-
                 Chunk->SetBiome(
                     X,
                     Y,
@@ -986,11 +980,6 @@ void AVoxelWorld::GenerateChunkBlocks(
                         ? 4
                         : uint8(Biome));
 
-                /*
-                 * Сначала строим обычный процедурный блок.
-                 * Затем накладываем изменение игрока, если
-                 * этот локальный блок уже был изменён ранее.
-                 */
                 const int32 LocalIndex =
                     X +
                     Y * ChunkSize +
@@ -1030,7 +1019,6 @@ void AVoxelWorld::GenerateChunkBlocks(
         }
     }
 }
-
 
 void AVoxelWorld::SaveWorld()
 {
