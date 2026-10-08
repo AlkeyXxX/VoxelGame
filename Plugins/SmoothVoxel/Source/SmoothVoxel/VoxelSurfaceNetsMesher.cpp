@@ -204,17 +204,6 @@ namespace
             return;
         }
 
-        FVector Outward =
-            -ComputeTrilinearGradient(
-                Densities,
-                Size,
-                FaceCenter);
-
-        if (!Outward.Normalize())
-        {
-            return;
-        }
-
         const FVector P0 =
             Output.Vertices[Indices[0]];
 
@@ -229,9 +218,32 @@ namespace
                 P1 - P0,
                 P2 - P0);
 
+        /*
+         * Degenerate triangles really cannot render. In that case
+         * there is no valid polygon to emit, so skipping this face is
+         * correct. A zero density gradient, however, is NOT a reason
+         * to delete a valid face.
+         */
         if (!FaceNormal.Normalize())
         {
             return;
+        }
+
+        FVector Outward =
+            -ComputeTrilinearGradient(
+                Densities,
+                Size,
+                FaceCenter);
+
+        /*
+         * Flat binary density regions can have a zero gradient at the
+         * averaged face center. Fall back to the geometric face normal
+         * instead of dropping the polygon; this prevents edit-induced
+         * holes that disappear after a neighbouring voxel is changed.
+         */
+        if (!Outward.Normalize())
+        {
+            Outward = FaceNormal;
         }
 
         /*
