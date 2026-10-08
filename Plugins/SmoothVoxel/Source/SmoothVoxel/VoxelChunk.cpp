@@ -474,9 +474,6 @@ void AVoxelChunk::RebuildMesh()
     const uint32 LocalVersion =
         MeshGenerationVersion;
 
-    bLOD = false;
-    CurrentLODLevel = 0;
-
     FVoxelMeshBuildInput CubicInput;
 
     CubicInput.Size = ChunkSize;
@@ -723,25 +720,3 @@ void AVoxelChunk::CopyZPlusStructure(TArray<uint8>& OutData) const
 }
 
 
-void AVoxelChunk::SetLODLevel(int32 LODLevel)
-{
-    LODLevel = FMath::Clamp(LODLevel, 0, 2);
-
-    if (CurrentLODLevel == LODLevel)
-    {
-        return;
-    }
-
-    if (LODLevel == 0)
-    {
-        RebuildMesh();
-    }
-    else if (LODLevel == 1)
-    {
-        RebuildLODMesh(2);
-    }
-    else
-    {
-        RebuildLODMesh(4);
-    }
-}
