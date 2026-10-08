@@ -14,9 +14,11 @@ enum class EVoxelBlock : uint8
     Grass = 1,
     Dirt  = 2,
     Stone = 3,
-    Sand  = 4,
-    Wood  = 5,
-    Water = 6
+    Sand      = 4,
+    Wood      = 5,
+    Water     = 6,
+    Snow      = 7,
+    Sandstone = 8
 };
 
 /*
