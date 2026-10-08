@@ -279,6 +279,42 @@ public:
         Category="Voxel|Terrain")
     float NoiseScale = 0.025f;
 
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain")
+    float DetailNoiseScale = 0.08f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain",
+        meta=(ClampMin="0.0"))
+    float DetailHeightVariation = 2.0f;
+
+    /*
+     * Cave generation controls.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Caves")
+    float CaveNoiseScale = 0.045f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Caves",
+        meta=(ClampMin="0.01", ClampMax="1.0"))
+    float CaveThreshold = 0.24f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Caves",
+        meta=(ClampMin="1", ClampMax="16"))
+    int32 CaveMinDepth = 4;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biome")
     float TemperatureScale = 0.006f;
 
