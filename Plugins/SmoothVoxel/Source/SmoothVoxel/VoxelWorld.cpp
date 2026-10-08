@@ -2059,48 +2059,6 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
 }
 
 
-int32 AVoxelWorld::GetChunkDistance(
-    const FIntVector& A,
-    const FIntVector& B) const
-{
-    const int32 DX = FMath::Abs(A.X - B.X);
-    const int32 DY = FMath::Abs(A.Y - B.Y);
-    const int32 DZ = FMath::Abs(A.Z - B.Z);
-
-    return FMath::Max3(DX, DY, DZ);
-}
-
-
-void AVoxelWorld::UpdateChunkLOD(
-    AVoxelChunk* Chunk,
-    int32 Distance)
-{
-    if (!Chunk)
-    {
-        return;
-    }
-
-    /*
-     * Не перестраиваем mesh, если LOD уже соответствует дистанции.
-     * Состояние хранится внутри AVoxelChunk.
-     */
-    if (Distance <= StreamingRadius)
-    {
-        Chunk->SetLODLevel(0);
-        return;
-    }
-
-    if (Distance <= LOD1Radius)
-    {
-        Chunk->SetLODLevel(1);
-        return;
-    }
-
-    if (Distance <= LOD2Radius)
-    {
-        Chunk->SetLODLevel(2);
-    }
-}
 
 
 void AVoxelWorld::ToggleDebugFly()
@@ -2476,12 +2434,14 @@ void AVoxelWorld::UpdateFarLOD(
                 MeshLocation);
 
             TWeakObjectPtr<UProceduralMeshComponent> WeakMesh(Mesh);
+            TWeakObjectPtr<AVoxelWorld> WeakWorld(this);
 
             Async(
                 EAsyncExecution::ThreadPool,
                 [
                     BuildInput = MoveTemp(BuildInput),
                     WeakMesh,
+                    WeakWorld,
                     LocalGeneration
                 ]() mutable
                 {
@@ -2496,18 +2456,18 @@ void AVoxelWorld::UpdateFarLOD(
                         [
                             Output = MoveTemp(Output),
                             WeakMesh,
+                            WeakWorld,
                             LocalGeneration
                         ]() mutable
                         {
-                            if (!WeakMesh.IsValid())
+                            if (!WeakMesh.IsValid() ||
+                                !WeakWorld.IsValid() ||
+                                WeakWorld->FarLODGenerationVersion !=
+                                    LocalGeneration)
                             {
                                 return;
                             }
 
-                            /*
-                             * A newer player position already scheduled
-                             * another far-LOD build.
-                             */
                             UProceduralMeshComponent* Mesh =
                                 WeakMesh.Get();
 
