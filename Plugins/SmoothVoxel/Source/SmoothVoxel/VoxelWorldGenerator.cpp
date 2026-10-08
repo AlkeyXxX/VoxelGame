@@ -54,6 +54,28 @@ EVoxelLandform FVoxelWorldGenerator::GetLandform(
     int32 WorldX,
     int32 WorldY) const
 {
+    const int32 SafeSizeX = FMath::Max(1, Settings.WorldBlocksX);
+    const int32 SafeSizeY = FMath::Max(1, Settings.WorldBlocksY);
+
+    const float NormalizedX =
+        (static_cast<float>(FMath::Clamp(WorldX, 0, SafeSizeX - 1)) + 0.5f) /
+        static_cast<float>(SafeSizeX);
+
+    const float NormalizedY =
+        (static_cast<float>(FMath::Clamp(WorldY, 0, SafeSizeY - 1)) + 0.5f) /
+        static_cast<float>(SafeSizeY);
+
+    /*
+     * Reserve a small, stable flat starting zone at the center. This is
+     * deliberately tiny compared with the whole map and leaves all three
+     * landforms available throughout the rest of every climate region.
+     */
+    if (FMath::Abs(NormalizedX - 0.5f) <= 0.01f &&
+        FMath::Abs(NormalizedY - 0.5f) <= 0.01f)
+    {
+        return EVoxelLandform::Flatlands;
+    }
+
     const float Noise = GetLandformNoise(WorldX, WorldY);
 
     /*
@@ -313,6 +335,16 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
     const float NormalizedY =
         (static_cast<float>(FMath::Clamp(WorldY, 0, SafeSizeY - 1)) + 0.5f) /
         static_cast<float>(SafeSizeY);
+
+    /*
+     * Ensure the start is always in a green Plains patch. The surrounding
+     * green band still uses the seeded 38/62 Plains/Forest distribution.
+     */
+    if (FMath::Abs(NormalizedX - 0.5f) <= 0.01f &&
+        FMath::Abs(NormalizedY - 0.5f) <= 0.01f)
+    {
+        return EVoxelBiome::Plains;
+    }
 
     const FVector2D BorderSamplePosition(
         NormalizedX * 5.0f + Settings.Seed * 0.037f,
