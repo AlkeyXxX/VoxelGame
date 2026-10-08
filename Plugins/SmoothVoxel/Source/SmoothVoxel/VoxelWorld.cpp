@@ -2241,8 +2241,14 @@ namespace
             return nullptr;
         }
 
+        /*
+         * Far LOD is generated and replaced at runtime.
+         * Keep the same movable lighting path as normal voxel chunks;
+         * Static mobility can make runtime procedural meshes receive
+         * noticeably darker/different lighting.
+         */
         Mesh->SetMobility(
-            EComponentMobility::Static);
+            EComponentMobility::Movable);
 
         Mesh->SetCollisionEnabled(
             ECollisionEnabled::NoCollision);
