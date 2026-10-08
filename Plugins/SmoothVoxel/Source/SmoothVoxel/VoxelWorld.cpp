@@ -135,6 +135,15 @@ void AVoxelWorld::BeginPlay()
     {
         EnableInput(PC);
 
+        /*
+         * AVoxelWorld получает только debug input, но не должен переводить
+         * PlayerController в UI input mode. Явно возвращаем игровой режим
+         * и захват мыши после регистрации debug bindings.
+         */
+        PC->bShowMouseCursor = false;
+        FInputModeGameOnly GameOnlyInput;
+        PC->SetInputMode(GameOnlyInput);
+
         if (InputComponent)
         {
             InputComponent->BindAction(
@@ -2237,6 +2246,10 @@ void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
 
     if (bEnable)
     {
+        PC->bShowMouseCursor = false;
+        FInputModeGameOnly GameOnlyInput;
+        PC->SetInputMode(GameOnlyInput);
+
         Movement->SetMovementMode(MOVE_Flying);
         Movement->MaxFlySpeed = bDebugFlyBoost ? 9000.0f : 3000.0f;
         Movement->MaxAcceleration = 12000.0f;
