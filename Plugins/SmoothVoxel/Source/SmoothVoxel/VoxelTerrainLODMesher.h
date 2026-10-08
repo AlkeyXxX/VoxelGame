@@ -1,0 +1,54 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "VoxelWorldGenerator.h"
+
+struct FVoxelTerrainLODBuildInput
+{
+    FVoxelWorldGenerator Generator;
+
+    int32 WorldSizeX = 0;
+    int32 WorldSizeY = 0;
+    int32 ChunkSize = 32;
+    float VoxelSize = 100.0f;
+
+    int32 BeachWidth = 2;
+    int32 SeaLevel = 10;
+
+    FIntVector CenterChunk = FIntVector::ZeroValue;
+    FIntVector TileCoord = FIntVector::ZeroValue;
+
+    int32 TileChunkSize = 4;
+    int32 SampleStep = 4;
+
+    int32 InnerRadiusChunks = 8;
+    int32 OuterRadiusChunks = 16;
+};
+
+struct FVoxelTerrainLODMeshOutput
+{
+    TArray<FVector> Vertices;
+    TArray<int32> Triangles;
+    TArray<FVector> Normals;
+    TArray<FVector2D> UV0;
+    TArray<FLinearColor> VertexColors;
+
+    TArray<FVector> WaterVertices;
+    TArray<int32> WaterTriangles;
+    TArray<FVector> WaterNormals;
+    TArray<FVector2D> WaterUV0;
+    TArray<FLinearColor> WaterVertexColors;
+
+    bool IsEmpty() const
+    {
+        return Vertices.Num() == 0 && WaterVertices.Num() == 0;
+    }
+};
+
+class FVoxelTerrainLODMesher
+{
+public:
+    static void Build(
+        const FVoxelTerrainLODBuildInput& Input,
+        FVoxelTerrainLODMeshOutput& Output);
+};
