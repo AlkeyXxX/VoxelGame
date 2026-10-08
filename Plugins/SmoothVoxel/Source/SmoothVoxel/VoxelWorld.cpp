@@ -2209,7 +2209,6 @@ void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
         Movement->BrakingDecelerationFlying = 12000.0f;
         Movement->GravityScale = 0.0f;
 
-        Character->JumpCurrentCount = 0;
     }
     else
     {
