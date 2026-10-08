@@ -51,6 +51,13 @@ struct FVoxelMeshBuildInput
 	TArray<uint8> Blocks;
 	TArray<uint8> Biomes;
 
+	/*
+	 * 1 означает, что блок был изменён игроком.
+	 * Непустые modified blocks рендерятся кубическим mesher'ом.
+	 * Для Air этот флаг означает выдолбленное место в smooth terrain.
+	 */
+	TArray<uint8> StructureFlags;
+
 	FVoxelNeighborData Neighbors;
 };
 
