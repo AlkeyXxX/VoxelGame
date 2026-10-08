@@ -62,12 +62,6 @@ public:
         bool bModified);
 
     void ClearModificationFlags();
-    void SetStructureFlag(
-        int32 X,
-        int32 Y,
-        int32 Z,
-        bool bStructure);
-    void ClearStructureFlags();
 
     void SetBlock(
         int32 X,
@@ -116,9 +110,6 @@ public:
         TArray<uint8>& OutData) const;
 
     void CopyModificationFlags(
-        TArray<uint8>& OutData) const;
-
-    void CopyStructureFlags(
         TArray<uint8>& OutData) const;
 
     void SetBiome(
@@ -213,7 +204,6 @@ private:
     TArray<uint8> BaseBlocks;
     TArray<uint8> Biomes;
     TArray<uint8> ModificationFlags;
-    TArray<uint8> StructureFlags;
 
 
     /*
