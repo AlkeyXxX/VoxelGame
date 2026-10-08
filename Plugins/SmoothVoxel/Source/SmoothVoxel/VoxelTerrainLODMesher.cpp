@@ -35,51 +35,67 @@ namespace
         }
     }
 
-    FLinearColor GetWaterColor()
-    {
-        return FLinearColor(
-            0.05f, 0.35f, 0.85f, 1.0f);
-    }
+    const FLinearColor WaterColor(
+        0.05f, 0.35f, 0.85f, 1.0f);
 
-    FORCEINLINE int32 SampleIndex(
+    FORCEINLINE int32 GridIndex(
         int32 X,
         int32 Y,
-        int32 SampleCount)
+        int32 CountX)
     {
-        return X + Y * (SampleCount + 1);
+        return X + Y * CountX;
     }
 
-    bool IsCellInsideBand(
-        int32 WorldX0,
-        int32 WorldX1,
-        int32 WorldY0,
-        int32 WorldY1,
-        const FVoxelTerrainLODBuildInput& Input)
+    FORCEINLINE bool IsCellInRing(
+        float MinChunkX,
+        float MaxChunkX,
+        float MinChunkY,
+        float MaxChunkY,
+        int32 InnerRadius,
+        int32 OuterRadius)
     {
-        const float CellCenterX =
-            (static_cast<float>(WorldX0) +
-             static_cast<float>(WorldX1)) * 0.5f /
-            static_cast<float>(Input.ChunkSize);
+        /*
+         * Use cell extents instead of only the cell centre.
+         * This prevents visible holes at the boundary between
+         * full chunks and coarse terrain.
+         */
+        const float ClosestX =
+            FMath::Clamp(
+                0.0f,
+                MinChunkX,
+                MaxChunkX);
 
-        const float CellCenterY =
-            (static_cast<float>(WorldY0) +
-             static_cast<float>(WorldY1)) * 0.5f /
-            static_cast<float>(Input.ChunkSize);
+        const float ClosestY =
+            FMath::Clamp(
+                0.0f,
+                MinChunkY,
+                MaxChunkY);
 
-        const float Distance =
+        const float FarthestX =
             FMath::Max(
-                FMath::Abs(
-                    CellCenterX -
-                    static_cast<float>(Input.CenterChunk.X)),
-                FMath::Abs(
-                    CellCenterY -
-                    static_cast<float>(Input.CenterChunk.Y)));
+                FMath::Abs(MinChunkX),
+                FMath::Abs(MaxChunkX));
+
+        const float FarthestY =
+            FMath::Max(
+                FMath::Abs(MinChunkY),
+                FMath::Abs(MaxChunkY));
+
+        const float MinDistance =
+            FMath::Max(
+                FMath::Abs(ClosestX),
+                FMath::Abs(ClosestY));
+
+        const float MaxDistance =
+            FMath::Max(
+                FarthestX,
+                FarthestY);
 
         return
-            Distance >
-                static_cast<float>(Input.InnerRadiusChunks) &&
-            Distance <=
-                static_cast<float>(Input.OuterRadiusChunks);
+            MaxDistance >=
+                static_cast<float>(InnerRadius) &&
+            MinDistance <=
+                static_cast<float>(OuterRadius);
     }
 }
 
@@ -92,7 +108,8 @@ void FVoxelTerrainLODMesher::Build(
         Input.ChunkSize <= 0 ||
         Input.VoxelSize <= 0.0f ||
         Input.SampleStep <= 0 ||
-        Input.TileChunkSize <= 0)
+        Input.OuterRadiusChunks <=
+            Input.InnerRadiusChunks)
     {
         return;
     }
@@ -103,84 +120,122 @@ void FVoxelTerrainLODMesher::Build(
     const int32 WorldBlocksY =
         Input.WorldSizeY * Input.ChunkSize;
 
-    const int32 TileBlocks =
-        Input.TileChunkSize * Input.ChunkSize;
+    const int32 MinChunkX =
+        FMath::Max(
+            0,
+            Input.CenterChunk.X -
+            Input.OuterRadiusChunks);
+
+    const int32 MaxChunkX =
+        FMath::Min(
+            Input.WorldSizeX - 1,
+            Input.CenterChunk.X +
+            Input.OuterRadiusChunks);
+
+    const int32 MinChunkY =
+        FMath::Max(
+            0,
+            Input.CenterChunk.Y -
+            Input.OuterRadiusChunks);
+
+    const int32 MaxChunkY =
+        FMath::Min(
+            Input.WorldSizeY - 1,
+            Input.CenterChunk.Y +
+            Input.OuterRadiusChunks);
 
     const int32 StartBlockX =
-        Input.TileCoord.X * TileBlocks;
+        MinChunkX * Input.ChunkSize;
 
     const int32 StartBlockY =
-        Input.TileCoord.Y * TileBlocks;
+        MinChunkY * Input.ChunkSize;
 
-    if (StartBlockX >= WorldBlocksX ||
-        StartBlockY >= WorldBlocksY)
-    {
-        return;
-    }
+    const int32 EndBlockX =
+        FMath::Min(
+            WorldBlocksX,
+            (MaxChunkX + 1) * Input.ChunkSize);
 
-    const int32 SampleCount =
+    const int32 EndBlockY =
+        FMath::Min(
+            WorldBlocksY,
+            (MaxChunkY + 1) * Input.ChunkSize);
+
+    const int32 WidthBlocks =
         FMath::Max(
             1,
-            FMath::DivideAndRoundUp(
-                TileBlocks,
-                Input.SampleStep));
+            EndBlockX - StartBlockX);
+
+    const int32 HeightBlocks =
+        FMath::Max(
+            1,
+            EndBlockY - StartBlockY);
+
+    const int32 CountX =
+        FMath::DivideAndRoundUp(
+            WidthBlocks,
+            Input.SampleStep) + 1;
+
+    const int32 CountY =
+        FMath::DivideAndRoundUp(
+            HeightBlocks,
+            Input.SampleStep) + 1;
 
     TArray<int32> Heights;
     TArray<FLinearColor> Colors;
 
     Heights.SetNumZeroed(
-        (SampleCount + 1) * (SampleCount + 1));
+        CountX * CountY);
 
     Colors.SetNum(
-        (SampleCount + 1) * (SampleCount + 1));
+        CountX * CountY);
 
-    /*
-     * Sample the real terrain generator directly.
-     * No voxel block snapshot and no Marching Cubes are needed
-     * for distant terrain.
-     */
-    for (int32 Y = 0; Y <= SampleCount; ++Y)
+    for (int32 Y = 0; Y < CountY; ++Y)
     {
-        for (int32 X = 0; X <= SampleCount; ++X)
+        for (int32 X = 0; X < CountX; ++X)
         {
-            const int32 RawWorldX =
-                StartBlockX +
-                X * Input.SampleStep;
-
-            const int32 RawWorldY =
-                StartBlockY +
-                Y * Input.SampleStep;
-
             const int32 WorldX =
+                FMath::Min(
+                    StartBlockX +
+                    X * Input.SampleStep,
+                    EndBlockX);
+
+            const int32 WorldY =
+                FMath::Min(
+                    StartBlockY +
+                    Y * Input.SampleStep,
+                    EndBlockY);
+
+            const int32 ClampedWorldX =
                 FMath::Clamp(
-                    RawWorldX,
+                    WorldX,
                     0,
                     WorldBlocksX - 1);
 
-            const int32 WorldY =
+            const int32 ClampedWorldY =
                 FMath::Clamp(
-                    RawWorldY,
+                    WorldY,
                     0,
                     WorldBlocksY - 1);
 
             const int32 Height =
                 Input.Generator.GetSurfaceHeight(
-                    WorldX,
-                    WorldY);
+                    ClampedWorldX,
+                    ClampedWorldY);
 
             const EVoxelBiome Biome =
                 Input.Generator.GetBiome(
-                    WorldX,
-                    WorldY,
+                    ClampedWorldX,
+                    ClampedWorldY,
                     Height);
 
             const int32 Index =
-                SampleIndex(
+                GridIndex(
                     X,
                     Y,
-                    SampleCount);
+                    CountX);
 
-            Heights[Index] = Height;
+            Heights[Index] =
+                Height;
 
             Colors[Index] =
                 GetBiomeColor(
@@ -191,46 +246,50 @@ void FVoxelTerrainLODMesher::Build(
         }
     }
 
-    const int32 VertexCount =
-        (SampleCount + 1) * (SampleCount + 1);
+    Output.Vertices.SetNumZeroed(
+        CountX * CountY);
 
-    Output.Vertices.SetNumZeroed(VertexCount);
-    Output.Normals.SetNumZeroed(VertexCount);
-    Output.UV0.SetNumZeroed(VertexCount);
-    Output.VertexColors = Colors;
+    Output.Normals.SetNumZeroed(
+        CountX * CountY);
 
-    for (int32 Y = 0; Y <= SampleCount; ++Y)
+    Output.UV0.SetNumZeroed(
+        CountX * CountY);
+
+    Output.VertexColors =
+        Colors;
+
+    for (int32 Y = 0; Y < CountY; ++Y)
     {
-        for (int32 X = 0; X <= SampleCount; ++X)
+        for (int32 X = 0; X < CountX; ++X)
         {
             const int32 Index =
-                SampleIndex(
+                GridIndex(
                     X,
                     Y,
-                    SampleCount);
+                    CountX);
 
             const int32 WorldX =
-                FMath::Clamp(
-                    StartBlockX + X * Input.SampleStep,
-                    0,
-                    WorldBlocksX - 1);
+                FMath::Min(
+                    StartBlockX +
+                    X * Input.SampleStep,
+                    EndBlockX);
 
             const int32 WorldY =
-                FMath::Clamp(
-                    StartBlockY + Y * Input.SampleStep,
-                    0,
-                    WorldBlocksY - 1);
-
-            const int32 Height =
-                Heights[Index];
+                FMath::Min(
+                    StartBlockY +
+                    Y * Input.SampleStep,
+                    EndBlockY);
 
             Output.Vertices[Index] =
                 FVector(
-                    static_cast<float>(WorldX - StartBlockX) *
+                    static_cast<float>(
+                        WorldX - StartBlockX) *
                         Input.VoxelSize,
-                    static_cast<float>(WorldY - StartBlockY) *
+                    static_cast<float>(
+                        WorldY - StartBlockY) *
                         Input.VoxelSize,
-                    static_cast<float>(Height + 1) *
+                    static_cast<float>(
+                        Heights[Index] + 1) *
                         Input.VoxelSize);
 
             Output.UV0[Index] =
@@ -240,74 +299,101 @@ void FVoxelTerrainLODMesher::Build(
         }
     }
 
-    Output.Triangles.Reserve(
-        SampleCount * SampleCount * 6);
-
-    for (int32 Y = 0; Y < SampleCount; ++Y)
+    for (int32 Y = 0; Y < CountY - 1; ++Y)
     {
-        for (int32 X = 0; X < SampleCount; ++X)
+        for (int32 X = 0; X < CountX - 1; ++X)
         {
-            const int32 WorldX0 =
-                StartBlockX +
-                X * Input.SampleStep;
-
-            const int32 WorldY0 =
-                StartBlockY +
-                Y * Input.SampleStep;
-
-            if (WorldX0 >= WorldBlocksX - 1 ||
-                WorldY0 >= WorldBlocksY - 1)
-            {
-                continue;
-            }
-
-            const int32 WorldX1 =
-                FMath::Min(
-                    WorldX0 + Input.SampleStep,
-                    WorldBlocksX - 1);
-
-            const int32 WorldY1 =
-                FMath::Min(
-                    WorldY0 + Input.SampleStep,
-                    WorldBlocksY - 1);
-
-            if (!IsCellInsideBand(
-                    WorldX0,
-                    WorldX1,
-                    WorldY0,
-                    WorldY1,
-                    Input))
-            {
-                continue;
-            }
-
             const int32 I00 =
-                SampleIndex(X, Y, SampleCount);
+                GridIndex(X, Y, CountX);
 
             const int32 I10 =
-                SampleIndex(X + 1, Y, SampleCount);
+                GridIndex(X + 1, Y, CountX);
 
             const int32 I01 =
-                SampleIndex(X, Y + 1, SampleCount);
+                GridIndex(X, Y + 1, CountX);
 
             const int32 I11 =
-                SampleIndex(X + 1, Y + 1, SampleCount);
+                GridIndex(X + 1, Y + 1, CountX);
 
-            const FVector& P00 = Output.Vertices[I00];
-            const FVector& P10 = Output.Vertices[I10];
-            const FVector& P01 = Output.Vertices[I01];
-            const FVector& P11 = Output.Vertices[I11];
+            const int32 SampleWorldX0 =
+                FMath::Min(
+                    StartBlockX +
+                    X * Input.SampleStep,
+                    EndBlockX);
 
-            const FVector N0 =
-                FVector::CrossProduct(
-                    P10 - P00,
-                    P11 - P00);
+            const int32 SampleWorldX1 =
+                FMath::Min(
+                    StartBlockX +
+                    (X + 1) * Input.SampleStep,
+                    EndBlockX);
 
-            const FVector N1 =
-                FVector::CrossProduct(
-                    P11 - P00,
-                    P01 - P00);
+            const int32 SampleWorldY0 =
+                FMath::Min(
+                    StartBlockY +
+                    Y * Input.SampleStep,
+                    EndBlockY);
 
+            const int32 SampleWorldY1 =
+                FMath::Min(
+                    StartBlockY +
+                    (Y + 1) * Input.SampleStep,
+                    EndBlockY);
+
+            const float CellMinChunkX =
+                (
+                    static_cast<float>(
+                        SampleWorldX0) /
+                    static_cast<float>(
+                        Input.ChunkSize))
+                -
+                static_cast<float>(
+                    Input.CenterChunk.X);
+
+            const float CellMaxChunkX =
+                (
+                    static_cast<float>(
+                        SampleWorldX1) /
+                    static_cast<float>(
+                        Input.ChunkSize))
+                -
+                static_cast<float>(
+                    Input.CenterChunk.X);
+
+            const float CellMinChunkY =
+                (
+                    static_cast<float>(
+                        SampleWorldY0) /
+                    static_cast<float>(
+                        Input.ChunkSize))
+                -
+                static_cast<float>(
+                    Input.CenterChunk.Y);
+
+            const float CellMaxChunkY =
+                (
+                    static_cast<float>(
+                        SampleWorldY1) /
+                    static_cast<float>(
+                        Input.ChunkSize))
+                -
+                static_cast<float>(
+                    Input.CenterChunk.Y);
+
+            if (!IsCellInRing(
+                    CellMinChunkX,
+                    CellMaxChunkX,
+                    CellMinChunkY,
+                    CellMaxChunkY,
+                    Input.InnerRadiusChunks,
+                    Input.OuterRadiusChunks))
+            {
+                continue;
+            }
+
+            /*
+             * Use a single consistent diagonal to keep the coarse
+             * terrain stable while the player moves.
+             */
             Output.Triangles.Add(I00);
             Output.Triangles.Add(I11);
             Output.Triangles.Add(I10);
@@ -316,11 +402,29 @@ void FVoxelTerrainLODMesher::Build(
             Output.Triangles.Add(I01);
             Output.Triangles.Add(I11);
 
+            const FVector N0 =
+                FVector::CrossProduct(
+                    Output.Vertices[I11] -
+                        Output.Vertices[I00],
+                    Output.Vertices[I10] -
+                        Output.Vertices[I00]);
+
+            const FVector N1 =
+                FVector::CrossProduct(
+                    Output.Vertices[I01] -
+                        Output.Vertices[I00],
+                    Output.Vertices[I11] -
+                        Output.Vertices[I00]);
+
             Output.Normals[I00] += N0 + N1;
             Output.Normals[I10] += N0;
             Output.Normals[I11] += N0 + N1;
             Output.Normals[I01] += N1;
 
+            /*
+             * Water is continuous at world SeaLevel and is rendered
+             * only for cells outside the nearer ring.
+             */
             const float AverageHeight =
                 (
                     static_cast<float>(Heights[I00]) +
@@ -329,46 +433,50 @@ void FVoxelTerrainLODMesher::Build(
                     static_cast<float>(Heights[I11])
                 ) * 0.25f;
 
-            /*
-             * Simple distant water plane. The surface is continuous
-             * and remains stable even when terrain sampling is coarse.
-             */
             if (AverageHeight <
                 static_cast<float>(Input.SeaLevel))
             {
                 const float WaterZ =
                     (
-                        static_cast<float>(Input.SeaLevel) +
-                        0.95f
-                    ) * Input.VoxelSize;
-
-                const float LX0 =
-                    static_cast<float>(WorldX0 - StartBlockX) *
-                    Input.VoxelSize;
-
-                const float LX1 =
-                    static_cast<float>(WorldX1 - StartBlockX) *
-                    Input.VoxelSize;
-
-                const float LY0 =
-                    static_cast<float>(WorldY0 - StartBlockY) *
-                    Input.VoxelSize;
-
-                const float LY1 =
-                    static_cast<float>(WorldY1 - StartBlockY) *
+                        static_cast<float>(
+                            Input.SeaLevel) +
+                        0.95f) *
                     Input.VoxelSize;
 
                 const int32 WaterStart =
                     Output.WaterVertices.Num();
 
                 Output.WaterVertices.Add(
-                    FVector(LX0, LY0, WaterZ));
+                    Output.Vertices[I00] *
+                    FVector(1.0f, 1.0f, 0.0f) +
+                    FVector(
+                        0.0f,
+                        0.0f,
+                        WaterZ));
+
                 Output.WaterVertices.Add(
-                    FVector(LX1, LY0, WaterZ));
+                    Output.Vertices[I10] *
+                    FVector(1.0f, 1.0f, 0.0f) +
+                    FVector(
+                        0.0f,
+                        0.0f,
+                        WaterZ));
+
                 Output.WaterVertices.Add(
-                    FVector(LX1, LY1, WaterZ));
+                    Output.Vertices[I11] *
+                    FVector(1.0f, 1.0f, 0.0f) +
+                    FVector(
+                        0.0f,
+                        0.0f,
+                        WaterZ));
+
                 Output.WaterVertices.Add(
-                    FVector(LX0, LY1, WaterZ));
+                    Output.Vertices[I01] *
+                    FVector(1.0f, 1.0f, 0.0f) +
+                    FVector(
+                        0.0f,
+                        0.0f,
+                        WaterZ));
 
                 Output.WaterTriangles.Add(
                     WaterStart + 0);
@@ -384,59 +492,44 @@ void FVoxelTerrainLODMesher::Build(
                 Output.WaterTriangles.Add(
                     WaterStart + 2);
 
-                const FVector WaterNormal =
-                    FVector::UpVector;
+                for (int32 I = 0; I < 4; ++I)
+                {
+                    Output.WaterNormals.Add(
+                        FVector::UpVector);
+                }
 
-                Output.WaterNormals.Add(WaterNormal);
-                Output.WaterNormals.Add(WaterNormal);
-                Output.WaterNormals.Add(WaterNormal);
-                Output.WaterNormals.Add(WaterNormal);
+                const FVector2D UV0 =
+                    Output.UV0[I00];
 
-                const float U0 =
-                    static_cast<float>(WorldX0) /
-                    FMath::Max(Input.VoxelSize, 1.0f);
+                const FVector2D UV1 =
+                    Output.UV0[I10];
 
-                const float U1 =
-                    static_cast<float>(WorldX1) /
-                    FMath::Max(Input.VoxelSize, 1.0f);
+                const FVector2D UV2 =
+                    Output.UV0[I11];
 
-                const float V0 =
-                    static_cast<float>(WorldY0) /
-                    FMath::Max(Input.VoxelSize, 1.0f);
+                const FVector2D UV3 =
+                    Output.UV0[I01];
 
-                const float V1 =
-                    static_cast<float>(WorldY1) /
-                    FMath::Max(Input.VoxelSize, 1.0f);
+                Output.WaterUV0.Add(UV0);
+                Output.WaterUV0.Add(UV1);
+                Output.WaterUV0.Add(UV2);
+                Output.WaterUV0.Add(UV3);
 
-                Output.WaterUV0.Add(FVector2D(U0, V0));
-                Output.WaterUV0.Add(FVector2D(U1, V0));
-                Output.WaterUV0.Add(FVector2D(U1, V1));
-                Output.WaterUV0.Add(FVector2D(U0, V1));
-
-                const FLinearColor WaterColor =
-                    GetWaterColor();
-
-                Output.WaterVertexColors.Add(WaterColor);
-                Output.WaterVertexColors.Add(WaterColor);
-                Output.WaterVertexColors.Add(WaterColor);
-                Output.WaterVertexColors.Add(WaterColor);
+                for (int32 I = 0; I < 4; ++I)
+                {
+                    Output.WaterVertexColors.Add(
+                        WaterColor);
+                }
             }
         }
     }
 
-    /*
-     * Convert accumulated face normals to normalized vertex normals.
-     */
-    for (FVector& Normal : Output.Normals)
+    for (FVector& Normal :
+        Output.Normals)
     {
         if (!Normal.Normalize())
         {
             Normal = FVector::UpVector;
         }
     }
-
-    /*
-     * The current heightfield renderer does not need collision.
-     * Tangents are intentionally omitted.
-     */
 }
