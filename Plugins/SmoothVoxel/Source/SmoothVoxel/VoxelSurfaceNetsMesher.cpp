@@ -728,15 +728,13 @@ void FVoxelSurfaceNetsMesher::Build(
 
                         AddSurfaceQuad(
                             Output,
-                            CellVertices,
-                            C0,
-                            C1,
-                            C2,
-                            C3,
+                            I0,
+                            I1,
+                            I2,
+                            I3,
                             Center,
                             Densities,
-                            Size,
-                            FVector::OneVector);
+                            Size);
 
                         (void)Before;
                     }
@@ -811,15 +809,13 @@ void FVoxelSurfaceNetsMesher::Build(
 
                         AddSurfaceQuad(
                             Output,
-                            CellVertices,
-                            C0,
-                            C1,
-                            C2,
-                            C3,
+                            I0,
+                            I1,
+                            I2,
+                            I3,
                             Center,
                             Densities,
-                            Size,
-                            FVector::OneVector);
+                            Size);
                     }
                 }
 
@@ -892,15 +888,13 @@ void FVoxelSurfaceNetsMesher::Build(
 
                         AddSurfaceQuad(
                             Output,
-                            CellVertices,
-                            C0,
-                            C1,
-                            C2,
-                            C3,
+                            I0,
+                            I1,
+                            I2,
+                            I3,
                             Center,
                             Densities,
-                            Size,
-                            FVector::OneVector);
+                            Size);
                     }
                 }
             }
