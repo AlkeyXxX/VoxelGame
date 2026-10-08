@@ -240,12 +240,6 @@ void FVoxelTerrainLODMesher::Build(
         }
     }
 
-    const float SafeStepWorld =
-        FMath::Max(
-            Input.VoxelSize *
-                static_cast<float>(Input.SampleStep),
-            1.0f);
-
     Output.Triangles.Reserve(
         SampleCount * SampleCount * 6);
 
@@ -445,5 +439,4 @@ void FVoxelTerrainLODMesher::Build(
      * The current heightfield renderer does not need collision.
      * Tangents are intentionally omitted.
      */
-    (void)SafeStepWorld;
 }
