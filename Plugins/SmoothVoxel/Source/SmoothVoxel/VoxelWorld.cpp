@@ -876,6 +876,9 @@ void AVoxelWorld::GenerateChunkBlocks(
             }
         }
     }
+
+    RefreshStructureFlagsAround(
+        ChunkCoord);
 }
 
 
@@ -1506,6 +1509,9 @@ void AVoxelWorld::SetBlockInternal(
         LocalIndex,
         Block);
 
+    RefreshStructureFlagsAround(
+        ChunkCoord);
+
 
     /*
      * Перестраиваем изменённый chunk
@@ -1567,6 +1573,131 @@ void AVoxelWorld::SetBlockAtWorld(
  * Перестраиваем изменённый chunk
  * плюс шесть соседей.
  */
+void AVoxelWorld::RebuildStructureFlagsForChunk(
+    const FIntVector& TargetChunkCoord)
+{
+    AVoxelChunk* TargetChunk =
+        GetChunk(TargetChunkCoord);
+
+    if (!TargetChunk)
+    {
+        return;
+    }
+
+    TargetChunk->ClearStructureFlags();
+
+    /*
+     * A one-voxel cubic seam is built around every modified block.
+     * This includes diagonal cells so a rectangular cut has continuous
+     * cubic corners instead of leaving MC triangles in the corners.
+     */
+    for (int32 Z = -1; Z <= 1; ++Z)
+    {
+        for (int32 Y = -1; Y <= 1; ++Y)
+        {
+            for (int32 X = -1; X <= 1; ++X)
+            {
+                const FIntVector SourceChunkCoord =
+                    TargetChunkCoord +
+                    FIntVector(X, Y, Z);
+
+                const TMap<int32, uint8>* Modifications =
+                    ModifiedBlocks.Find(
+                        SourceChunkCoord);
+
+                if (!Modifications)
+                {
+                    continue;
+                }
+
+                for (const TPair<int32, uint8>& Modification :
+                    *Modifications)
+                {
+                    const int32 LocalIndex =
+                        Modification.Key;
+
+                    const int32 SourceLocalX =
+                        LocalIndex % ChunkSize;
+
+                    const int32 SourceLocalY =
+                        (LocalIndex / ChunkSize) % ChunkSize;
+
+                    const int32 SourceLocalZ =
+                        LocalIndex /
+                        (ChunkSize * ChunkSize);
+
+                    const FIntVector ModifiedWorldBlock(
+                        SourceChunkCoord.X * ChunkSize +
+                            SourceLocalX,
+                        SourceChunkCoord.Y * ChunkSize +
+                            SourceLocalY,
+                        SourceChunkCoord.Z * ChunkSize +
+                            SourceLocalZ);
+
+                    for (int32 DZ = -1; DZ <= 1; ++DZ)
+                    {
+                        for (int32 DY = -1; DY <= 1; ++DY)
+                        {
+                            for (int32 DX = -1; DX <= 1; ++DX)
+                            {
+                                const FIntVector SeamWorldBlock =
+                                    ModifiedWorldBlock +
+                                    FIntVector(DX, DY, DZ);
+
+                                if (WorldBlockToChunk(
+                                        SeamWorldBlock) !=
+                                    TargetChunkCoord)
+                                {
+                                    continue;
+                                }
+
+                                const FIntVector LocalBlock =
+                                    WorldBlockToLocal(
+                                        SeamWorldBlock);
+
+                                const EVoxelBlock Block =
+                                    static_cast<EVoxelBlock>(
+                                        TargetChunk->GetBlock(
+                                            LocalBlock.X,
+                                            LocalBlock.Y,
+                                            LocalBlock.Z));
+
+                                if (IsVoxelSolid(Block))
+                                {
+                                    TargetChunk->SetStructureFlag(
+                                        LocalBlock.X,
+                                        LocalBlock.Y,
+                                        LocalBlock.Z,
+                                        true);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+void AVoxelWorld::RefreshStructureFlagsAround(
+    const FIntVector& ChunkCoord)
+{
+    for (int32 Z = -1; Z <= 1; ++Z)
+    {
+        for (int32 Y = -1; Y <= 1; ++Y)
+        {
+            for (int32 X = -1; X <= 1; ++X)
+            {
+                RebuildStructureFlagsForChunk(
+                    ChunkCoord +
+                    FIntVector(X, Y, Z));
+            }
+        }
+    }
+}
+
+
 void AVoxelWorld::RebuildChunkAndNeighbors(
     const FIntVector& ChunkCoord)
 {
