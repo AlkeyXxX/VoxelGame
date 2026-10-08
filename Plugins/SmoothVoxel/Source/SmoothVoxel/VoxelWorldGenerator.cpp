@@ -388,3 +388,29 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
 
     return EVoxelBiome::Plains;
 }
+
+EVoxelMajorBiome FVoxelWorldGenerator::GetMajorBiome(
+    int32 WorldX,
+    int32 WorldY) const
+{
+    const EVoxelBiome Biome =
+        GetBiome(
+            WorldX,
+            WorldY,
+            0);
+
+    switch (Biome)
+    {
+    case EVoxelBiome::Desert:
+        return EVoxelMajorBiome::Desert;
+
+    case EVoxelBiome::Snow:
+        return EVoxelMajorBiome::Winter;
+
+    case EVoxelBiome::Forest:
+    case EVoxelBiome::Plains:
+    case EVoxelBiome::Mountain:
+    default:
+        return EVoxelMajorBiome::Green;
+    }
+}
