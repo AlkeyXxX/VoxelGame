@@ -6,12 +6,12 @@
 #include "GameFramework/GameModeBase.h"
 #include "MyVoxelGameGameModeBase.generated.h"
 
-/**
- * 
- */
 UCLASS()
 class MYVOXELGAME_API AMyVoxelGameGameModeBase : public AGameModeBase
 {
-	GENERATED_BODY()
-	
+    GENERATED_BODY()
+
+protected:
+    virtual AActor* ChoosePlayerStart_Implementation(
+        AController* Player) override;
 };
