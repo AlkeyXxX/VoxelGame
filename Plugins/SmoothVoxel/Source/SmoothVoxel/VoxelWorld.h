@@ -479,6 +479,9 @@ private:
     void RefreshStructureFlagsAround(
         const FIntVector& ChunkCoord);
 
+    void MarkStructureSeamAroundBlock(
+        const FIntVector& WorldBlock);
+
 
     /*
      * Streaming.
