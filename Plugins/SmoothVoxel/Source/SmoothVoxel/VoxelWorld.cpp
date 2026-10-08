@@ -1357,11 +1357,11 @@ void AVoxelWorld::UpdateUnderwaterEffect()
          * transition unless it is explicitly held.
          */
         PC->PlayerCameraManager->SetManualCameraFade(
-            0.20f,
+            0.38f,
             FLinearColor(
                 0.02f,
-                0.16f,
-                0.42f,
+                0.20f,
+                0.55f,
                 1.0f),
             false);
     }
