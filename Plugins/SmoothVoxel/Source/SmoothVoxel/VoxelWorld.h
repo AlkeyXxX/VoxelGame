@@ -14,6 +14,7 @@ class AVoxelChunk;
 class UMaterialInterface;
 class UVoxelWorldSaveGame;
 class UDataTable;
+class UProceduralMeshComponent;
 
 
 UCLASS()
@@ -504,7 +505,8 @@ private:
 
     void UpdateChunkStreaming();
     int32 GetChunkDistance(const FIntVector& A, const FIntVector& B) const;
-    void UpdateChunkLOD(AVoxelChunk* Chunk, int32 Distance);
+    void UpdateFarLOD(const FIntVector& CenterChunk);
+    void ClearFarLOD();
     bool IsPositionInsideWater(const FVector& WorldPosition) const;
     void UpdateUnderwaterEffect();
 
@@ -516,6 +518,13 @@ private:
         FIntVector::ZeroValue;
 
     bool bUnderwaterEffectActive = false;
+
+    UPROPERTY()
+    TMap<FIntVector, UProceduralMeshComponent*> FarLODTiles;
+
+    uint32 FarLODGenerationVersion = 0;
+    FIntVector LastFarLODCenter = FIntVector::ZeroValue;
+    bool bFarLODInitialized = false;
 
     bool bDebugFlyMode = false;
     bool bDebugFlyBoost = false;
