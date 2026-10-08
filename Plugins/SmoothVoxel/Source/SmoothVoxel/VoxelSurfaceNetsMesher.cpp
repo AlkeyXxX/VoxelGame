@@ -16,8 +16,8 @@ namespace
         int32 Z,
         int32 Size)
     {
-        const int32 Side = Size + 3;
-        const int32 Offset = 1;
+        const int32 Side = Size + 4;
+        const int32 Offset = 2;
 
         return
             (X + Offset) +
@@ -269,9 +269,9 @@ uint8 FVoxelSurfaceNetsMesher::GetBlock(
     int32 Y,
     int32 Z)
 {
-    if (X < -1 || X > Input.Size + 1 ||
-        Y < -1 || Y > Input.Size + 1 ||
-        Z < -1 || Z > Input.Size + 1)
+    if (X < -2 || X > Input.Size + 1 ||
+        Y < -2 || Y > Input.Size + 1 ||
+        Z < -2 || Z > Input.Size + 1)
     {
         return uint8(EVoxelBlock::Air);
     }
@@ -312,9 +312,9 @@ float FVoxelSurfaceNetsMesher::GetNodeDensity(
                     static_cast<EVoxelBlock>(
                         GetBlock(
                             Input,
-                            X + DX,
-                            Y + DY,
-                            Z + DZ));
+                            X - 1 + DX,
+                            Y - 1 + DY,
+                            Z - 1 + DZ));
 
                 if (IsVoxelSolid(Block))
                 {
