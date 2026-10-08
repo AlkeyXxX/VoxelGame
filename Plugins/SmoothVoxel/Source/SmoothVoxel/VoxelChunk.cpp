@@ -1,6 +1,7 @@
 
 #include "VoxelChunk.h"
 #include "VoxelWorld.h"
+#include "VoxelMarchingCubesMesher.h"
 
 #include "ProceduralMeshComponent.h"
 #include "Async/Async.h"
@@ -461,73 +462,103 @@ void AVoxelChunk::CopyZPlus(
  */
 void AVoxelChunk::RebuildMesh()
 {
-    /*
-     * Новая версия mesh.
-     */
     ++MeshGenerationVersion;
 
     const uint32 LocalVersion =
         MeshGenerationVersion;
 
+    FVoxelMeshBuildInput CubicInput;
 
-    /*
-     * Полностью собираем snapshot на Game Thread.
-     */
-    FVoxelMeshBuildInput Input;
+    CubicInput.Size = ChunkSize;
+    CubicInput.VoxelSize = VoxelSize;
 
-    Input.Size = ChunkSize;
-    Input.VoxelSize = VoxelSize;
+    CopyBlockData(CubicInput.Blocks);
+    CopyBiomeData(CubicInput.Biomes);
+    CopyModificationFlags(CubicInput.StructureFlags);
 
+    CubicInput.Neighbors.Init(ChunkSize);
 
-    CopyBlockData(Input.Blocks);
-    CopyBiomeData(Input.Biomes);
+    FVoxelMarchingCubesBuildInput SmoothInput;
 
-    Input.Neighbors.Init(ChunkSize);
-
+    SmoothInput.Init(ChunkSize);
+    SmoothInput.VoxelSize = VoxelSize;
 
     if (World)
     {
         World->BuildNeighborData(
             ChunkCoord,
-            Input.Neighbors);
+            CubicInput.Neighbors);
+
+        World->BuildMarchingCubesData(
+            ChunkCoord,
+            SmoothInput);
     }
 
-
-    /*
-     * Сохраняем weak pointer.
-     *
-     * Если chunk будет уничтожен,
-     * worker ничего не применит.
-     */
     TWeakObjectPtr<AVoxelChunk> WeakThis(this);
 
-
-    /*
-     * Само построение выполняется в ThreadPool.
-     */
     Async(
         EAsyncExecution::ThreadPool,
 
         [
             WeakThis,
-            Input = MoveTemp(Input),
+            CubicInput = MoveTemp(CubicInput),
+            SmoothInput = MoveTemp(SmoothInput),
             LocalVersion
         ]() mutable
         {
             FVoxelMeshBuildOutput Output;
+            FVoxelMeshBuildOutput CubicOutput;
 
-
-            FVoxelMesher::Build(
-                Input,
+            FVoxelMarchingCubesMesher::Build(
+                SmoothInput,
                 Output);
 
+            FVoxelMesher::Build(
+                CubicInput,
+                CubicOutput);
 
-            /*
-             * CreateMeshSection нельзя выполнять
-             * из worker thread.
-             *
-             * Возвращаемся на Game Thread.
-             */
+            const int32 VertexOffset =
+                Output.Vertices.Num();
+
+            Output.Vertices.Append(
+                CubicOutput.Vertices);
+
+            for (const int32 Triangle :
+                CubicOutput.Triangles)
+            {
+                Output.Triangles.Add(
+                    Triangle + VertexOffset);
+            }
+
+            Output.Normals.Append(
+                CubicOutput.Normals);
+
+            Output.UV0.Append(
+                CubicOutput.UV0);
+
+            Output.VertexColors.Append(
+                CubicOutput.VertexColors);
+
+            Output.WaterVertices =
+                MoveTemp(
+                    CubicOutput.WaterVertices);
+
+            Output.WaterTriangles =
+                MoveTemp(
+                    CubicOutput.WaterTriangles);
+
+            Output.WaterNormals =
+                MoveTemp(
+                    CubicOutput.WaterNormals);
+
+            Output.WaterUV0 =
+                MoveTemp(
+                    CubicOutput.WaterUV0);
+
+            Output.WaterVertexColors =
+                MoveTemp(
+                    CubicOutput.WaterVertexColors);
+
             AsyncTask(
                 ENamedThreads::GameThread,
 
@@ -542,14 +573,12 @@ void AVoxelChunk::RebuildMesh()
                         return;
                     }
 
-
                     WeakThis->ApplyMesh(
                         MoveTemp(Output),
                         LocalVersion);
                 });
         });
 }
-
 
 void AVoxelChunk::ApplyMesh(
     FVoxelMeshBuildOutput&& Output,
