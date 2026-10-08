@@ -1255,13 +1255,13 @@ void AVoxelWorld::BuildSurfaceNetsData(
     OutData.Init(ChunkSize);
     OutData.VoxelSize = VoxelSize;
 
-    const int32 Side = ChunkSize + 3;
+    const int32 Side = ChunkSize + 4;
 
-    for (int32 Z = -1; Z <= ChunkSize + 1; ++Z)
+    for (int32 Z = -2; Z <= ChunkSize + 1; ++Z)
     {
-        for (int32 Y = -1; Y <= ChunkSize + 1; ++Y)
+        for (int32 Y = -2; Y <= ChunkSize + 1; ++Y)
         {
-            for (int32 X = -1; X <= ChunkSize + 1; ++X)
+            for (int32 X = -2; X <= ChunkSize + 1; ++X)
             {
                 const FIntVector WorldBlock(
                     ChunkCoord.X * ChunkSize + X,
