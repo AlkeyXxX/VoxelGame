@@ -234,9 +234,15 @@ namespace
             return;
         }
 
+        /*
+         * ProceduralMeshComponent UE4 expects the opposite winding
+         * from the mathematical cross-product orientation used above.
+         * Keep the visible/front side aligned with the extracted
+         * surface normal.
+         */
         if (FVector::DotProduct(
                 FaceNormal,
-                Outward) < 0.0f)
+                Outward) > 0.0f)
         {
             Swap(
                 Indices[1],
