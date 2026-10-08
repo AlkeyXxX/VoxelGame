@@ -1161,6 +1161,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyXPlus(
             OutData.XMinus);
+        Neighbor->CopyXPlusStructure(
+            OutData.XMinusStructure);
     }
 
 
@@ -1173,6 +1175,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyXMinus(
             OutData.XPlus);
+        Neighbor->CopyXMinusStructure(
+            OutData.XPlusStructure);
     }
 
 
@@ -1185,6 +1189,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyYPlus(
             OutData.YMinus);
+        Neighbor->CopyYPlusStructure(
+            OutData.YMinusStructure);
     }
 
 
@@ -1197,6 +1203,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyYMinus(
             OutData.YPlus);
+        Neighbor->CopyYMinusStructure(
+            OutData.YPlusStructure);
     }
 
 
@@ -1209,6 +1217,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyZPlus(
             OutData.ZMinus);
+        Neighbor->CopyZPlusStructure(
+            OutData.ZMinusStructure);
     }
 
 
@@ -1221,6 +1231,8 @@ void AVoxelWorld::BuildNeighborData(
     {
         Neighbor->CopyZMinus(
             OutData.ZPlus);
+        Neighbor->CopyZMinusStructure(
+            OutData.ZPlusStructure);
     }
 }
 
