@@ -203,16 +203,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="8"))
     int32 LODUpdateChunkInterval = 1;
 
-    /* Сколько обычных чанков объединяем в один дальний terrain tile. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="2", ClampMax="8"))
-    int32 LODTileChunkSize = 4;
-
-
     /*
-     * Радиус, после которого чанк можно выгрузить.
-     *
-     * Должен быть больше StreamingRadius,
-     * чтобы не было постоянного load/unload на границе.
+     * Радиус, после которого Full chunk можно выгрузить.
+     * Дальний terrain при этом продолжает жить как отдельный LOD mesh.
      */
     UPROPERTY(
         EditAnywhere,
