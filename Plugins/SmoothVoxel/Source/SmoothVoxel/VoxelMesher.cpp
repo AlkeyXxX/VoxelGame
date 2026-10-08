@@ -322,7 +322,9 @@ void FVoxelMesher::AddFace(
     const FVector& D,
     const FVector& Normal,
     const FLinearColor& Color,
-    bool bWater)
+    bool bWater,
+    const FVector& WorldOrigin,
+    float VoxelSize)
 {
     TArray<FVector>& Vertices = bWater ? Output.WaterVertices : Output.Vertices;
     TArray<int32>& Triangles = bWater ? Output.WaterTriangles : Output.Triangles;
