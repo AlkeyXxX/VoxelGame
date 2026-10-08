@@ -10,6 +10,8 @@
 #include "Engine/Engine.h"
 
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "InputCoreTypes.h"
 
@@ -122,6 +124,51 @@ void AVoxelWorld::BeginPlay()
 {
     Super::BeginPlay();
 
+    /*
+     * Debug fly управляется через сам VoxelWorld, поэтому не требуется
+     * менять parent у BP_VoxelPlayer / BP_VoxelPlayerController.
+     */
+    if (APlayerController* PC =
+        GetWorld()
+            ? GetWorld()->GetFirstPlayerController()
+            : nullptr)
+    {
+        EnableInput(PC);
+
+        if (InputComponent)
+        {
+            InputComponent->BindAction(
+                TEXT("ToggleDebugFly"),
+                IE_Pressed,
+                this,
+                &AVoxelWorld::ToggleDebugFly);
+
+            InputComponent->BindAction(
+                TEXT("DebugFlyUp"),
+                IE_Pressed,
+                this,
+                &AVoxelWorld::DebugFlyUpPressed);
+
+            InputComponent->BindAction(
+                TEXT("DebugFlyUp"),
+                IE_Released,
+                this,
+                &AVoxelWorld::DebugFlyUpReleased);
+
+            InputComponent->BindAction(
+                TEXT("DebugFlyDown"),
+                IE_Pressed,
+                this,
+                &AVoxelWorld::DebugFlyDownPressed);
+
+            InputComponent->BindAction(
+                TEXT("DebugFlyDown"),
+                IE_Released,
+                this,
+                &AVoxelWorld::DebugFlyDownReleased);
+        }
+    }
+
     GenerateWorld();
 }
 
@@ -144,6 +191,19 @@ void AVoxelWorld::Tick(
     float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+
+    if (bDebugFlyMode)
+    {
+        if (APawn* Pawn =
+            UGameplayStatics::GetPlayerPawn(
+                GetWorld(),
+                0))
+        {
+            Pawn->AddMovementInput(
+                FVector::UpVector,
+                DebugFlyVerticalInput);
+        }
+    }
 
     UpdateChunkStreaming();
     UpdateUnderwaterEffect();
@@ -2057,5 +2117,104 @@ void AVoxelWorld::UpdateChunkLOD(
     if (Distance <= LOD2Radius)
     {
         Chunk->SetLODLevel(2);
+    }
+}
+
+
+void AVoxelWorld::ToggleDebugFly()
+{
+    bDebugFlyMode = !bDebugFlyMode;
+    DebugFlyVerticalInput = 0.0f;
+    ApplyDebugFlySettings(bDebugFlyMode);
+
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Debug Fly Mode: %s"),
+        bDebugFlyMode ? TEXT("ON") : TEXT("OFF"));
+}
+
+
+void AVoxelWorld::DebugFlyUpPressed()
+{
+    if (bDebugFlyMode)
+    {
+        DebugFlyVerticalInput = 1.0f;
+    }
+}
+
+
+void AVoxelWorld::DebugFlyUpReleased()
+{
+    if (bDebugFlyMode && DebugFlyVerticalInput > 0.0f)
+    {
+        DebugFlyVerticalInput = 0.0f;
+    }
+}
+
+
+void AVoxelWorld::DebugFlyDownPressed()
+{
+    if (bDebugFlyMode)
+    {
+        DebugFlyVerticalInput = -1.0f;
+    }
+}
+
+
+void AVoxelWorld::DebugFlyDownReleased()
+{
+    if (bDebugFlyMode && DebugFlyVerticalInput < 0.0f)
+    {
+        DebugFlyVerticalInput = 0.0f;
+    }
+}
+
+
+void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
+{
+    UWorld* World = GetWorld();
+
+    if (!World)
+    {
+        return;
+    }
+
+    APawn* Pawn =
+        UGameplayStatics::GetPlayerPawn(
+            World,
+            0);
+
+    ACharacter* Character =
+        Cast<ACharacter>(Pawn);
+
+    if (!Character)
+    {
+        return;
+    }
+
+    UCharacterMovementComponent* Movement =
+        Character->GetCharacterMovement();
+
+    if (!Movement)
+    {
+        return;
+    }
+
+    if (bEnable)
+    {
+        Movement->SetMovementMode(MOVE_Flying);
+        Movement->MaxFlySpeed = 3000.0f;
+        Movement->MaxAcceleration = 12000.0f;
+        Movement->BrakingDecelerationFlying = 12000.0f;
+        Movement->GravityScale = 0.0f;
+
+        Character->JumpCurrentCount = 0;
+    }
+    else
+    {
+        Movement->SetMovementMode(MOVE_Walking);
+        Movement->GravityScale = 1.0f;
+        DebugFlyVerticalInput = 0.0f;
     }
 }
