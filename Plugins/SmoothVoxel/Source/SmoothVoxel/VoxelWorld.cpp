@@ -1289,9 +1289,9 @@ void AVoxelWorld::BuildSurfaceNetsData(
                     }
                 }
 
-                const int32 ArrayX = X + 1;
-                const int32 ArrayY = Y + 1;
-                const int32 ArrayZ = Z + 1;
+                const int32 ArrayX = X + 2;
+                const int32 ArrayY = Y + 2;
+                const int32 ArrayZ = Z + 2;
 
                 const int32 Index =
                     ArrayX +
