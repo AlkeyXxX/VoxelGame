@@ -185,7 +185,11 @@ namespace
     {
         switch (static_cast<EVoxelBlock>(Block))
         {
+        case EVoxelBlock::Snow:
+            return 7;
         case EVoxelBlock::Grass:
+            return 6;
+        case EVoxelBlock::Sandstone:
             return 5;
         case EVoxelBlock::Sand:
             return 4;
@@ -328,6 +332,13 @@ FLinearColor FVoxelMarchingCubesMesher::GetBlockColor(
 
     case EVoxelBlock::Sand:
         return FLinearColor(0.85f, 0.72f, 0.42f, 1.0f);
+
+    case EVoxelBlock::Sandstone:
+        /* Southwest-style warm red/tan rock. */
+        return FLinearColor(0.72f, 0.38f, 0.22f, 1.0f);
+
+    case EVoxelBlock::Snow:
+        return FLinearColor(0.94f, 0.97f, 1.0f, 1.0f);
 
     case EVoxelBlock::Wood:
         return FLinearColor(0.58f, 0.32f, 0.12f, 1.0f);
