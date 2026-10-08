@@ -16,9 +16,7 @@ struct FVoxelTerrainLODBuildInput
     int32 SeaLevel = 10;
 
     FIntVector CenterChunk = FIntVector::ZeroValue;
-    FIntVector TileCoord = FIntVector::ZeroValue;
 
-    int32 TileChunkSize = 4;
     int32 SampleStep = 4;
 
     int32 InnerRadiusChunks = 8;
@@ -41,7 +39,9 @@ struct FVoxelTerrainLODMeshOutput
 
     bool IsEmpty() const
     {
-        return Vertices.Num() == 0 && WaterVertices.Num() == 0;
+        return
+            (Vertices.Num() == 0 || Triangles.Num() == 0) &&
+            (WaterVertices.Num() == 0 || WaterTriangles.Num() == 0);
     }
 };
 
