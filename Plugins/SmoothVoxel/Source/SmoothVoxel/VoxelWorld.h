@@ -162,7 +162,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|World",
         meta=(ClampMin="1", ClampMax="256"))
-    int32 WorldSizeX = 32;
+    int32 WorldSizeX = 128;
 
 
     UPROPERTY(
@@ -170,7 +170,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|World",
         meta=(ClampMin="1", ClampMax="256"))
-    int32 WorldSizeY = 32;
+    int32 WorldSizeY = 128;
 
 
     UPROPERTY(
@@ -199,9 +199,20 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="64"))
     int32 LOD2Radius = 16;
 
-    /* Частота обновления дальней LOD-зоны при перемещении по чанкам. */
+    /* Дальность LOD3 в чанках. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="128"))
+    int32 LOD3Radius = 32;
+
+    /* Дальность LOD4 в чанках. Самое дальнее и самое дешёвое кольцо. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="256"))
+    int32 LOD4Radius = 64;
+
+    /*
+     * Как часто перестраивать дальние LOD при движении по чанкам.
+     * 2 означает, что далёкие кольца обновляются через каждый второй chunk.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="8"))
-    int32 LODUpdateChunkInterval = 1;
+    int32 LODUpdateChunkInterval = 2;
 
     /*
      * Радиус, после которого Full chunk можно выгрузить.
@@ -524,6 +535,12 @@ private:
 
     UPROPERTY()
     UProceduralMeshComponent* FarLOD2Mesh = nullptr;
+
+    UPROPERTY()
+    UProceduralMeshComponent* FarLOD3Mesh = nullptr;
+
+    UPROPERTY()
+    UProceduralMeshComponent* FarLOD4Mesh = nullptr;
 
     uint32 FarLODGenerationVersion = 0;
     FIntVector LastFarLODCenter = FIntVector::ZeroValue;
