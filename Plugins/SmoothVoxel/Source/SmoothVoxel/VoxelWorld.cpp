@@ -2246,9 +2246,15 @@ void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
 
     if (bEnable)
     {
-        PC->bShowMouseCursor = false;
-        FInputModeGameOnly GameOnlyInput;
-        PC->SetInputMode(GameOnlyInput);
+        APlayerController* PC =
+            World->GetFirstPlayerController();
+
+        if (PC)
+        {
+            PC->bShowMouseCursor = false;
+            FInputModeGameOnly GameOnlyInput;
+            PC->SetInputMode(GameOnlyInput);
+        }
 
         Movement->SetMovementMode(MOVE_Flying);
         Movement->MaxFlySpeed = bDebugFlyBoost ? 9000.0f : 3000.0f;
