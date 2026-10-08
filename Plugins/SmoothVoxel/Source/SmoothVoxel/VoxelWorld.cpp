@@ -624,7 +624,14 @@ void AVoxelWorld::UpdateChunkStreaming()
                         if (AVoxelChunk* Neighbor =
                             GetChunk(NeighborCoord))
                         {
-                            Neighbor->RebuildMesh();
+                            const int32 NeighborDistance =
+                                GetChunkDistance(
+                                    NeighborCoord,
+                                    CenterChunk);
+
+                            UpdateChunkLOD(
+                                Neighbor,
+                                NeighborDistance);
                         }
                     }
                 }
