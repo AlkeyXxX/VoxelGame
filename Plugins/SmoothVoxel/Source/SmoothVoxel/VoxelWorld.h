@@ -337,6 +337,47 @@ public:
         Category="Voxel|Water")
     int32 SeaLevel = 10;
 
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain|Caves")
+    bool bEnableCaves = true;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain|Caves",
+        meta=(ClampMin="0.005"))
+    float CaveNoiseScale = 0.045f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain|Caves",
+        meta=(ClampMin="0.01"))
+    float CaveSecondaryScale = 0.09f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain|Caves",
+        meta=(ClampMin="0.0", ClampMax="1.0"))
+    float CaveThreshold = 0.62f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain|Caves",
+        meta=(ClampMin="-1.0", ClampMax="1.0"))
+    float CaveSecondaryThreshold = 0.10f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain|Caves",
+        meta=(ClampMin="2", ClampMax="16"))
+    int32 CaveMinDepth = 5;
+
     /*
      * Ширина пляжной зоны в блоках.
      */
