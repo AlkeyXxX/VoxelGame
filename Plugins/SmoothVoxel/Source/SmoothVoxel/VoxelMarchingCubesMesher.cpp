@@ -348,11 +348,17 @@ uint8 FVoxelMarchingCubesMesher::GetRepresentativeBlock(
     int32 BestZ = TNumericLimits<int32>::Lowest();
     uint8 BestBlock = uint8(EVoxelBlock::Stone);
 
-    for (int32 DZ = 0; DZ <= 1; ++DZ)
+    /*
+     * The MC vertex lies on the boundary between air and solid.
+     * Search downward from that boundary so the surface material comes
+     * from the actual solid layer instead of the air cell above it.
+     * A small X/Y neighborhood also handles sloped surfaces cleanly.
+     */
+    for (int32 DZ = 0; DZ >= -2; --DZ)
     {
-        for (int32 DY = 0; DY <= 1; ++DY)
+        for (int32 DY = -1; DY <= 1; ++DY)
         {
-            for (int32 DX = 0; DX <= 1; ++DX)
+            for (int32 DX = -1; DX <= 1; ++DX)
             {
                 const int32 SampleZ = Z + DZ;
 
