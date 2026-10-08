@@ -18,6 +18,24 @@ struct FVoxelWorldGenerationSettings
     float NoiseScale = 0.025f;
     float DetailNoiseScale = 0.08f;
     int32 DetailHeightVariation = 2;
+
+    /*
+     * Масштаб широких зон плато.
+     */
+    float PlateauScale = 0.007f;
+
+    /*
+     * Размер шага по высоте для плато.
+     * 2 блока дают широкие ровные поверхности,
+     * сохраняя естественные переходы между уровнями.
+     */
+    int32 PlateauHeightStep = 2;
+
+    /*
+     * Сила формирования плоских участков.
+     */
+    float PlateauStrength = 0.68f;
+
     int32 SeaLevel = 10;
     float TemperatureScale = 0.006f;
     float MoistureScale = 0.008f;
