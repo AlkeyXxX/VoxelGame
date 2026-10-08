@@ -18,6 +18,7 @@ struct FVoxelWorldGenerationSettings
     float NoiseScale = 0.025f;
     float DetailNoiseScale = 0.08f;
     int32 DetailHeightVariation = 2;
+    int32 SeaLevel = 10;
     float TemperatureScale = 0.006f;
     float MoistureScale = 0.008f;
 };
