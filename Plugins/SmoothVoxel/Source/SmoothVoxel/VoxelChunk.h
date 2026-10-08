@@ -140,6 +140,24 @@ public:
     void CopyZPlus(
         TArray<uint8>& OutData) const;
 
+    void CopyXMinusStructure(
+        TArray<uint8>& OutData) const;
+
+    void CopyXPlusStructure(
+        TArray<uint8>& OutData) const;
+
+    void CopyYMinusStructure(
+        TArray<uint8>& OutData) const;
+
+    void CopyYPlusStructure(
+        TArray<uint8>& OutData) const;
+
+    void CopyZMinusStructure(
+        TArray<uint8>& OutData) const;
+
+    void CopyZPlusStructure(
+        TArray<uint8>& OutData) const;
+
 
     /*
      * Материал.
