@@ -96,6 +96,12 @@ public:
     AVoxelChunk* GetChunk(
         const FIntVector& ChunkCoord);
 
+    /*
+     * Recommended player start: exact center of the map, above generated
+     * terrain. The center remains inside the green macro-biome band.
+     */
+    FVector GetCenterSpawnLocation();
+
 
     /*
      * Формирование snapshot границ соседей.
