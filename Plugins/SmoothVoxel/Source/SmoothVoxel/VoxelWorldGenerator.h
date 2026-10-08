@@ -57,6 +57,13 @@ public:
     void Configure(const FVoxelWorldGenerationSettings& InSettings);
 
     int32 GetSurfaceHeight(int32 WorldX, int32 WorldY) const;
+
+    bool IsCave(
+        int32 WorldX,
+        int32 WorldY,
+        int32 WorldZ,
+        int32 SurfaceHeight) const;
+
     float GetTerrainNoise(int32 WorldX, int32 WorldY) const;
     float GetTemperature(int32 WorldX, int32 WorldY) const;
     float GetMoisture(int32 WorldX, int32 WorldY) const;
