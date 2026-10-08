@@ -429,10 +429,57 @@ void FVoxelMesher::Build(
 
 
                 const float S = VoxelSize;
-                const float WaterTop =
-                    bWater
-                        ? S * (1.0f - WaterSurfaceInsetFraction)
-                        : S;
+                float WaterTop = S;
+
+                if (bWater)
+                {
+                    int32 SolidNeighborCount = 0;
+
+                    const int32 NeighborDX[4] = { -1, 1, 0, 0 };
+                    const int32 NeighborDY[4] = { 0, 0, -1, 1 };
+
+                    for (int32 Neighbor = 0;
+                         Neighbor < 4;
+                         ++Neighbor)
+                    {
+                        const uint8 NeighborBlock =
+                            GetCubicNeighborBlock(
+                                Input,
+                                X + NeighborDX[Neighbor],
+                                Y + NeighborDY[Neighbor],
+                                Z,
+                                true);
+
+                        if (IsVoxelSolid(
+                            static_cast<EVoxelBlock>(NeighborBlock)))
+                        {
+                            ++SolidNeighborCount;
+                        }
+                    }
+
+                    /*
+                     * Deep water stays slightly inset. Near solid shore cells
+                     * the surface rises toward the terrain level, producing a
+                     * small shoreline transition instead of a hard vertical cut.
+                     */
+                    const float ShoreBlend =
+                        static_cast<float>(
+                            FMath::Clamp(
+                                SolidNeighborCount,
+                                0,
+                                2)) *
+                        0.04f;
+
+                    const float WaterTopFraction =
+                        FMath::Clamp(
+                            (1.0f - WaterSurfaceInsetFraction) +
+                                ShoreBlend,
+                            0.0f,
+                            1.0f);
+
+                    WaterTop =
+                        S * WaterTopFraction;
+                }
 
                 /*
                  * Сейчас используем понятные preview/debug-цвета
