@@ -283,10 +283,10 @@ void FVoxelTerrainLODMesher::Build(
             Output.Vertices[Index] =
                 FVector(
                     static_cast<float>(
-                        WorldX - StartBlockX) *
+                        WorldX) *
                         Input.VoxelSize,
                     static_cast<float>(
-                        WorldY - StartBlockY) *
+                        WorldY) *
                         Input.VoxelSize,
                     static_cast<float>(
                         Heights[Index] + 1) *
