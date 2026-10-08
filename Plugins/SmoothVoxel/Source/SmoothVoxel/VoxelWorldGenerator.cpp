@@ -35,12 +35,43 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
     const float DetailNoise =
         FMath::PerlinNoise2D(DetailSamplePosition);
 
-    int32 Height =
+    const int32 BaseTerrainHeight =
         Settings.BaseHeight +
         FMath::RoundToInt(
-            BaseNoise * static_cast<float>(Settings.HeightVariation)) +
+            BaseNoise * static_cast<float>(Settings.HeightVariation));
+
+    /*
+     * Мелкий шум не должен создавать отдельные островки
+     * в явно низкой местности. Чем ближе базовый рельеф
+     * к уровню моря, тем сильнее деталь затухает.
+     */
+    const float DetailWeight =
+        FMath::Clamp(
+            static_cast<float>(
+                BaseTerrainHeight -
+                (Settings.SeaLevel - 3)) / 6.0f,
+            0.0f,
+            1.0f);
+
+    int32 Height =
+        BaseTerrainHeight +
         FMath::RoundToInt(
-            DetailNoise * static_cast<float>(Settings.DetailHeightVariation));
+            DetailNoise *
+            static_cast<float>(Settings.DetailHeightVariation) *
+            DetailWeight);
+
+    /*
+     * Если крупный рельеф находится на уровне моря или ниже,
+     * детальный шум не может поднять отдельную колонку
+     * выше водной поверхности и создать остров внутри озера.
+     */
+    if (BaseTerrainHeight <= Settings.SeaLevel)
+    {
+        Height =
+            FMath::Min(
+                Height,
+                Settings.SeaLevel - 1);
+    }
 
     return FMath::Max(Height, 1);
 }
