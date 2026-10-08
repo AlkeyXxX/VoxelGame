@@ -2197,34 +2197,18 @@ void AVoxelWorld::ClearFarLOD()
 {
     ++FarLODGenerationVersion;
 
-    for (TPair<FIntVector, UProceduralMeshComponent*>& Pair :
-        FarLODTiles)
-    {
-        if (Pair.Value)
-        {
-            Pair.Value->DestroyComponent();
-        }
-    }
-
-    FarLODTiles.Empty();
-    bFarLODInitialized = false;
-    LastFarLODCenter = FIntVector::ZeroValue;
-}
-
-
-
-void AVoxelWorld::ClearFarLOD()
-{
-    ++FarLODGenerationVersion;
-
     if (FarLOD1Mesh)
     {
+        FarLOD1Mesh->ClearMeshSection(0);
+        FarLOD1Mesh->ClearMeshSection(1);
         FarLOD1Mesh->DestroyComponent();
         FarLOD1Mesh = nullptr;
     }
 
     if (FarLOD2Mesh)
     {
+        FarLOD2Mesh->ClearMeshSection(0);
+        FarLOD2Mesh->ClearMeshSection(1);
         FarLOD2Mesh->DestroyComponent();
         FarLOD2Mesh = nullptr;
     }
@@ -2266,13 +2250,8 @@ namespace
         Mesh->SetGenerateOverlapEvents(
             false);
 
-        Mesh->SetMaterial(
-            0,
-            Material);
-
-        Mesh->SetMaterial(
-            1,
-            WaterMaterial);
+        Mesh->SetMaterial(0, Material);
+        Mesh->SetMaterial(1, WaterMaterial);
 
         Mesh->RegisterComponent();
 
@@ -2314,14 +2293,26 @@ void AVoxelWorld::UpdateFarLOD(
         return;
     }
 
+    const FVoxelWorldGenerator GeneratorCopy =
+        WorldGenerator;
+
+    TWeakObjectPtr<AVoxelWorld> WeakWorld(this);
+
     /*
-     * The actual worker jobs are scheduled separately below so each
-     * lambda carries the corresponding mesh/version safely.
+     * Builds one lightweight mesh for a complete ring.
+     * No AVoxelChunk actors are created in this path.
      */
-    auto Schedule =
+    auto ScheduleLOD =
         [
-            this,
             WeakWorld,
+            GeneratorCopy,
+            CenterChunk,
+            WorldSizeX,
+            WorldSizeY,
+            ChunkSize,
+            VoxelSize,
+            BeachWidth,
+            SeaLevel,
             LocalGeneration
         ](
             UProceduralMeshComponent* Mesh,
@@ -2329,26 +2320,48 @@ void AVoxelWorld::UpdateFarLOD(
             int32 InnerRadius,
             int32 OuterRadius)
         {
-            if (!Mesh)
+            if (!Mesh || InnerRadius >= OuterRadius)
             {
                 return;
             }
 
             FVoxelTerrainLODBuildInput BuildInput;
 
-            BuildInput.Generator = WorldGenerator;
-            BuildInput.WorldSizeX = WorldSizeX;
-            BuildInput.WorldSizeY = WorldSizeY;
-            BuildInput.ChunkSize = ChunkSize;
-            BuildInput.VoxelSize = VoxelSize;
-            BuildInput.BeachWidth = BeachWidth;
-            BuildInput.SeaLevel = SeaLevel;
-            BuildInput.CenterChunk = CenterChunk;
-            BuildInput.SampleStep = SampleStep;
-            BuildInput.InnerRadiusChunks = InnerRadius;
-            BuildInput.OuterRadiusChunks = OuterRadius;
+            BuildInput.Generator =
+                GeneratorCopy;
 
-            TWeakObjectPtr<UProceduralMeshComponent> WeakMesh(Mesh);
+            BuildInput.WorldSizeX =
+                WorldSizeX;
+
+            BuildInput.WorldSizeY =
+                WorldSizeY;
+
+            BuildInput.ChunkSize =
+                ChunkSize;
+
+            BuildInput.VoxelSize =
+                VoxelSize;
+
+            BuildInput.BeachWidth =
+                BeachWidth;
+
+            BuildInput.SeaLevel =
+                SeaLevel;
+
+            BuildInput.CenterChunk =
+                CenterChunk;
+
+            BuildInput.SampleStep =
+                SampleStep;
+
+            BuildInput.InnerRadiusChunks =
+                InnerRadius;
+
+            BuildInput.OuterRadiusChunks =
+                OuterRadius;
+
+            TWeakObjectPtr<UProceduralMeshComponent> WeakMesh(
+                Mesh);
 
             Async(
                 EAsyncExecution::ThreadPool,
@@ -2430,15 +2443,20 @@ void AVoxelWorld::UpdateFarLOD(
                 });
         };
 
-    Schedule(
+    /*
+     * Replacing the complete mesh section on update keeps the ring
+     * deterministic and prevents stale geometry from previous centers.
+     */
+    ScheduleLOD(
         FarLOD1Mesh,
         2,
         StreamingRadius,
         LOD1Radius);
 
-    Schedule(
+    ScheduleLOD(
         FarLOD2Mesh,
         4,
         LOD1Radius,
         LOD2Radius);
 }
+
