@@ -575,28 +575,22 @@ void AVoxelWorld::UpdateChunkStreaming()
         for (const FIntVector& UnloadedCoord :
             ChunksToUnload)
         {
-            static const FIntVector Directions[] =
+            for (int32 Z = -1; Z <= 1; ++Z)
             {
-                FIntVector(-1, 0, 0),
-                FIntVector(1, 0, 0),
-                FIntVector(0, -1, 0),
-                FIntVector(0, 1, 0),
-                FIntVector(0, 0, -1),
-                FIntVector(0, 0, 1)
-            };
-
-
-            for (const FIntVector& Direction :
-                Directions)
-            {
-                const FIntVector NeighborCoord =
-                    UnloadedCoord + Direction;
-
-
-                if (AVoxelChunk* Neighbor =
-                    GetChunk(NeighborCoord))
+                for (int32 Y = -1; Y <= 1; ++Y)
                 {
-                    Neighbor->RebuildMesh();
+                    for (int32 X = -1; X <= 1; ++X)
+                    {
+                        const FIntVector NeighborCoord =
+                            UnloadedCoord +
+                            FIntVector(X, Y, Z);
+
+                        if (AVoxelChunk* Neighbor =
+                            GetChunk(NeighborCoord))
+                        {
+                            Neighbor->RebuildMesh();
+                        }
+                    }
                 }
             }
         }
