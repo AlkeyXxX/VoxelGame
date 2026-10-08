@@ -2197,21 +2197,28 @@ void AVoxelWorld::ClearFarLOD()
 {
     ++FarLODGenerationVersion;
 
-    if (FarLOD1Mesh)
+    UProceduralMeshComponent* FarMeshes[] =
     {
-        FarLOD1Mesh->ClearMeshSection(0);
-        FarLOD1Mesh->ClearMeshSection(1);
-        FarLOD1Mesh->DestroyComponent();
-        FarLOD1Mesh = nullptr;
+        FarLOD1Mesh,
+        FarLOD2Mesh,
+        FarLOD3Mesh,
+        FarLOD4Mesh
+    };
+
+    for (UProceduralMeshComponent* Mesh : FarMeshes)
+    {
+        if (Mesh)
+        {
+            Mesh->ClearMeshSection(0);
+            Mesh->ClearMeshSection(1);
+            Mesh->DestroyComponent();
+        }
     }
 
-    if (FarLOD2Mesh)
-    {
-        FarLOD2Mesh->ClearMeshSection(0);
-        FarLOD2Mesh->ClearMeshSection(1);
-        FarLOD2Mesh->DestroyComponent();
-        FarLOD2Mesh = nullptr;
-    }
+    FarLOD1Mesh = nullptr;
+    FarLOD2Mesh = nullptr;
+    FarLOD3Mesh = nullptr;
+    FarLOD4Mesh = nullptr;
 
     bFarLODInitialized = false;
     LastFarLODCenter = FIntVector::ZeroValue;
@@ -2294,7 +2301,30 @@ void AVoxelWorld::UpdateFarLOD(
                 WaterMaterial);
     }
 
-    if (!FarLOD1Mesh || !FarLOD2Mesh)
+    if (!FarLOD3Mesh)
+    {
+        FarLOD3Mesh =
+            CreateFarLODMeshComponent(
+                this,
+                TEXT("FarLOD3"),
+                Material,
+                WaterMaterial);
+    }
+
+    if (!FarLOD4Mesh)
+    {
+        FarLOD4Mesh =
+            CreateFarLODMeshComponent(
+                this,
+                TEXT("FarLOD4"),
+                Material,
+                WaterMaterial);
+    }
+
+    if (!FarLOD1Mesh ||
+        !FarLOD2Mesh ||
+        !FarLOD3Mesh ||
+        !FarLOD4Mesh)
     {
         return;
     }
@@ -2476,6 +2506,12 @@ void AVoxelWorld::UpdateFarLOD(
      * Replacing the complete mesh section on update keeps the ring
      * deterministic and prevents stale geometry from previous centers.
      */
+    /*
+     * Keep the first rings detailed enough to preserve the visual
+     * transition from Full terrain, then increase the sample step
+     * aggressively with distance. This keeps the vertex count almost
+     * constant even though the visible radius becomes much larger.
+     */
     ScheduleLOD(
         FarLOD1Mesh,
         2,
@@ -2487,5 +2523,17 @@ void AVoxelWorld::UpdateFarLOD(
         4,
         LOD1Radius + 1,
         LOD2Radius);
+
+    ScheduleLOD(
+        FarLOD3Mesh,
+        8,
+        LOD2Radius + 1,
+        LOD3Radius);
+
+    ScheduleLOD(
+        FarLOD4Mesh,
+        16,
+        LOD3Radius + 1,
+        LOD4Radius);
 }
 
