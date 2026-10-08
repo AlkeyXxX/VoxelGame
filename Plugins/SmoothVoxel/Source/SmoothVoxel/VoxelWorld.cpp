@@ -417,10 +417,13 @@ void AVoxelWorld::UpdateChunkStreaming()
     TArray<FIntVector> ChunksToUnload;
 
 
+    const int32 EffectiveLOD2Radius =
+        FMath::Max(LOD2Radius, LOD1Radius);
+
     const int32 EffectiveUnloadRadius =
         FMath::Max(
             UnloadRadius,
-            StreamingRadius + 1);
+            EffectiveLOD2Radius + 1);
 
 
     for (const TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
@@ -468,9 +471,13 @@ void AVoxelWorld::UpdateChunkStreaming()
 
 
     /*
-     * Если центр не изменился и вокруг уже всё загружено,
-     * здесь практически ничего не делаем.
+     * Дальняя зона теперь тоже стримится: её chunks нужны как
+     * дешёвая геометрия LOD. Полный mesh остаётся только внутри
+     * StreamingRadius.
      */
+    const int32 EffectiveLoadRadius =
+        FMath::Max(StreamingRadius, FMath::Max(LOD1Radius, LOD2Radius));
+
     TArray<FIntVector> Candidates;
 
 
@@ -571,6 +578,27 @@ void AVoxelWorld::UpdateChunkStreaming()
         {
             ++LoadedThisTick;
         }
+    }
+
+
+    /*
+     * Применяем LOD ко всем уже загруженным chunks.
+     * Full: <= StreamingRadius
+     * LOD1: <= LOD1Radius
+     * LOD2: <= LOD2Radius
+     */
+    for (const TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
+    {
+        const FIntVector& Coord = Pair.Key;
+        AVoxelChunk* Chunk = Pair.Value;
+
+        if (!Chunk)
+        {
+            continue;
+        }
+
+        const int32 Distance = GetChunkDistance(Coord, CenterChunk);
+        UpdateChunkLOD(Chunk, Distance);
     }
 
 
@@ -1979,4 +2007,48 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
     }
 
     return true;
+}
+
+
+int32 AVoxelWorld::GetChunkDistance(
+    const FIntVector& A,
+    const FIntVector& B) const
+{
+    const int32 DX = FMath::Abs(A.X - B.X);
+    const int32 DY = FMath::Abs(A.Y - B.Y);
+    const int32 DZ = FMath::Abs(A.Z - B.Z);
+
+    return FMath::Max3(DX, DY, DZ);
+}
+
+
+void AVoxelWorld::UpdateChunkLOD(
+    AVoxelChunk* Chunk,
+    int32 Distance)
+{
+    if (!Chunk)
+    {
+        return;
+    }
+
+    /*
+     * Не перестраиваем mesh, если LOD уже соответствует дистанции.
+     * Состояние хранится внутри AVoxelChunk.
+     */
+    if (Distance <= StreamingRadius)
+    {
+        Chunk->RebuildMesh();
+        return;
+    }
+
+    if (Distance <= LOD1Radius)
+    {
+        Chunk->RebuildLODMesh(2);
+        return;
+    }
+
+    if (Distance <= LOD2Radius)
+    {
+        Chunk->RebuildLODMesh(4);
+    }
 }
