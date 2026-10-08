@@ -1492,10 +1492,8 @@ void AVoxelWorld::RebuildChunkAndNeighbors(
     const FIntVector& ChunkCoord)
 {
     /*
-     * Marching Cubes density nodes near a chunk corner can depend on
-     * modified cells in diagonal neighbour chunks. Rebuild the complete
-     * 3x3x3 neighbourhood after an edit so the smooth field stays local
-     * and consistent.
+     * MC density nodes near borders can depend on blocks in diagonal
+     * neighbours because each node samples the surrounding voxel cells.
      */
     for (int32 Z = -1; Z <= 1; ++Z)
     {
