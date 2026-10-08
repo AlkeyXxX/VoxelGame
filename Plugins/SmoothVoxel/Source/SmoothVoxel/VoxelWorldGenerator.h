@@ -27,6 +27,17 @@ enum class EVoxelLandform : uint8
     Mountains
 };
 
+/*
+ * Three major regions used by future POI/loot rules.
+ * Plains and Forest share Green; Desert and Snow remain separate.
+ */
+enum class EVoxelMajorBiome : uint8
+{
+    Green = 0,
+    Desert,
+    Winter
+};
+
 struct FVoxelWorldGenerationSettings
 {
     int32 Seed = 1337;
@@ -74,6 +85,10 @@ public:
         int32 WorldX,
         int32 WorldY,
         int32 SurfaceHeight) const;
+
+    EVoxelMajorBiome GetMajorBiome(
+        int32 WorldX,
+        int32 WorldY) const;
 
     EVoxelLandform GetLandform(
         int32 WorldX,
