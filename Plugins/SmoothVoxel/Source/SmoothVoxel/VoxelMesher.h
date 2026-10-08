@@ -61,6 +61,7 @@ struct FVoxelMeshBuildInput
 {
 	int32 Size = 32;
 	float VoxelSize = 100.0f;
+	FVector WorldOrigin = FVector::ZeroVector;
 
 	TArray<uint8> Blocks;
 	TArray<uint8> Biomes;
@@ -139,6 +140,8 @@ private:
 		const FVector& D,
 		const FVector& Normal,
 		const FLinearColor& Color,
-		bool bWater);
+		bool bWater,
+		const FVector& WorldOrigin,
+		float VoxelSize);
 };
 
