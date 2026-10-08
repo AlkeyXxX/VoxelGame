@@ -10,6 +10,7 @@
 #include "Engine/Engine.h"
 
 #include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 #include "InputCoreTypes.h"
 
 #include "Kismet/GameplayStatics.h"
@@ -145,6 +146,7 @@ void AVoxelWorld::Tick(
     Super::Tick(DeltaSeconds);
 
     UpdateChunkStreaming();
+    UpdateUnderwaterEffect();
 
     if (AutoSaveInterval > 0.0f)
     {
@@ -1287,6 +1289,77 @@ void AVoxelWorld::BuildMarchingCubesData(
             }
         }
     }
+}
+
+
+bool AVoxelWorld::IsPositionInsideWater(
+    const FVector& WorldPosition) const
+{
+    FIntVector WorldBlock;
+
+    if (!WorldToBlock(
+        WorldPosition,
+        WorldBlock))
+    {
+        return false;
+    }
+
+    const FIntVector ChunkCoord =
+        WorldBlockToChunk(WorldBlock);
+
+    const AVoxelChunk* Chunk =
+        Chunks.FindRef(ChunkCoord);
+
+    if (!Chunk)
+    {
+        return false;
+    }
+
+    const FIntVector LocalBlock =
+        WorldBlockToLocal(WorldBlock);
+
+    return Chunk->GetBlock(
+        LocalBlock.X,
+        LocalBlock.Y,
+        LocalBlock.Z) ==
+        uint8(EVoxelBlock::Water);
+}
+
+
+void AVoxelWorld::UpdateUnderwaterEffect()
+{
+    APlayerController* PC =
+        UGameplayStatics::GetPlayerController(
+            this,
+            0);
+
+    if (!PC || !PC->PlayerCameraManager)
+    {
+        return;
+    }
+
+    const bool bUnderwater =
+        IsPositionInsideWater(
+            PC->PlayerCameraManager->GetCameraLocation());
+
+    if (bUnderwater == bUnderwaterEffectActive)
+    {
+        return;
+    }
+
+    bUnderwaterEffectActive = bUnderwater;
+
+    PC->PlayerCameraManager->StartCameraFade(
+        bUnderwater ? 0.0f : 0.20f,
+        bUnderwater ? 0.20f : 0.0f,
+        0.20f,
+        FLinearColor(
+            0.02f,
+            0.16f,
+            0.42f,
+            1.0f),
+        false,
+        false);
 }
 
 
