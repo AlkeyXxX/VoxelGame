@@ -1579,43 +1579,81 @@ bool AVoxelWorld::BreakBlockByRay()
 
 
     /*
-     * Чуть двигаемся внутрь блока,
-     * чтобы получить именно тот блок,
-     * по которому кликнули.
+     * На MC-поверхности ImpactPoint находится на сглаженной границе,
+     * поэтому одного FloorToInt недостаточно. Идём по нормали внутрь
+     * поверхности и берём первый реально ломаемый voxel.
      */
-    const FVector BlockPoint =
-        Hit.ImpactPoint -
-        Hit.ImpactNormal * 0.01f;
-
-
     FIntVector WorldBlock;
+    AVoxelChunk* Chunk = nullptr;
+    FIntVector LocalBlock;
+    EVoxelBlock HitBlock = EVoxelBlock::Air;
+    bool bFoundBreakableBlock = false;
 
+    const float SampleStep =
+        FMath::Max(
+            VoxelSize * 0.05f,
+            1.0f);
 
-    if (!WorldToBlock(
-        BlockPoint,
-        WorldBlock))
+    const int32 MaxSamples = 16;
+
+    for (int32 Sample = 1;
+         Sample <= MaxSamples;
+         ++Sample)
+    {
+        const FVector SamplePoint =
+            Hit.ImpactPoint -
+            Hit.ImpactNormal *
+            (SampleStep * Sample);
+
+        FIntVector CandidateWorldBlock;
+
+        if (!WorldToBlock(
+            SamplePoint,
+            CandidateWorldBlock))
+        {
+            continue;
+        }
+
+        AVoxelChunk* CandidateChunk =
+            GetChunk(
+                WorldBlockToChunk(
+                    CandidateWorldBlock));
+
+        if (!CandidateChunk)
+        {
+            continue;
+        }
+
+        const FIntVector CandidateLocalBlock =
+            WorldBlockToLocal(
+                CandidateWorldBlock);
+
+        const EVoxelBlock CandidateBlock =
+            static_cast<EVoxelBlock>(
+                CandidateChunk->GetBlock(
+                    CandidateLocalBlock.X,
+                    CandidateLocalBlock.Y,
+                    CandidateLocalBlock.Z));
+
+        if (!UVoxelBlockLibrary::CanBreakBlockFromTable(
+            BlockDataTable,
+            CandidateBlock))
+        {
+            continue;
+        }
+
+        WorldBlock = CandidateWorldBlock;
+        Chunk = CandidateChunk;
+        LocalBlock = CandidateLocalBlock;
+        HitBlock = CandidateBlock;
+        bFoundBreakableBlock = true;
+        break;
+    }
+
+    if (!bFoundBreakableBlock)
     {
         return false;
     }
-
-
-    AVoxelChunk* Chunk =
-        GetChunk(WorldBlockToChunk(WorldBlock));
-
-    if (!Chunk)
-    {
-        return false;
-    }
-
-    const FIntVector LocalBlock =
-        WorldBlockToLocal(WorldBlock);
-
-    const EVoxelBlock HitBlock =
-        static_cast<EVoxelBlock>(
-            Chunk->GetBlock(
-                LocalBlock.X,
-                LocalBlock.Y,
-                LocalBlock.Z));
 
     /*
      * Вся игровая логика блока теперь смотрит в единый реестр.
