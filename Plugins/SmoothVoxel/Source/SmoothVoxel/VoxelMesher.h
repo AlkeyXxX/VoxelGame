@@ -131,13 +131,15 @@ private:
 		int32 Z,
 		bool bCurrentWater);
 
-	static bool IsWaterShoreSideVisible(
-		const FVoxelMeshBuildInput& Input,
-		int32 X,
-		int32 Y,
-		int32 Z,
-		int32 OffsetX,
-		int32 OffsetY);
+	static void AddWaterSurfaceQuad(
+		FVoxelMeshBuildOutput& Output,
+		const FVector& A,
+		const FVector& B,
+		const FVector& C,
+		const FVector& D,
+		const FLinearColor& Color,
+		const FVector& WorldOrigin,
+		float VoxelSize);
 
 	static void AddFace(
 		FVoxelMeshBuildOutput& Output,
