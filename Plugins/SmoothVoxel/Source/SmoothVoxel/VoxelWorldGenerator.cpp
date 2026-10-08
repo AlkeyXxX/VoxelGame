@@ -10,6 +10,7 @@ void FVoxelWorldGenerator::Configure(
     Settings = InSettings;
     Settings.WorldBlocksX = FMath::Max(1, Settings.WorldBlocksX);
     Settings.WorldBlocksY = FMath::Max(1, Settings.WorldBlocksY);
+    Settings.MaxTerrainHeight = FMath::Max(1, Settings.MaxTerrainHeight);
 }
 
 float FVoxelWorldGenerator::GetTerrainNoise(
@@ -79,16 +80,16 @@ EVoxelLandform FVoxelWorldGenerator::GetLandform(
     const float Noise = GetLandformNoise(WorldX, WorldY);
 
     /*
-     * Keep large flat areas useful for future city POIs, use hills as
-     * the common transition terrain, and make mountains less frequent.
-     * Thresholds can be tuned later without changing biome layout.
+     * Keep flatlands common for large city POIs, while widening the
+     * mountain mask and giving hills their own substantial share.
+     * These thresholds affect landforms only, never climate regions.
      */
-    if (Noise > 0.18f)
+    if (Noise > 0.10f)
     {
         return EVoxelLandform::Mountains;
     }
 
-    if (Noise < -0.12f)
+    if (Noise < -0.08f)
     {
         return EVoxelLandform::Flatlands;
     }
@@ -206,20 +207,20 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
 
     case EVoxelLandform::Hills:
         /*
-         * Rolling terrain: broad macro undulation plus softer local hills.
+         * Rolling hills use the broad hill noise as a true height signal,
+         * not only the tiny detail-noise budget. This makes ridges visible
+         * while keeping their tops below mountain peaks.
          */
         Height =
             Settings.BaseHeight +
             FMath::RoundToInt(
-                TerrainNoise * HeightVariation * 0.72f) +
+                TerrainNoise * HeightVariation * 0.35f) +
             FMath::RoundToInt(
-                HillNoise *
-                static_cast<float>(Settings.DetailHeightVariation) *
-                0.85f) +
+                HillNoise * HeightVariation * 0.95f) +
             FMath::RoundToInt(
                 DetailNoise *
                 static_cast<float>(Settings.DetailHeightVariation) *
-                0.35f);
+                0.45f);
         break;
 
     case EVoxelLandform::Mountains:
@@ -233,11 +234,11 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
             const float MountainMask =
                 FMath::Pow(
                     FMath::Clamp(
-                        (GetLandformNoise(WorldX, WorldY) - 0.18f) /
-                            0.82f,
+                        (GetLandformNoise(WorldX, WorldY) - 0.10f) /
+                            0.42f,
                         0.0f,
                         1.0f),
-                    0.70f);
+                    0.65f);
 
             const FVector2D RidgeSamplePosition(
                 NormalizedX * 23.0f + Settings.Seed * 0.031f,
@@ -252,9 +253,9 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
             Height =
                 Settings.BaseHeight +
                 FMath::RoundToInt(
-                    TerrainNoise * HeightVariation * 0.55f +
-                    MountainMask * HeightVariation * 1.15f +
-                    RidgeNoise * HeightVariation * 0.35f) +
+                    TerrainNoise * HeightVariation * 0.25f +
+                    MountainMask * HeightVariation * 4.0f +
+                    RidgeNoise * HeightVariation * 0.45f) +
                 FMath::RoundToInt(
                     DetailNoise *
                     static_cast<float>(Settings.DetailHeightVariation) *
@@ -281,7 +282,10 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
                 Settings.SeaLevel - 1);
     }
 
-    return FMath::Max(Height, 1);
+    return FMath::Clamp(
+        Height,
+        1,
+        Settings.MaxTerrainHeight);
 }
 
 float FVoxelWorldGenerator::GetTemperature(
