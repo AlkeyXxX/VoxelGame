@@ -209,10 +209,11 @@ public:
 
     /*
      * Как часто перестраивать дальние LOD при движении по чанкам.
-     * 2 означает, что далёкие кольца обновляются через каждый второй chunk.
+     * 1 держит границы LOD синхронными с Full чанками и исключает
+     * временные пустые полосы при переходе между соседними chunks.
      */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="8"))
-    int32 LODUpdateChunkInterval = 2;
+    int32 LODUpdateChunkInterval = 1;
 
     /*
      * Радиус, после которого Full chunk можно выгрузить.
