@@ -1244,8 +1244,8 @@ void AVoxelWorld::BuildNeighborData(
  * modified cells становятся Air в smooth field, а сам modified
  * block затем попадает в cubic construction layer.
  *
- * Диапазон локальных block coordinates: [-1, Size + 1].
- * Этого хватает для node density и одного слоя соседних cells,
+ * Диапазон локальных block coordinates: [-2, Size + 1].
+ * Этого хватает для node density и слоя cells вокруг границы,
  * которые нужны для бесшовной стыковки Surface Nets между chunks.
  */
 void AVoxelWorld::BuildSurfaceNetsData(
