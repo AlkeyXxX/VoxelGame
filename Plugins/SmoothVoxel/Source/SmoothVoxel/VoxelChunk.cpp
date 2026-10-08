@@ -811,10 +811,8 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
             WaterInput.Blocks.SetNumZeroed(
                 LODSize * LODSize * LODSize);
 
-            const int32 LODSide = LODSize + 2;
-
             auto IsWaterAtSource =
-                [&SourceSmoothInput, SourceSide, &SourceIndex](int32 SX, int32 SY, int32 SZ)
+                [&SourceSmoothInput, SourceSize, &SourceIndex](int32 SX, int32 SY, int32 SZ)
                 {
                     const int32 CX =
                         FMath::Clamp(SX, -1, SourceSize);
