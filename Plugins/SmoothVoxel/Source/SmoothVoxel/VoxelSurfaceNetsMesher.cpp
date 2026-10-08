@@ -364,21 +364,33 @@ uint8 FVoxelSurfaceNetsMesher::GetRepresentativeBlock(
     int32 Y,
     int32 Z)
 {
-    int32 BestBlock = uint8(EVoxelBlock::Stone);
-    int32 BestCount = 0;
+    /*
+     * Surface Nets cell (X,Y,Z) is influenced by density nodes whose
+     * block support spans one voxel around those nodes. Choose the
+     * visible material from the highest solid block in that support
+     * neighbourhood so a grass/dirt surface does not default to stone.
+     */
+    bool bFound = false;
+    int32 BestZ = TNumericLimits<int32>::Lowest();
+    int32 BestDistance = TNumericLimits<int32>::Max();
+    uint8 BestBlock = uint8(EVoxelBlock::Stone);
 
-    for (int32 DZ = 0; DZ <= 1; ++DZ)
+    for (int32 DZ = -1; DZ <= 1; ++DZ)
     {
-        for (int32 DY = 0; DY <= 1; ++DY)
+        for (int32 DY = -1; DY <= 1; ++DY)
         {
-            for (int32 DX = 0; DX <= 1; ++DX)
+            for (int32 DX = -1; DX <= 1; ++DX)
             {
+                const int32 SampleX = X + DX;
+                const int32 SampleY = Y + DY;
+                const int32 SampleZ = Z + DZ;
+
                 const uint8 Block =
                     GetBlock(
                         Input,
-                        X + DX,
-                        Y + DY,
-                        Z + DZ);
+                        SampleX,
+                        SampleY,
+                        SampleZ);
 
                 if (!IsVoxelSolid(
                     static_cast<EVoxelBlock>(Block)))
@@ -386,36 +398,26 @@ uint8 FVoxelSurfaceNetsMesher::GetRepresentativeBlock(
                     continue;
                 }
 
-                int32 Count = 0;
+                const int32 Distance =
+                    FMath::Abs(DX) +
+                    FMath::Abs(DY) +
+                    FMath::Abs(DZ);
 
-                for (int32 AZ = 0; AZ <= 1; ++AZ)
+                if (!bFound ||
+                    SampleZ > BestZ ||
+                    (SampleZ == BestZ &&
+                     Distance < BestDistance))
                 {
-                    for (int32 AY = 0; AY <= 1; ++AY)
-                    {
-                        for (int32 AX = 0; AX <= 1; ++AX)
-                        {
-                            if (GetBlock(
-                                    Input,
-                                    X + AX,
-                                    Y + AY,
-                                    Z + AZ) == Block)
-                            {
-                                ++Count;
-                            }
-                        }
-                    }
-                }
-
-                if (Count > BestCount)
-                {
-                    BestCount = Count;
+                    bFound = true;
+                    BestZ = SampleZ;
+                    BestDistance = Distance;
                     BestBlock = Block;
                 }
             }
         }
     }
 
-    return static_cast<uint8>(BestBlock);
+    return BestBlock;
 }
 
 
@@ -648,8 +650,20 @@ void FVoxelSurfaceNetsMesher::Build(
                 const int32 VertexIndex =
                     Output.Vertices.Num();
 
+                /*
+                 * The binary block density represents block volumes,
+                 * while the legacy cubic water surface is placed on the
+                 * block boundary. The extracted Surface Nets surface sits
+                 * about half a voxel below that boundary, so lift the
+                 * smooth terrain by half a voxel.
+                 */
+                FVector WorldCellPosition =
+                    CellPosition;
+
+                WorldCellPosition.Z += 0.5f;
+
                 Output.Vertices.Add(
-                    CellPosition *
+                    WorldCellPosition *
                     Input.VoxelSize);
 
                 Output.Normals.Add(
