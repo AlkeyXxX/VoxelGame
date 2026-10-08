@@ -430,7 +430,7 @@ void FVoxelSurfaceNetsMesher::Build(
         return;
     }
 
-    const int32 BlockSide = Size + 3;
+    const int32 BlockSide = Size + 4;
 
     Output.Vertices.Reserve(
         Output.Vertices.Num() + Size * Size * Size);
