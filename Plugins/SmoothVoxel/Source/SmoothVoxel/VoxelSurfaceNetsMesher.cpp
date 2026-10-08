@@ -10,7 +10,7 @@ namespace
     constexpr int32 CellHalo = 1;
     constexpr int32 NodeHalo = 1;
 
-    FORCEINLINE int32 BlockIndex(
+    FORCEINLINE int32 SurfaceNetsBlockIndex(
         int32 X,
         int32 Y,
         int32 Z,
@@ -271,7 +271,7 @@ uint8 FVoxelSurfaceNetsMesher::GetBlock(
     }
 
     return Input.Blocks[
-        BlockIndex(
+        SurfaceNetsBlockIndex(
             X,
             Y,
             Z,
