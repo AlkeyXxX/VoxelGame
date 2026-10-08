@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h" 
 #include "VoxelTypes.h" 
 #include "VoxelMesher.h"
+#include "VoxelSurfaceNetsMesher.h"
 #include "VoxelWorldGenerator.h"
 #include "VoxelWorld.generated.h"
 
@@ -101,6 +102,10 @@ public:
     void BuildNeighborData(
         const FIntVector& ChunkCoord,
         FVoxelNeighborData& OutData) const;
+
+    void BuildSurfaceNetsData(
+        const FIntVector& ChunkCoord,
+        FVoxelSurfaceNetsBuildInput& OutData) const;
 
     /*
      * Debug helpers.
