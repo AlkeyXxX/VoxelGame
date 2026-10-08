@@ -478,6 +478,7 @@ void AVoxelChunk::RebuildMesh()
 
     CubicInput.Size = ChunkSize;
     CubicInput.VoxelSize = VoxelSize;
+    CubicInput.WorldOrigin = GetActorLocation();
 
     CopyBlockData(CubicInput.Blocks);
     CopyBiomeData(CubicInput.Biomes);
