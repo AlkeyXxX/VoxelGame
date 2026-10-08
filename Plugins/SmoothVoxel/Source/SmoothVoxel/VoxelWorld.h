@@ -184,7 +184,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|World",
         meta=(ClampMin="1", ClampMax="32"))
-    int32 WorldSizeZ = 1;
+    int32 WorldSizeZ = 2;
 
 
     /*
