@@ -1,6 +1,7 @@
 
 #include "VoxelChunk.h"
 #include "VoxelWorld.h"
+#include "VoxelSurfaceNetsMesher.h"
 
 #include "ProceduralMeshComponent.h"
 #include "Async/Async.h"
@@ -49,7 +50,9 @@ void AVoxelChunk::InitializeChunk(
         ChunkSize * ChunkSize * ChunkSize;
 
     Blocks.SetNumZeroed(BlockCount);
+    BaseBlocks.SetNumZeroed(BlockCount);
     Biomes.SetNumZeroed(BlockCount);
+    ModificationFlags.SetNumZeroed(BlockCount);
 
 
     if (Material)
@@ -118,6 +121,36 @@ uint8 AVoxelChunk::GetBlock(
 }
 
 
+uint8 AVoxelChunk::GetTerrainBlock(
+    int32 X,
+    int32 Y,
+    int32 Z) const
+{
+    if (X < 0 || X >= ChunkSize ||
+        Y < 0 || Y >= ChunkSize ||
+        Z < 0 || Z >= ChunkSize)
+    {
+        return uint8(EVoxelBlock::Air);
+    }
+
+    const int32 Index =
+        BlockIndex(X, Y, Z);
+
+    /*
+     * Modified cells belong to the player layer. Surface Nets must
+     * treat them as empty so a placed block can remain perfectly cubic
+     * and a removed terrain block becomes a hole in the smooth field.
+     */
+    if (ModificationFlags.IsValidIndex(Index) &&
+        ModificationFlags[Index] != 0)
+    {
+        return uint8(EVoxelBlock::Air);
+    }
+
+    return BaseBlocks[Index];
+}
+
+
 void AVoxelChunk::SetBiome(
     int32 X,
     int32 Y,
@@ -155,6 +188,53 @@ void AVoxelChunk::SetBlock(
 }
 
 
+void AVoxelChunk::SetBaseBlock(
+    int32 X,
+    int32 Y,
+    int32 Z,
+    uint8 Block)
+{
+    if (X < 0 || X >= ChunkSize ||
+        Y < 0 || Y >= ChunkSize ||
+        Z < 0 || Z >= ChunkSize)
+    {
+        return;
+    }
+
+    BaseBlocks[
+        BlockIndex(X, Y, Z)
+    ] = Block;
+}
+
+
+void AVoxelChunk::SetModificationFlag(
+    int32 X,
+    int32 Y,
+    int32 Z,
+    bool bModified)
+{
+    if (X < 0 || X >= ChunkSize ||
+        Y < 0 || Y >= ChunkSize ||
+        Z < 0 || Z >= ChunkSize)
+    {
+        return;
+    }
+
+    ModificationFlags[
+        BlockIndex(X, Y, Z)
+    ] = bModified ? 1 : 0;
+}
+
+
+void AVoxelChunk::ClearModificationFlags()
+{
+    const int32 BlockCount =
+        ChunkSize * ChunkSize * ChunkSize;
+
+    ModificationFlags.SetNumZeroed(BlockCount);
+}
+
+
 void AVoxelChunk::RemoveBlock(
     int32 X,
     int32 Y,
@@ -179,6 +259,13 @@ void AVoxelChunk::CopyBiomeData(
     TArray<uint8>& OutData) const
 {
     OutData = Biomes;
+}
+
+
+void AVoxelChunk::CopyModificationFlags(
+    TArray<uint8>& OutData) const
+{
+    OutData = ModificationFlags;
 }
 
 
@@ -350,73 +437,108 @@ void AVoxelChunk::CopyZPlus(
  */
 void AVoxelChunk::RebuildMesh()
 {
-    /*
-     * Новая версия mesh.
-     */
     ++MeshGenerationVersion;
 
     const uint32 LocalVersion =
         MeshGenerationVersion;
 
+    FVoxelMeshBuildInput CubicInput;
 
-    /*
-     * Полностью собираем snapshot на Game Thread.
-     */
-    FVoxelMeshBuildInput Input;
+    CubicInput.Size = ChunkSize;
+    CubicInput.VoxelSize = VoxelSize;
 
-    Input.Size = ChunkSize;
-    Input.VoxelSize = VoxelSize;
+    CopyBlockData(CubicInput.Blocks);
+    CopyBiomeData(CubicInput.Biomes);
+    CopyModificationFlags(CubicInput.StructureFlags);
 
+    CubicInput.Neighbors.Init(ChunkSize);
 
-    CopyBlockData(Input.Blocks);
-    CopyBiomeData(Input.Biomes);
+    FVoxelSurfaceNetsBuildInput SurfaceInput;
 
-    Input.Neighbors.Init(ChunkSize);
-
+    SurfaceInput.Init(ChunkSize);
+    SurfaceInput.VoxelSize = VoxelSize;
 
     if (World)
     {
         World->BuildNeighborData(
             ChunkCoord,
-            Input.Neighbors);
+            CubicInput.Neighbors);
+
+        World->BuildSurfaceNetsData(
+            ChunkCoord,
+            SurfaceInput);
     }
 
-
-    /*
-     * Сохраняем weak pointer.
-     *
-     * Если chunk будет уничтожен,
-     * worker ничего не применит.
-     */
     TWeakObjectPtr<AVoxelChunk> WeakThis(this);
 
-
-    /*
-     * Само построение выполняется в ThreadPool.
-     */
     Async(
         EAsyncExecution::ThreadPool,
 
         [
             WeakThis,
-            Input = MoveTemp(Input),
+            CubicInput = MoveTemp(CubicInput),
+            SurfaceInput = MoveTemp(SurfaceInput),
             LocalVersion
         ]() mutable
         {
             FVoxelMeshBuildOutput Output;
+            FVoxelMeshBuildOutput CubicOutput;
 
-
-            FVoxelMesher::Build(
-                Input,
+            FVoxelSurfaceNetsMesher::Build(
+                SurfaceInput,
                 Output);
 
+            FVoxelMesher::Build(
+                CubicInput,
+                CubicOutput);
 
             /*
-             * CreateMeshSection нельзя выполнять
-             * из worker thread.
-             *
-             * Возвращаемся на Game Thread.
+             * Surface Nets owns the solid terrain section.
+             * The legacy cubic mesher contributes only modified
+             * construction blocks. Water remains in its own section.
              */
+            const int32 VertexOffset =
+                Output.Vertices.Num();
+
+            Output.Vertices.Append(
+                CubicOutput.Vertices);
+
+            for (const int32 Triangle :
+                CubicOutput.Triangles)
+            {
+                Output.Triangles.Add(
+                    Triangle + VertexOffset);
+            }
+
+            Output.Normals.Append(
+                CubicOutput.Normals);
+
+            Output.UV0.Append(
+                CubicOutput.UV0);
+
+            Output.VertexColors.Append(
+                CubicOutput.VertexColors);
+
+            Output.WaterVertices =
+                MoveTemp(
+                    CubicOutput.WaterVertices);
+
+            Output.WaterTriangles =
+                MoveTemp(
+                    CubicOutput.WaterTriangles);
+
+            Output.WaterNormals =
+                MoveTemp(
+                    CubicOutput.WaterNormals);
+
+            Output.WaterUV0 =
+                MoveTemp(
+                    CubicOutput.WaterUV0);
+
+            Output.WaterVertexColors =
+                MoveTemp(
+                    CubicOutput.WaterVertexColors);
+
             AsyncTask(
                 ENamedThreads::GameThread,
 
@@ -431,14 +553,12 @@ void AVoxelChunk::RebuildMesh()
                         return;
                     }
 
-
                     WeakThis->ApplyMesh(
                         MoveTemp(Output),
                         LocalVersion);
                 });
         });
 }
-
 
 void AVoxelChunk::ApplyMesh(
     FVoxelMeshBuildOutput&& Output,
@@ -468,49 +588,42 @@ void AVoxelChunk::ApplyMesh(
     Mesh->ClearMeshSection(1);
 
 
-    /*
-     * Если чанк полностью пустой,
-     * оставляем его без geometry.
-     */
-    if (Output.IsEmpty())
-    {
-        return;
-    }
-
-
     TArray<FLinearColor> VertexColors;
     TArray<FProcMeshTangent> Tangents;
 
-
-    /*
-     * Tangents здесь не нужны —
-     * Unreal сможет работать с normals.
-     */
-    Mesh->CreateMeshSection_LinearColor(
-        0,
-
-        Output.Vertices,
-        Output.Triangles,
-        Output.Normals,
-        Output.UV0,
-
-        TArray<FVector2D>(),
-        TArray<FVector2D>(),
-        TArray<FVector2D>(),
-
-        Output.VertexColors,
-
-        Tangents,
-
-        true);
-
-
-    if (Material)
+    if (Output.Vertices.Num() > 0 &&
+        Output.Triangles.Num() > 0)
     {
-        Mesh->SetMaterial(
+        /*
+         * Tangents здесь не нужны —
+         * Unreal сможет работать с normals.
+         */
+        Mesh->CreateMeshSection_LinearColor(
             0,
-            Material);
+
+            Output.Vertices,
+            Output.Triangles,
+            Output.Normals,
+            Output.UV0,
+
+            TArray<FVector2D>(),
+            TArray<FVector2D>(),
+            TArray<FVector2D>(),
+
+            Output.VertexColors,
+
+            Tangents,
+
+            true);
+
+        if (Material)
+        {
+            Mesh->SetMaterial(
+                0,
+                Material);
+        }
     }
+
 
     if (Output.WaterVertices.Num() > 0 &&
         Output.WaterTriangles.Num() > 0)
