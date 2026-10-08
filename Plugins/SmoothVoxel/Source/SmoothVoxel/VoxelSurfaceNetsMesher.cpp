@@ -166,8 +166,8 @@ namespace
         const TArray<float>& Densities,
         int32 Size)
     {
-        TArray<int32> Indices;
-        Indices.Reserve(4);
+        int32 Indices[4];
+        int32 IndexCount = 0;
 
         const int32 Candidates[4] = { A, B, C, D };
 
@@ -179,14 +179,27 @@ namespace
                 continue;
             }
 
-            if (Indices.Num() == 0 ||
-                Indices.Last() != Candidate)
+            bool bAlreadyAdded = false;
+
+            for (int32 Index = 0;
+                 Index < IndexCount;
+                 ++Index)
             {
-                Indices.Add(Candidate);
+                if (Indices[Index] == Candidate)
+                {
+                    bAlreadyAdded = true;
+                    break;
+                }
+            }
+
+            if (!bAlreadyAdded &&
+                IndexCount < 4)
+            {
+                Indices[IndexCount++] = Candidate;
             }
         }
 
-        if (Indices.Num() < 3)
+        if (IndexCount < 3)
         {
             return;
         }
@@ -227,14 +240,14 @@ namespace
         {
             Swap(
                 Indices[1],
-                Indices.Last());
+                Indices[IndexCount - 1]);
         }
 
         Output.Triangles.Add(Indices[0]);
         Output.Triangles.Add(Indices[1]);
         Output.Triangles.Add(Indices[2]);
 
-        if (Indices.Num() == 4)
+        if (IndexCount == 4)
         {
             Output.Triangles.Add(Indices[0]);
             Output.Triangles.Add(Indices[2]);
@@ -412,6 +425,17 @@ void FVoxelSurfaceNetsMesher::Build(
     }
 
     const int32 BlockSide = Size + 3;
+
+    Output.Vertices.Reserve(
+        Output.Vertices.Num() + Size * Size * Size);
+    Output.Normals.Reserve(
+        Output.Normals.Num() + Size * Size * Size);
+    Output.UV0.Reserve(
+        Output.UV0.Num() + Size * Size * Size);
+    Output.VertexColors.Reserve(
+        Output.VertexColors.Num() + Size * Size * Size);
+    Output.Triangles.Reserve(
+        Output.Triangles.Num() + Size * Size * 6);
 
     if (Input.Blocks.Num() !=
         BlockSide * BlockSide * BlockSide)
