@@ -158,15 +158,13 @@ namespace
 
     void AddSurfaceQuad(
         FVoxelMeshBuildOutput& Output,
-        const TArray<int32>& CellVertices,
         int32 A,
         int32 B,
         int32 C,
         int32 D,
         const FVector& FaceCenter,
         const TArray<float>& Densities,
-        int32 Size,
-        const FVector& VertexScale)
+        int32 Size)
     {
         TArray<int32> Indices;
         Indices.Reserve(4);
@@ -176,21 +174,17 @@ namespace
         for (const int32 Candidate : Candidates)
         {
             if (Candidate < 0 ||
-                Candidate >= CellVertices.Num())
+                Candidate >= Output.Vertices.Num())
             {
                 continue;
             }
 
-            const int32 VertexIndex = CellVertices[Candidate];
-
-            if (VertexIndex >= 0)
+            if (Indices.Num() == 0 ||
+                Indices.Last() != Candidate)
             {
-                Indices.Add(VertexIndex);
+                Indices.Add(Candidate);
             }
         }
-
-        Indices.SetNum(
-            Algo::Unique(Indices));
 
         if (Indices.Num() < 3)
         {
@@ -205,42 +199,6 @@ namespace
 
         if (!Outward.Normalize())
         {
-            return;
-        }
-
-        if (Indices.Num() == 3)
-        {
-            const FVector P0 =
-                Output.Vertices[Indices[0]];
-
-            const FVector P1 =
-                Output.Vertices[Indices[1]];
-
-            const FVector P2 =
-                Output.Vertices[Indices[2]];
-
-            FVector FaceNormal =
-                FVector::CrossProduct(
-                    P1 - P0,
-                    P2 - P0);
-
-            if (!FaceNormal.Normalize())
-            {
-                return;
-            }
-
-            if (FVector::DotProduct(
-                    FaceNormal,
-                    Outward) < 0.0f)
-            {
-                Swap(
-                    Indices[1],
-                    Indices[2]);
-            }
-
-            Output.Triangles.Add(Indices[0]);
-            Output.Triangles.Add(Indices[1]);
-            Output.Triangles.Add(Indices[2]);
             return;
         }
 
@@ -267,18 +225,21 @@ namespace
                 FaceNormal,
                 Outward) < 0.0f)
         {
-            Swap(Indices[1], Indices[3]);
+            Swap(
+                Indices[1],
+                Indices.Last());
         }
 
         Output.Triangles.Add(Indices[0]);
         Output.Triangles.Add(Indices[1]);
         Output.Triangles.Add(Indices[2]);
 
-        Output.Triangles.Add(Indices[0]);
-        Output.Triangles.Add(Indices[2]);
-        Output.Triangles.Add(Indices[3]);
-
-        (void)VertexScale;
+        if (Indices.Num() == 4)
+        {
+            Output.Triangles.Add(Indices[0]);
+            Output.Triangles.Add(Indices[2]);
+            Output.Triangles.Add(Indices[3]);
+        }
     }
 }
 
