@@ -175,6 +175,12 @@ void AVoxelWorld::ConfigureWorldGenerator()
     Settings.PlateauHeightStep = PlateauHeightStep;
     Settings.PlateauStrength = PlateauStrength;
     Settings.SeaLevel = SeaLevel;
+    Settings.bEnableCaves = bEnableCaves;
+    Settings.CaveNoiseScale = CaveNoiseScale;
+    Settings.CaveSecondaryScale = CaveSecondaryScale;
+    Settings.CaveThreshold = CaveThreshold;
+    Settings.CaveSecondaryThreshold = CaveSecondaryThreshold;
+    Settings.CaveMinDepth = CaveMinDepth;
     Settings.TemperatureScale = TemperatureScale;
     Settings.MoistureScale = MoistureScale;
 
