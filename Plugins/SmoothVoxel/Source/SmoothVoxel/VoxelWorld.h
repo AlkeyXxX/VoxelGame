@@ -451,6 +451,8 @@ private:
         const FIntVector& ChunkCoord);
 
     void UpdateChunkStreaming();
+    bool IsPositionInsideWater(const FVector& WorldPosition) const;
+    void UpdateUnderwaterEffect();
 
     void SetPersistentObjectStateInternal(int64 ObjectId, uint8 State);
 
@@ -458,5 +460,7 @@ private:
 
     FIntVector LastStreamingCenter =
         FIntVector::ZeroValue;
+
+    bool bUnderwaterEffectActive = false;
 };
 
