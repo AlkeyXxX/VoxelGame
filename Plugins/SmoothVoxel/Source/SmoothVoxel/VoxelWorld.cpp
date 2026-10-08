@@ -2307,13 +2307,25 @@ void AVoxelWorld::UpdateFarLOD(
 
             int32 LODLevel = 0;
 
-            if (MinDistance > LOD2Radius)
-            {
-                LODLevel = 2;
-            }
-            else if (MaxDistance > StreamingRadius)
+            /*
+             * Pick the LOD whose ring actually intersects this tile.
+             * LOD1 gets priority on the shared 4-8 boundary.
+             */
+            const bool bIntersectsLOD1 =
+                MaxDistance > StreamingRadius &&
+                MinDistance <= LOD1Radius;
+
+            const bool bIntersectsLOD2 =
+                MaxDistance > LOD1Radius &&
+                MinDistance <= LOD2Radius;
+
+            if (bIntersectsLOD1)
             {
                 LODLevel = 1;
+            }
+            else if (bIntersectsLOD2)
+            {
+                LODLevel = 2;
             }
 
             if (LODLevel == 0)
