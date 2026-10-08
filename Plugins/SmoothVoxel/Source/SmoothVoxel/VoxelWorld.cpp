@@ -169,11 +169,6 @@ void AVoxelWorld::ConfigureWorldGenerator()
     Settings.BaseHeight = BaseHeight;
     Settings.HeightVariation = HeightVariation;
     Settings.NoiseScale = NoiseScale;
-    Settings.DetailNoiseScale = DetailNoiseScale;
-    Settings.DetailHeightVariation = DetailHeightVariation;
-    Settings.CaveNoiseScale = CaveNoiseScale;
-    Settings.CaveThreshold = CaveThreshold;
-    Settings.CaveMinDepth = CaveMinDepth;
     Settings.TemperatureScale = TemperatureScale;
     Settings.MoistureScale = MoistureScale;
 
@@ -765,19 +760,7 @@ void AVoxelWorld::GenerateChunkBlocks(
                 uint8 Block =
                     uint8(EVoxelBlock::Air);
 
-                const bool bCave =
-                    WorldGenerator.IsCave(
-                        WorldX,
-                        WorldY,
-                        WorldZ,
-                        Height);
-
-                if (bCave)
-                {
-                    Block =
-                        uint8(EVoxelBlock::Air);
-                }
-                else if (WorldZ > Height)
+                if (WorldZ > Height)
                 {
                     if (WorldZ <= SeaLevel)
                     {
@@ -893,9 +876,6 @@ void AVoxelWorld::GenerateChunkBlocks(
             }
         }
     }
-
-    RefreshStructureFlagsAround(
-        ChunkCoord);
 }
 
 
@@ -1526,9 +1506,6 @@ void AVoxelWorld::SetBlockInternal(
         LocalIndex,
         Block);
 
-    MarkStructureSeamAroundBlock(
-        WorldBlock);
-
 
     /*
      * Перестраиваем изменённый chunk
@@ -1590,187 +1567,6 @@ void AVoxelWorld::SetBlockAtWorld(
  * Перестраиваем изменённый chunk
  * плюс шесть соседей.
  */
-void AVoxelWorld::RebuildStructureFlagsForChunk(
-    const FIntVector& TargetChunkCoord)
-{
-    AVoxelChunk* TargetChunk =
-        GetChunk(TargetChunkCoord);
-
-    if (!TargetChunk)
-    {
-        return;
-    }
-
-    TargetChunk->ClearStructureFlags();
-
-    /*
-     * A one-voxel cubic seam is built around every modified block.
-     * This includes diagonal cells so a rectangular cut has continuous
-     * cubic corners instead of leaving MC triangles in the corners.
-     */
-    for (int32 Z = -1; Z <= 1; ++Z)
-    {
-        for (int32 Y = -1; Y <= 1; ++Y)
-        {
-            for (int32 X = -1; X <= 1; ++X)
-            {
-                const FIntVector SourceChunkCoord =
-                    TargetChunkCoord +
-                    FIntVector(X, Y, Z);
-
-                const TMap<int32, uint8>* Modifications =
-                    ModifiedBlocks.Find(
-                        SourceChunkCoord);
-
-                if (!Modifications)
-                {
-                    continue;
-                }
-
-                for (const TPair<int32, uint8>& Modification :
-                    *Modifications)
-                {
-                    const int32 LocalIndex =
-                        Modification.Key;
-
-                    const int32 SourceLocalX =
-                        LocalIndex % ChunkSize;
-
-                    const int32 SourceLocalY =
-                        (LocalIndex / ChunkSize) % ChunkSize;
-
-                    const int32 SourceLocalZ =
-                        LocalIndex /
-                        (ChunkSize * ChunkSize);
-
-                    const FIntVector ModifiedWorldBlock(
-                        SourceChunkCoord.X * ChunkSize +
-                            SourceLocalX,
-                        SourceChunkCoord.Y * ChunkSize +
-                            SourceLocalY,
-                        SourceChunkCoord.Z * ChunkSize +
-                            SourceLocalZ);
-
-                    for (int32 DZ = -1; DZ <= 1; ++DZ)
-                    {
-                        for (int32 DY = -1; DY <= 1; ++DY)
-                        {
-                            for (int32 DX = -1; DX <= 1; ++DX)
-                            {
-                                const FIntVector SeamWorldBlock =
-                                    ModifiedWorldBlock +
-                                    FIntVector(DX, DY, DZ);
-
-                                if (WorldBlockToChunk(
-                                        SeamWorldBlock) !=
-                                    TargetChunkCoord)
-                                {
-                                    continue;
-                                }
-
-                                const FIntVector LocalBlock =
-                                    WorldBlockToLocal(
-                                        SeamWorldBlock);
-
-                                const EVoxelBlock Block =
-                                    static_cast<EVoxelBlock>(
-                                        TargetChunk->GetBlock(
-                                            LocalBlock.X,
-                                            LocalBlock.Y,
-                                            LocalBlock.Z));
-
-                                if (IsVoxelSolid(Block))
-                                {
-                                    TargetChunk->SetStructureFlag(
-                                        LocalBlock.X,
-                                        LocalBlock.Y,
-                                        LocalBlock.Z,
-                                        true);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-
-void AVoxelWorld::RefreshStructureFlagsAround(
-    const FIntVector& ChunkCoord)
-{
-    for (int32 Z = -1; Z <= 1; ++Z)
-    {
-        for (int32 Y = -1; Y <= 1; ++Y)
-        {
-            for (int32 X = -1; X <= 1; ++X)
-            {
-                RebuildStructureFlagsForChunk(
-                    ChunkCoord +
-                    FIntVector(X, Y, Z));
-            }
-        }
-    }
-}
-
-
-void AVoxelWorld::MarkStructureSeamAroundBlock(
-    const FIntVector& WorldBlock)
-{
-    /*
-     * Runtime edits only affect the edited voxel and its immediate
-     * neighborhood. Structure seam flags are monotonic during runtime,
-     * so there is no need to scan all saved modifications again.
-     */
-    for (int32 DZ = -1; DZ <= 1; ++DZ)
-    {
-        for (int32 DY = -1; DY <= 1; ++DY)
-        {
-            for (int32 DX = -1; DX <= 1; ++DX)
-            {
-                const FIntVector SeamWorldBlock =
-                    WorldBlock +
-                    FIntVector(DX, DY, DZ);
-
-                const FIntVector TargetChunkCoord =
-                    WorldBlockToChunk(
-                        SeamWorldBlock);
-
-                AVoxelChunk* TargetChunk =
-                    GetChunk(
-                        TargetChunkCoord);
-
-                if (!TargetChunk)
-                {
-                    continue;
-                }
-
-                const FIntVector LocalBlock =
-                    WorldBlockToLocal(
-                        SeamWorldBlock);
-
-                const EVoxelBlock Block =
-                    static_cast<EVoxelBlock>(
-                        TargetChunk->GetBlock(
-                            LocalBlock.X,
-                            LocalBlock.Y,
-                            LocalBlock.Z));
-
-                if (IsVoxelSolid(Block))
-                {
-                    TargetChunk->SetStructureFlag(
-                        LocalBlock.X,
-                        LocalBlock.Y,
-                        LocalBlock.Z,
-                        true);
-                }
-            }
-        }
-    }
-}
-
-
 void AVoxelWorld::RebuildChunkAndNeighbors(
     const FIntVector& ChunkCoord)
 {
@@ -2068,6 +1864,10 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
                 UVoxelInventoryComponent>();
     }
 
+    /*
+     * Если inventory подключён, выбранный слот обязан
+     * содержать тот же блок, который мы ставим.
+     */
     if (Inventory &&
         (Inventory->GetSelectedBlock() != BlockToPlace ||
          Inventory->GetSelectedQuantity() <= 0))
@@ -2120,72 +1920,45 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
         return false;
     }
 
-    /*
-     * The target cell is sampled outward from the impact point.
-     * On a smooth MC surface the exact adjacent voxel can change
-     * across a curved face, so we try a small series of positions.
-     */
-    const float SampleStep =
-        FMath::Max(
-            VoxelSize * 0.10f,
-            1.0f);
-
-    const int32 MaxSamples = 8;
+    const FVector PlacePoint =
+        Hit.ImpactPoint +
+        Hit.ImpactNormal *
+        (VoxelSize * 0.51f);
 
     FIntVector WorldBlock;
-    bool bFoundPlacementCell = false;
 
-    for (int32 Sample = 1;
-         Sample <= MaxSamples;
-         ++Sample)
+    if (!WorldToBlock(
+        PlacePoint,
+        WorldBlock))
     {
-        const FVector PlacePoint =
-            Hit.ImpactPoint +
-            Hit.ImpactNormal *
-            (VoxelSize * 0.51f +
-             SampleStep * (Sample - 1));
-
-        FIntVector CandidateWorldBlock;
-
-        if (!WorldToBlock(
-            PlacePoint,
-            CandidateWorldBlock))
-        {
-            continue;
-        }
-
-        AVoxelChunk* TargetChunk =
-            GetChunk(
-                WorldBlockToChunk(
-                    CandidateWorldBlock));
-
-        if (!TargetChunk)
-        {
-            continue;
-        }
-
-        const FIntVector CandidateLocalBlock =
-            WorldBlockToLocal(
-                CandidateWorldBlock);
-
-        const EVoxelBlock ExistingBlock =
-            static_cast<EVoxelBlock>(
-                TargetChunk->GetBlock(
-                    CandidateLocalBlock.X,
-                    CandidateLocalBlock.Y,
-                    CandidateLocalBlock.Z));
-
-        if (ExistingBlock != EVoxelBlock::Air)
-        {
-            continue;
-        }
-
-        WorldBlock = CandidateWorldBlock;
-        bFoundPlacementCell = true;
-        break;
+        return false;
     }
 
-    if (!bFoundPlacementCell)
+    const FIntVector LocalBlock =
+        WorldBlockToLocal(WorldBlock);
+
+    AVoxelChunk* TargetChunk =
+        GetChunk(
+            WorldBlockToChunk(
+                WorldBlock));
+
+    if (!TargetChunk)
+    {
+        return false;
+    }
+
+    /*
+     * Не перезаписываем существующий твёрдый блок.
+     * Воду также не считаем свободным местом для строительства.
+     */
+    const EVoxelBlock ExistingBlock =
+        static_cast<EVoxelBlock>(
+            TargetChunk->GetBlock(
+                LocalBlock.X,
+                LocalBlock.Y,
+                LocalBlock.Z));
+
+    if (ExistingBlock != EVoxelBlock::Air)
     {
         return false;
     }
