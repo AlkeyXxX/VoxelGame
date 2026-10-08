@@ -6,6 +6,9 @@ public class SmoothVoxel : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+		// Legacy module headers (including VoxelWorld.h) currently live here.
+		// Expose the module root so other project modules can include them.
+		PublicIncludePaths.Add(ModuleDirectory);
 
 		PublicDependencyModuleNames.AddRange(
 			new string[]
