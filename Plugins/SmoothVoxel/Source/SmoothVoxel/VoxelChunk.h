@@ -44,11 +44,34 @@ public:
         int32 Y,
         int32 Z) const;
 
+    /*
+     * Блок, который принадлежит smooth terrain.
+     * Любое player modification убирает эту ячейку из Surface Nets.
+     */
+    uint8 GetTerrainBlock(
+        int32 X,
+        int32 Y,
+        int32 Z) const;
+
     void SetBlock(
         int32 X,
         int32 Y,
         int32 Z,
         uint8 Block);
+
+    void SetBaseBlock(
+        int32 X,
+        int32 Y,
+        int32 Z,
+        uint8 Block);
+
+    void SetModificationFlag(
+        int32 X,
+        int32 Y,
+        int32 Z,
+        bool bModified);
+
+    void ClearModificationFlags();
 
     void RemoveBlock(
         int32 X,
@@ -88,6 +111,9 @@ public:
         TArray<uint8>& OutData) const;
 
     void CopyBiomeData(
+        TArray<uint8>& OutData) const;
+
+    void CopyModificationFlags(
         TArray<uint8>& OutData) const;
 
     void SetBiome(
@@ -172,7 +198,9 @@ private:
 
 
     TArray<uint8> Blocks;
+    TArray<uint8> BaseBlocks;
     TArray<uint8> Biomes;
+    TArray<uint8> ModificationFlags;
 
 
     /*
