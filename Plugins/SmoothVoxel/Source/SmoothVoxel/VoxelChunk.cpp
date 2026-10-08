@@ -428,6 +428,45 @@ void AVoxelChunk::CopyZPlus(
 }
 
 
+void CopyStructureFace(const TArray<uint8>& Flags, TArray<uint8>& OutData, int32 Size, int32 Axis, bool bPlus)
+{
+    const int32 Count = Size * Size;
+    OutData.SetNumUninitialized(Count);
+
+    for (int32 B = 0; B < Size; ++B)
+    {
+        for (int32 A = 0; A < Size; ++A)
+        {
+            int32 X = A;
+            int32 Y = B;
+            int32 Z = 0;
+
+            if (Axis == 0)
+            {
+                X = bPlus ? Size - 1 : 0;
+                Z = B;
+                Y = A;
+            }
+            else if (Axis == 1)
+            {
+                Y = bPlus ? Size - 1 : 0;
+                Z = B;
+                X = A;
+            }
+            else
+            {
+                Z = bPlus ? Size - 1 : 0;
+                Y = B;
+                X = A;
+            }
+
+            OutData[A + B * Size] =
+                Flags[X + Y * Size + Z * Size * Size];
+        }
+    }
+}
+
+
 /*
  * Запускает построение mesh в worker thread.
  *
@@ -650,3 +689,34 @@ void AVoxelChunk::ApplyMesh(
     }
 }
 
+
+
+void AVoxelChunk::CopyXMinusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 0, false);
+}
+
+void AVoxelChunk::CopyXPlusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 0, true);
+}
+
+void AVoxelChunk::CopyYMinusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 1, false);
+}
+
+void AVoxelChunk::CopyYPlusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 1, true);
+}
+
+void AVoxelChunk::CopyZMinusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 2, false);
+}
+
+void AVoxelChunk::CopyZPlusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 2, true);
+}
