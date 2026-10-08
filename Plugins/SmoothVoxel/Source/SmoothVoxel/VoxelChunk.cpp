@@ -474,6 +474,9 @@ void AVoxelChunk::RebuildMesh()
     const uint32 LocalVersion =
         MeshGenerationVersion;
 
+    bLOD = false;
+    CurrentLODLevel = 0;
+
     FVoxelMeshBuildInput CubicInput;
 
     CubicInput.Size = ChunkSize;
@@ -583,14 +586,196 @@ void AVoxelChunk::RebuildMesh()
 
                     WeakThis->ApplyMesh(
                         MoveTemp(Output),
-                        LocalVersion);
+                        LocalVersion,
+                        true);
                 });
         });
 }
 
+
+/*
+ * LOD строится из тех же данных чанка, но с уменьшенной дискретизацией.
+ * Это сохраняет форму мира и не требует отдельного генератора.
+ */
+void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
+{
+    DownsampleFactor = FMath::Max(DownsampleFactor, 2);
+
+    ++MeshGenerationVersion;
+
+    const uint32 LocalVersion =
+        MeshGenerationVersion;
+
+    bLOD = true;
+    CurrentLODLevel =
+        DownsampleFactor == 2 ? 1 : 2;
+
+    const int32 SourceSize = ChunkSize;
+    const int32 LODSize =
+        FMath::Max(1, SourceSize / DownsampleFactor);
+
+    TArray<uint8> SourceBlocks;
+    CopyBlockData(SourceBlocks);
+
+    TWeakObjectPtr<AVoxelChunk> WeakThis(this);
+
+    Async(
+        EAsyncExecution::ThreadPool,
+
+        [
+            WeakThis,
+            SourceBlocks = MoveTemp(SourceBlocks),
+            SourceSize,
+            LODSize,
+            DownsampleFactor,
+            LocalVersion
+        ]() mutable
+        {
+            FVoxelMeshBuildInput Input;
+
+            Input.Size = LODSize;
+            Input.VoxelSize =
+                WeakThis.IsValid()
+                    ? WeakThis->VoxelSize * DownsampleFactor
+                    : 100.0f;
+
+            /*
+             * WorldOrigin нужен только для UV воды.
+             * Получаем его на Game Thread безопаснее, поэтому для LOD
+             * он не используется в геометрии.
+             */
+            Input.WorldOrigin = FVector::ZeroVector;
+
+            Input.Blocks.SetNumZeroed(
+                LODSize * LODSize * LODSize);
+
+            auto SourceIndex =
+                [SourceSize](int32 X, int32 Y, int32 Z)
+                {
+                    return X +
+                        Y * SourceSize +
+                        Z * SourceSize * SourceSize;
+                };
+
+            auto IsSolid =
+                [](uint8 Block)
+                {
+                    const EVoxelBlock Type =
+                        static_cast<EVoxelBlock>(Block);
+
+                    return Type != EVoxelBlock::Air &&
+                           Type != EVoxelBlock::Water;
+                };
+
+            auto Priority =
+                [](uint8 Block)
+                {
+                    switch (static_cast<EVoxelBlock>(Block))
+                    {
+                    case EVoxelBlock::Grass: return 6;
+                    case EVoxelBlock::Sand:  return 5;
+                    case EVoxelBlock::Dirt:  return 4;
+                    case EVoxelBlock::Stone: return 3;
+                    case EVoxelBlock::Wood:  return 2;
+                    case EVoxelBlock::Water: return 1;
+                    default: return 0;
+                    }
+                };
+
+            for (int32 Z = 0; Z < LODSize; ++Z)
+            {
+                for (int32 Y = 0; Y < LODSize; ++Y)
+                {
+                    for (int32 X = 0; X < LODSize; ++X)
+                    {
+                        uint8 BestBlock =
+                            uint8(EVoxelBlock::Air);
+
+                        int32 BestPriority = 0;
+
+                        for (int32 OZ = 0; OZ < DownsampleFactor; ++OZ)
+                        {
+                            for (int32 OY = 0; OY < DownsampleFactor; ++OY)
+                            {
+                                for (int32 OX = 0; OX < DownsampleFactor; ++OX)
+                                {
+                                    const int32 SX =
+                                        FMath::Min(
+                                            X * DownsampleFactor + OX,
+                                            SourceSize - 1);
+
+                                    const int32 SY =
+                                        FMath::Min(
+                                            Y * DownsampleFactor + OY,
+                                            SourceSize - 1);
+
+                                    const int32 SZ =
+                                        FMath::Min(
+                                            Z * DownsampleFactor + OZ,
+                                            SourceSize - 1);
+
+                                    const uint8 Block =
+                                        SourceBlocks[
+                                            SourceIndex(
+                                                SX, SY, SZ)];
+
+                                    const int32 P =
+                                        Priority(Block);
+
+                                    if (P > BestPriority)
+                                    {
+                                        BestPriority = P;
+                                        BestBlock = Block;
+                                    }
+                                }
+                            }
+                        }
+
+                        Input.Blocks[
+                            X +
+                            Y * LODSize +
+                            Z * LODSize * LODSize] =
+                            BestBlock;
+                    }
+                }
+            }
+
+            /*
+             * Упрощённые LOD-чанки не строят collision.
+             */
+            FVoxelMeshBuildOutput Output;
+
+            FVoxelMesher::Build(
+                Input,
+                Output);
+
+            AsyncTask(
+                ENamedThreads::GameThread,
+
+                [
+                    WeakThis,
+                    Output = MoveTemp(Output),
+                    LocalVersion
+                ]() mutable
+                {
+                    if (!WeakThis.IsValid())
+                    {
+                        return;
+                    }
+
+                    WeakThis->ApplyMesh(
+                        MoveTemp(Output),
+                        LocalVersion,
+                        false);
+                });
+        });
+}
+
+
 void AVoxelChunk::ApplyMesh(
     FVoxelMeshBuildOutput&& Output,
-    uint32 Version)
+    uint32 Version,
+    bool bEnableCollision)
 {
     /*
      * Если пока строился этот mesh,
@@ -650,7 +835,7 @@ void AVoxelChunk::ApplyMesh(
 
         Tangents,
 
-        true);
+        bEnableCollision);
 
 
     if (Material)
