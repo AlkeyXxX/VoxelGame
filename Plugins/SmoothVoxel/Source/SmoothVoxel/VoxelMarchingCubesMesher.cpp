@@ -746,12 +746,18 @@ void FVoxelMarchingCubesMesher::Build(
                             P / Input.VoxelSize);
 
                     /*
-                     * Density increases toward solid terrain,
-                     * therefore outward points against the gradient.
+                     * Unreal's front-face winding is opposite to the
+                     * conventional mathematical cross-product winding.
+                     *
+                     * The density gradient points toward solid terrain,
+                     * while the rendered surface must face toward air.
+                     * Therefore the mathematical face normal should point
+                     * along the density gradient so the reversed UE winding
+                     * faces outward.
                      */
                     if (FVector::DotProduct(
                             FaceNormal,
-                            -Gradient) < 0.0f)
+                            Gradient) < 0.0f)
                     {
                         Output.Triangles.Add(I0);
                         Output.Triangles.Add(I2);
