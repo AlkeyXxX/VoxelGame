@@ -49,7 +49,9 @@ void AVoxelChunk::InitializeChunk(
         ChunkSize * ChunkSize * ChunkSize;
 
     Blocks.SetNumZeroed(BlockCount);
+    BaseBlocks.SetNumZeroed(BlockCount);
     Biomes.SetNumZeroed(BlockCount);
+    ModificationFlags.SetNumZeroed(BlockCount);
 
 
     if (Material)
@@ -111,10 +113,33 @@ uint8 AVoxelChunk::GetBlock(
         return uint8(EVoxelBlock::Air);
     }
 
-
     return Blocks[
         BlockIndex(X, Y, Z)
     ];
+}
+
+
+uint8 AVoxelChunk::GetTerrainBlock(
+    int32 X,
+    int32 Y,
+    int32 Z) const
+{
+    if (X < 0 || X >= ChunkSize ||
+        Y < 0 || Y >= ChunkSize ||
+        Z < 0 || Z >= ChunkSize)
+    {
+        return uint8(EVoxelBlock::Air);
+    }
+
+    const int32 Index = BlockIndex(X, Y, Z);
+
+    if (ModificationFlags.IsValidIndex(Index) &&
+        ModificationFlags[Index] != 0)
+    {
+        return uint8(EVoxelBlock::Air);
+    }
+
+    return BaseBlocks[Index];
 }
 
 
@@ -179,6 +204,92 @@ void AVoxelChunk::CopyBiomeData(
     TArray<uint8>& OutData) const
 {
     OutData = Biomes;
+}
+
+
+void CopyStructureFace(
+    const TArray<uint8>& Flags,
+    TArray<uint8>& OutData,
+    int32 Size,
+    int32 Axis,
+    bool bPlus)
+{
+    const int32 Count = Size * Size;
+    OutData.SetNumUninitialized(Count);
+
+    for (int32 B = 0; B < Size; ++B)
+    {
+        for (int32 A = 0; A < Size; ++A)
+        {
+            int32 X = A;
+            int32 Y = B;
+            int32 Z = 0;
+
+            if (Axis == 0)
+            {
+                X = bPlus ? Size - 1 : 0;
+                Y = A;
+                Z = B;
+            }
+            else if (Axis == 1)
+            {
+                X = A;
+                Y = bPlus ? Size - 1 : 0;
+                Z = B;
+            }
+            else
+            {
+                X = A;
+                Y = B;
+                Z = bPlus ? Size - 1 : 0;
+            }
+
+            OutData[A + B * Size] =
+                Flags[X + Y * Size + Z * Size * Size];
+        }
+    }
+}
+
+
+void AVoxelChunk::SetBaseBlock(
+    int32 X,
+    int32 Y,
+    int32 Z,
+    uint8 Block)
+{
+    if (X < 0 || X >= ChunkSize ||
+        Y < 0 || Y >= ChunkSize ||
+        Z < 0 || Z >= ChunkSize)
+    {
+        return;
+    }
+
+    BaseBlocks[BlockIndex(X, Y, Z)] = Block;
+}
+
+
+void AVoxelChunk::SetModificationFlag(
+    int32 X,
+    int32 Y,
+    int32 Z,
+    bool bModified)
+{
+    if (X < 0 || X >= ChunkSize ||
+        Y < 0 || Y >= ChunkSize ||
+        Z < 0 || Z >= ChunkSize)
+    {
+        return;
+    }
+
+    ModificationFlags[BlockIndex(X, Y, Z)] =
+        bModified ? 1 : 0;
+}
+
+
+void AVoxelChunk::ClearModificationFlags()
+{
+    ModificationFlags.SetNumZeroed(
+        ChunkSize * ChunkSize * ChunkSize);
 }
 
 
@@ -537,3 +648,29 @@ void AVoxelChunk::ApplyMesh(
     }
 }
 
+
+
+void AVoxelChunk::CopyXMinusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 0, false);
+}
+void AVoxelChunk::CopyXPlusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 0, true);
+}
+void AVoxelChunk::CopyYMinusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 1, false);
+}
+void AVoxelChunk::CopyYPlusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 1, true);
+}
+void AVoxelChunk::CopyZMinusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 2, false);
+}
+void AVoxelChunk::CopyZPlusStructure(TArray<uint8>& OutData) const
+{
+    CopyStructureFace(ModificationFlags, OutData, ChunkSize, 2, true);
+}
