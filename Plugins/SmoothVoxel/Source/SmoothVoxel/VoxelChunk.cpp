@@ -896,3 +896,27 @@ void AVoxelChunk::CopyZPlusStructure(TArray<uint8>& OutData) const
 {
     CopyStructureFace(ModificationFlags, OutData, ChunkSize, 2, true);
 }
+
+
+void AVoxelChunk::SetLODLevel(int32 LODLevel)
+{
+    LODLevel = FMath::Clamp(LODLevel, 0, 2);
+
+    if (CurrentLODLevel == LODLevel)
+    {
+        return;
+    }
+
+    if (LODLevel == 0)
+    {
+        RebuildMesh();
+    }
+    else if (LODLevel == 1)
+    {
+        RebuildLODMesh(2);
+    }
+    else
+    {
+        RebuildLODMesh(4);
+    }
+}
