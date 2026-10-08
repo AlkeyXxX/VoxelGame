@@ -2296,23 +2296,46 @@ void AVoxelWorld::UpdateFarLOD(
     const FVoxelWorldGenerator GeneratorCopy =
         WorldGenerator;
 
+    const int32 LODWorldSizeX =
+        WorldSizeX;
+
+    const int32 LODWorldSizeY =
+        WorldSizeY;
+
+    const int32 LODChunkSize =
+        ChunkSize;
+
+    const float LODVoxelSize =
+        VoxelSize;
+
+    const int32 LODBeachWidth =
+        BeachWidth;
+
+    const int32 LODSeaLevel =
+        SeaLevel;
+
     TWeakObjectPtr<AVoxelWorld> WeakWorld(this);
 
     /*
      * Builds one lightweight mesh for a complete ring.
      * No AVoxelChunk actors are created in this path.
+     *
+     * IMPORTANT:
+     * Capture local copies of all AVoxelWorld properties.
+     * Capturing class fields directly would require capturing this,
+     * which is not allowed by this C++ lambda capture form.
      */
     auto ScheduleLOD =
         [
             WeakWorld,
             GeneratorCopy,
             CenterChunk,
-            WorldSizeX,
-            WorldSizeY,
-            ChunkSize,
-            VoxelSize,
-            BeachWidth,
-            SeaLevel,
+            LODWorldSizeX,
+            LODWorldSizeY,
+            LODChunkSize,
+            LODVoxelSize,
+            LODBeachWidth,
+            LODSeaLevel,
             LocalGeneration
         ](
             UProceduralMeshComponent* Mesh,
@@ -2331,22 +2354,22 @@ void AVoxelWorld::UpdateFarLOD(
                 GeneratorCopy;
 
             BuildInput.WorldSizeX =
-                WorldSizeX;
+                LODWorldSizeX;
 
             BuildInput.WorldSizeY =
-                WorldSizeY;
+                LODWorldSizeY;
 
             BuildInput.ChunkSize =
-                ChunkSize;
+                LODChunkSize;
 
             BuildInput.VoxelSize =
-                VoxelSize;
+                LODVoxelSize;
 
             BuildInput.BeachWidth =
-                BeachWidth;
+                LODBeachWidth;
 
             BuildInput.SeaLevel =
-                SeaLevel;
+                LODSeaLevel;
 
             BuildInput.CenterChunk =
                 CenterChunk;
