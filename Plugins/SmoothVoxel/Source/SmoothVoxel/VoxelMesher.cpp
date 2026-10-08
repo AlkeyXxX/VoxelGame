@@ -5,6 +5,8 @@
 
 namespace
 {
+    constexpr float WaterSurfaceInsetFraction = 0.08f;
+
     FORCEINLINE bool IsFaceVisibleInternal(uint8 Block, uint8 NeighborBlock)
     {
         const bool bWater = Block == uint8(EVoxelBlock::Water);
@@ -423,6 +425,10 @@ void FVoxelMesher::Build(
 
 
                 const float S = VoxelSize;
+                const float WaterTop =
+                    bWater
+                        ? S * (1.0f - WaterSurfaceInsetFraction)
+                        : S;
 
                 /*
                  * Сейчас используем понятные preview/debug-цвета
@@ -516,8 +522,8 @@ void FVoxelMesher::Build(
                         Origin,
 
                         FVector(0, 0, 0),
-                        FVector(0, 0, S),
-                        FVector(0, S, S),
+                        FVector(0, 0, WaterTop),
+                        FVector(0, S, WaterTop),
                         FVector(0, S, 0),
 
                         FVector(-1, 0, 0),
@@ -542,8 +548,8 @@ void FVoxelMesher::Build(
 
                         FVector(S, 0, 0),
                         FVector(S, S, 0),
-                        FVector(S, S, S),
-                        FVector(S, 0, S),
+                        FVector(S, S, WaterTop),
+                        FVector(S, 0, WaterTop),
 
                         FVector(1, 0, 0),
                         BlockColor,
@@ -567,8 +573,8 @@ void FVoxelMesher::Build(
 
                         FVector(0, 0, 0),
                         FVector(S, 0, 0),
-                        FVector(S, 0, S),
-                        FVector(0, 0, S),
+                        FVector(S, 0, WaterTop),
+                        FVector(0, 0, WaterTop),
 
                         FVector(0, -1, 0),
                         BlockColor,
@@ -591,8 +597,8 @@ void FVoxelMesher::Build(
                         Origin,
 
                         FVector(0, S, 0),
-                        FVector(0, S, S),
-                        FVector(S, S, S),
+                        FVector(0, S, WaterTop),
+                        FVector(S, S, WaterTop),
                         FVector(S, S, 0),
 
                         FVector(0, 1, 0),
@@ -640,10 +646,10 @@ void FVoxelMesher::Build(
                         Output,
                         Origin,
 
-                        FVector(0, 0, S),
-                        FVector(S, 0, S),
-                        FVector(S, S, S),
-                        FVector(0, S, S),
+                        FVector(0, 0, WaterTop),
+                        FVector(S, 0, WaterTop),
+                        FVector(S, S, WaterTop),
+                        FVector(0, S, WaterTop),
 
                         FVector(0, 0, 1),
                         BlockColor,
