@@ -47,55 +47,42 @@ namespace
     }
 
     FORCEINLINE bool IsCellInRing(
-        float MinChunkX,
-        float MaxChunkX,
-        float MinChunkY,
-        float MaxChunkY,
+        int32 CellChunkX,
+        int32 CellChunkY,
+        const FIntVector& CenterChunk,
         int32 InnerRadius,
         int32 OuterRadius)
     {
         /*
-         * Use cell extents instead of only the cell centre.
-         * This prevents visible holes at the boundary between
-         * full chunks and coarse terrain.
+         * Assign every sampled cell to the chunk containing its
+         * lower-left sample point.
+         *
+         * The previous implementation classified cells using their
+         * floating-point extents. At LOD boundaries this could make
+         * the boundary cell belong to both rings or neither ring,
+         * producing visible empty bands.
+         *
+         * Chunk-based classification is deterministic:
+         * every cell belongs to exactly one LOD ring.
          */
-        const float ClosestX =
-            FMath::Clamp(
-                0.0f,
-                MinChunkX,
-                MaxChunkX);
+        const int32 DistanceX =
+            FMath::Abs(
+                CellChunkX -
+                CenterChunk.X);
 
-        const float ClosestY =
-            FMath::Clamp(
-                0.0f,
-                MinChunkY,
-                MaxChunkY);
+        const int32 DistanceY =
+            FMath::Abs(
+                CellChunkY -
+                CenterChunk.Y);
 
-        const float FarthestX =
+        const int32 Distance =
             FMath::Max(
-                FMath::Abs(MinChunkX),
-                FMath::Abs(MaxChunkX));
-
-        const float FarthestY =
-            FMath::Max(
-                FMath::Abs(MinChunkY),
-                FMath::Abs(MaxChunkY));
-
-        const float MinDistance =
-            FMath::Max(
-                FMath::Abs(ClosestX),
-                FMath::Abs(ClosestY));
-
-        const float MaxDistance =
-            FMath::Max(
-                FarthestX,
-                FarthestY);
+                DistanceX,
+                DistanceY);
 
         return
-            MaxDistance >=
-                static_cast<float>(InnerRadius) &&
-            MinDistance <=
-                static_cast<float>(OuterRadius);
+            Distance >= InnerRadius &&
+            Distance <= OuterRadius;
     }
 }
 
@@ -339,51 +326,30 @@ void FVoxelTerrainLODMesher::Build(
                     (Y + 1) * Input.SampleStep,
                     EndBlockY);
 
-            const float CellMinChunkX =
-                (
-                    static_cast<float>(
-                        SampleWorldX0) /
-                    static_cast<float>(
-                        Input.ChunkSize))
-                -
-                static_cast<float>(
-                    Input.CenterChunk.X);
+            /*
+             * The cell is assigned to the chunk containing its first
+             * sample point. SampleStep values used by the current LOD
+             * levels divide ChunkSize, so cells stay aligned to the
+             * chunk grid and cannot leave a ring-sized gap.
+             */
+            const int32 CellChunkX =
+                FMath::Clamp(
+                    SampleWorldX0 /
+                        Input.ChunkSize,
+                    0,
+                    Input.WorldSizeX - 1);
 
-            const float CellMaxChunkX =
-                (
-                    static_cast<float>(
-                        SampleWorldX1) /
-                    static_cast<float>(
-                        Input.ChunkSize))
-                -
-                static_cast<float>(
-                    Input.CenterChunk.X);
-
-            const float CellMinChunkY =
-                (
-                    static_cast<float>(
-                        SampleWorldY0) /
-                    static_cast<float>(
-                        Input.ChunkSize))
-                -
-                static_cast<float>(
-                    Input.CenterChunk.Y);
-
-            const float CellMaxChunkY =
-                (
-                    static_cast<float>(
-                        SampleWorldY1) /
-                    static_cast<float>(
-                        Input.ChunkSize))
-                -
-                static_cast<float>(
-                    Input.CenterChunk.Y);
+            const int32 CellChunkY =
+                FMath::Clamp(
+                    SampleWorldY0 /
+                        Input.ChunkSize,
+                    0,
+                    Input.WorldSizeY - 1);
 
             if (!IsCellInRing(
-                    CellMinChunkX,
-                    CellMaxChunkX,
-                    CellMinChunkY,
-                    CellMaxChunkY,
+                    CellChunkX,
+                    CellChunkY,
+                    Input.CenterChunk,
                     Input.InnerRadiusChunks,
                     Input.OuterRadiusChunks))
             {
