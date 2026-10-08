@@ -2037,18 +2037,18 @@ void AVoxelWorld::UpdateChunkLOD(
      */
     if (Distance <= StreamingRadius)
     {
-        Chunk->RebuildMesh();
+        Chunk->SetLODLevel(0);
         return;
     }
 
     if (Distance <= LOD1Radius)
     {
-        Chunk->RebuildLODMesh(2);
+        Chunk->SetLODLevel(1);
         return;
     }
 
     if (Distance <= LOD2Radius)
     {
-        Chunk->RebuildLODMesh(4);
+        Chunk->SetLODLevel(2);
     }
 }
