@@ -43,10 +43,11 @@ private:
         int32 Z);
 
     static float GetDensity(
-        const FVoxelMarchingCubesBuildInput& Input,
+        const TArray<uint8>& SolidSamples,
         int32 X,
         int32 Y,
-        int32 Z);
+        int32 Z,
+        int32 Size);
 
     static FLinearColor GetBlockColor(
         uint8 Block);
