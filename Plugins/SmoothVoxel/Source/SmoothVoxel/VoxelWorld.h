@@ -516,5 +516,17 @@ private:
         FIntVector::ZeroValue;
 
     bool bUnderwaterEffectActive = false;
+
+    bool bDebugFlyMode = false;
+    float DebugFlyVerticalInput = 0.0f;
+
+    UFUNCTION()
+    void ToggleDebugFly();
+
+    void DebugFlyUpPressed();
+    void DebugFlyUpReleased();
+    void DebugFlyDownPressed();
+    void DebugFlyDownReleased();
+    void ApplyDebugFlySettings(bool bEnable);
 };
 
