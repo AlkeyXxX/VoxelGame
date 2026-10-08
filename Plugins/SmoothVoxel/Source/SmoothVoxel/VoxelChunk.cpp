@@ -614,6 +614,9 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
     const int32 LODSize =
         FMath::Max(1, SourceSize / DownsampleFactor);
 
+    const float EffectiveVoxelSize =
+        VoxelSize * DownsampleFactor;
+
     TArray<uint8> SourceBlocks;
     CopyBlockData(SourceBlocks);
 
@@ -628,16 +631,15 @@ void AVoxelChunk::RebuildLODMesh(int32 DownsampleFactor)
             SourceSize,
             LODSize,
             DownsampleFactor,
+            EffectiveVoxelSize,
             LocalVersion
         ]() mutable
         {
             FVoxelMeshBuildInput Input;
 
             Input.Size = LODSize;
-            Input.VoxelSize =
-                WeakThis.IsValid()
-                    ? WeakThis->VoxelSize * DownsampleFactor
-                    : 100.0f;
+            Input.VoxelSize = EffectiveVoxelSize;
+            Input.Neighbors.Init(LODSize);
 
             /*
              * WorldOrigin нужен только для UV воды.
