@@ -6,6 +6,22 @@
 namespace
 {
     constexpr float WaterSurfaceInsetFraction = 0.08f;
+    constexpr float WaterWaveAmplitudeFraction = 0.02f;
+    constexpr float WaterWaveScale = 0.0015f;
+
+    FORCEINLINE float GetWaterWaveOffset(
+        const FVector& WorldPosition,
+        float VoxelSize)
+    {
+        const FVector2D NoisePosition(
+            WorldPosition.X * WaterWaveScale,
+            WorldPosition.Y * WaterWaveScale);
+
+        return
+            FMath::PerlinNoise2D(NoisePosition) *
+            VoxelSize *
+            WaterWaveAmplitudeFraction;
+    }
 
     FORCEINLINE bool IsFaceVisibleInternal(uint8 Block, uint8 NeighborBlock)
     {
@@ -429,10 +445,60 @@ void FVoxelMesher::Build(
 
 
                 const float S = VoxelSize;
-                const float WaterTop =
+
+                const FVector WorldCorner00 =
+                    Input.WorldOrigin + FVector(
+                        X * S,
+                        Y * S,
+                        0.0f);
+
+                const FVector WorldCorner10 =
+                    WorldCorner00 + FVector(S, 0.0f, 0.0f);
+
+                const FVector WorldCorner11 =
+                    WorldCorner00 + FVector(S, S, 0.0f);
+
+                const FVector WorldCorner01 =
+                    WorldCorner00 + FVector(0.0f, S, 0.0f);
+
+                const float WaterBaseTop =
+                    S * (1.0f - WaterSurfaceInsetFraction);
+
+                const float WaterTop00 =
                     bWater
-                        ? S * (1.0f - WaterSurfaceInsetFraction)
+                        ? WaterBaseTop + GetWaterWaveOffset(
+                            WorldCorner00,
+                            S)
                         : S;
+
+                const float WaterTop10 =
+                    bWater
+                        ? WaterBaseTop + GetWaterWaveOffset(
+                            WorldCorner10,
+                            S)
+                        : S;
+
+                const float WaterTop11 =
+                    bWater
+                        ? WaterBaseTop + GetWaterWaveOffset(
+                            WorldCorner11,
+                            S)
+                        : S;
+
+                const float WaterTop01 =
+                    bWater
+                        ? WaterBaseTop + GetWaterWaveOffset(
+                            WorldCorner01,
+                            S)
+                        : S;
+
+                const FVector WaterTopNormal =
+                    bWater
+                        ? FVector(
+                            -(WaterTop10 - WaterTop00) / S,
+                            -(WaterTop01 - WaterTop00) / S,
+                            1.0f).GetSafeNormal()
+                        : FVector(0.0f, 0.0f, 1.0f);
 
                 /*
                  * Сейчас используем понятные preview/debug-цвета
@@ -526,8 +592,8 @@ void FVoxelMesher::Build(
                         Origin,
 
                         FVector(0, 0, 0),
-                        FVector(0, 0, WaterTop),
-                        FVector(0, S, WaterTop),
+                        FVector(0, 0, WaterTop00),
+                        FVector(0, S, WaterTop01),
                         FVector(0, S, 0),
 
                         FVector(-1, 0, 0),
@@ -552,8 +618,8 @@ void FVoxelMesher::Build(
 
                         FVector(S, 0, 0),
                         FVector(S, S, 0),
-                        FVector(S, S, WaterTop),
-                        FVector(S, 0, WaterTop),
+                        FVector(S, S, WaterTop11),
+                        FVector(S, 0, WaterTop10),
 
                         FVector(1, 0, 0),
                         BlockColor,
@@ -577,8 +643,8 @@ void FVoxelMesher::Build(
 
                         FVector(0, 0, 0),
                         FVector(S, 0, 0),
-                        FVector(S, 0, WaterTop),
-                        FVector(0, 0, WaterTop),
+                        FVector(S, 0, WaterTop10),
+                        FVector(0, 0, WaterTop00),
 
                         FVector(0, -1, 0),
                         BlockColor,
@@ -601,8 +667,8 @@ void FVoxelMesher::Build(
                         Origin,
 
                         FVector(0, S, 0),
-                        FVector(0, S, WaterTop),
-                        FVector(S, S, WaterTop),
+                        FVector(0, S, WaterTop01),
+                        FVector(S, S, WaterTop11),
                         FVector(S, S, 0),
 
                         FVector(0, 1, 0),
@@ -650,12 +716,12 @@ void FVoxelMesher::Build(
                         Output,
                         Origin,
 
-                        FVector(0, 0, WaterTop),
-                        FVector(S, 0, WaterTop),
-                        FVector(S, S, WaterTop),
-                        FVector(0, S, WaterTop),
+                        FVector(0, 0, WaterTop00),
+                        FVector(S, 0, WaterTop10),
+                        FVector(S, S, WaterTop11),
+                        FVector(0, S, WaterTop01),
 
-                        FVector(0, 0, 1),
+                        WaterTopNormal,
                         BlockColor,
                         bWater);
                 }
