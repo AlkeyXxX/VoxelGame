@@ -437,6 +437,12 @@ private:
     void RebuildChunkAndNeighbors(
         const FIntVector& ChunkCoord);
 
+    void RebuildStructureFlagsForChunk(
+        const FIntVector& ChunkCoord);
+
+    void RefreshStructureFlagsAround(
+        const FIntVector& ChunkCoord);
+
 
     /*
      * Streaming.
