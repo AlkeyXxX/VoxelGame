@@ -162,7 +162,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|World",
         meta=(ClampMin="1", ClampMax="256"))
-    int32 WorldSizeX = 8;
+    int32 WorldSizeX = 32;
 
 
     UPROPERTY(
@@ -170,7 +170,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|World",
         meta=(ClampMin="1", ClampMax="256"))
-    int32 WorldSizeY = 8;
+    int32 WorldSizeY = 32;
 
 
     UPROPERTY(
@@ -504,7 +504,6 @@ private:
         const FIntVector& ChunkCoord);
 
     void UpdateChunkStreaming();
-    int32 GetChunkDistance(const FIntVector& A, const FIntVector& B) const;
     void UpdateFarLOD(const FIntVector& CenterChunk);
     void ClearFarLOD();
     bool IsPositionInsideWater(const FVector& WorldPosition) const;
