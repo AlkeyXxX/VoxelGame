@@ -402,18 +402,24 @@ void FVoxelTerrainLODMesher::Build(
             Output.Triangles.Add(I01);
             Output.Triangles.Add(I11);
 
+            /*
+             * Winding above is intentionally kept stable for the mesh,
+             * but the cross-product order here must produce an upward
+             * lighting normal. The previous order generated -Z on flat
+             * terrain, which made the LOD surface appear almost black.
+             */
             const FVector N0 =
                 FVector::CrossProduct(
-                    Output.Vertices[I11] -
-                        Output.Vertices[I00],
                     Output.Vertices[I10] -
+                        Output.Vertices[I00],
+                    Output.Vertices[I11] -
                         Output.Vertices[I00]);
 
             const FVector N1 =
                 FVector::CrossProduct(
-                    Output.Vertices[I01] -
-                        Output.Vertices[I00],
                     Output.Vertices[I11] -
+                        Output.Vertices[I00],
+                    Output.Vertices[I01] -
                         Output.Vertices[I00]);
 
             Output.Normals[I00] += N0 + N1;
