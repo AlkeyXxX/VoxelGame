@@ -65,6 +65,12 @@ struct FVoxelMeshBuildInput
 	TArray<uint8> Blocks;
 	TArray<uint8> Biomes;
 
+	/*
+	 * 1 means the block was modified by the player.
+	 * Modified solid blocks are rendered by the cubic construction layer.
+	 */
+	TArray<uint8> StructureFlags;
+
 	FVoxelNeighborData Neighbors;
 };
 
