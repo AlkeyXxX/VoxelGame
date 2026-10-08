@@ -166,6 +166,18 @@ void AVoxelWorld::BeginPlay()
                 IE_Released,
                 this,
                 &AVoxelWorld::DebugFlyDownReleased);
+
+            InputComponent->BindAction(
+                TEXT("DebugFlyBoost"),
+                IE_Pressed,
+                this,
+                &AVoxelWorld::DebugFlyBoostPressed);
+
+            InputComponent->BindAction(
+                TEXT("DebugFlyBoost"),
+                IE_Released,
+                this,
+                &AVoxelWorld::DebugFlyBoostReleased);
         }
     }
 
@@ -2125,6 +2137,7 @@ void AVoxelWorld::ToggleDebugFly()
 {
     bDebugFlyMode = !bDebugFlyMode;
     DebugFlyVerticalInput = 0.0f;
+    bDebugFlyBoost = false;
     ApplyDebugFlySettings(bDebugFlyMode);
 
     UE_LOG(
@@ -2171,6 +2184,27 @@ void AVoxelWorld::DebugFlyDownReleased()
 }
 
 
+void AVoxelWorld::DebugFlyBoostPressed()
+{
+    if (bDebugFlyMode)
+    {
+        bDebugFlyBoost = true;
+        ApplyDebugFlySettings(true);
+    }
+}
+
+
+void AVoxelWorld::DebugFlyBoostReleased()
+{
+    bDebugFlyBoost = false;
+
+    if (bDebugFlyMode)
+    {
+        ApplyDebugFlySettings(true);
+    }
+}
+
+
 void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
 {
     UWorld* World = GetWorld();
@@ -2204,7 +2238,7 @@ void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
     if (bEnable)
     {
         Movement->SetMovementMode(MOVE_Flying);
-        Movement->MaxFlySpeed = 3000.0f;
+        Movement->MaxFlySpeed = bDebugFlyBoost ? 9000.0f : 3000.0f;
         Movement->MaxAcceleration = 12000.0f;
         Movement->BrakingDecelerationFlying = 12000.0f;
         Movement->GravityScale = 0.0f;
@@ -2215,5 +2249,6 @@ void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
         Movement->SetMovementMode(MOVE_Walking);
         Movement->GravityScale = 1.0f;
         DebugFlyVerticalInput = 0.0f;
+        bDebugFlyBoost = false;
     }
 }
