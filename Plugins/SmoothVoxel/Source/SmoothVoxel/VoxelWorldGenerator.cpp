@@ -25,12 +25,22 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
     int32 WorldX,
     int32 WorldY) const
 {
-    const float Noise = GetTerrainNoise(WorldX, WorldY);
+    const float BaseNoise =
+        GetTerrainNoise(WorldX, WorldY);
+
+    const FVector2D DetailSamplePosition(
+        (WorldX + Settings.Seed * 29) * Settings.DetailNoiseScale,
+        (WorldY - Settings.Seed * 31) * Settings.DetailNoiseScale);
+
+    const float DetailNoise =
+        FMath::PerlinNoise2D(DetailSamplePosition);
 
     int32 Height =
         Settings.BaseHeight +
         FMath::RoundToInt(
-            Noise * static_cast<float>(Settings.HeightVariation));
+            BaseNoise * static_cast<float>(Settings.HeightVariation)) +
+        FMath::RoundToInt(
+            DetailNoise * static_cast<float>(Settings.DetailHeightVariation));
 
     return FMath::Max(Height, 1);
 }
