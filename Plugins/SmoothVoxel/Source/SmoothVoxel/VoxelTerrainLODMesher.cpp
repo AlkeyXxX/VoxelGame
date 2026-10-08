@@ -6,11 +6,13 @@ namespace
 {
     FLinearColor GetBiomeColor(
         EVoxelBiome Biome,
+        EVoxelLandform Landform,
         int32 Height,
         int32 SeaLevel,
         int32 BeachWidth)
     {
-        if (Height < SeaLevel &&
+        if (Biome != EVoxelBiome::Snow &&
+            Height < SeaLevel &&
             Height >= SeaLevel - BeachWidth)
         {
             return FLinearColor(
@@ -19,17 +21,33 @@ namespace
 
         switch (Biome)
         {
+        case EVoxelBiome::Snow:
+            return FLinearColor(
+                0.94f, 0.97f, 1.0f, 1.0f);
+
         case EVoxelBiome::Desert:
+            if (Landform == EVoxelLandform::Mountains)
+            {
+                return FLinearColor(
+                    0.72f, 0.38f, 0.22f, 1.0f);
+            }
+
             return FLinearColor(
                 0.85f, 0.72f, 0.42f, 1.0f);
 
-        case EVoxelBiome::Mountain:
+        case EVoxelBiome::Mountain: // Legacy biome value.
             return FLinearColor(
                 0.50f, 0.52f, 0.56f, 1.0f);
 
         case EVoxelBiome::Forest:
         case EVoxelBiome::Plains:
         default:
+            if (Landform == EVoxelLandform::Mountains)
+            {
+                return FLinearColor(
+                    0.50f, 0.52f, 0.56f, 1.0f);
+            }
+
             return FLinearColor(
                 0.20f, 0.65f, 0.12f, 1.0f);
         }
@@ -215,6 +233,11 @@ void FVoxelTerrainLODMesher::Build(
                     ClampedWorldY,
                     Height);
 
+            const EVoxelLandform Landform =
+                Input.Generator.GetLandform(
+                    ClampedWorldX,
+                    ClampedWorldY);
+
             const int32 Index =
                 GridIndex(
                     X,
@@ -227,6 +250,7 @@ void FVoxelTerrainLODMesher::Build(
             Colors[Index] =
                 GetBiomeColor(
                     Biome,
+                    Landform,
                     Height,
                     Input.SeaLevel,
                     Input.BeachWidth);
