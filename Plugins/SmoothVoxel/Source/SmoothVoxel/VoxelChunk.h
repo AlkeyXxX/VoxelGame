@@ -80,14 +80,6 @@ public:
      */
     void RebuildMesh();
 
-    /*
-     * Перестроение упрощённого LOD mesh.
-     * DownsampleFactor=2 означает сетку 16x16x16 вместо 32x32x32.
-     */
-    void RebuildLODMesh(int32 DownsampleFactor);
-
-    /* Меняет LOD только при фактическом переходе между уровнями. */
-    void SetLODLevel(int32 LODLevel);
 
 
     /*
@@ -223,8 +215,6 @@ private:
      */
     uint32 MeshGenerationVersion = 0;
 
-    bool bLOD = false;
-    int32 CurrentLODLevel = 0;
 
 
     int32 BlockIndex(
