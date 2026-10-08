@@ -332,20 +332,93 @@ void FVoxelMesher::AddFace(
 
     const int32 StartIndex = Vertices.Num();
 
-    Vertices.Add(Origin + A);
-    Vertices.Add(Origin + B);
-    Vertices.Add(Origin + C);
-    Vertices.Add(Origin + D);
+    const FVector PA = Origin + A;
+    const FVector PB = Origin + B;
+    const FVector PC = Origin + C;
+    const FVector PD = Origin + D;
+
+    Vertices.Add(PA);
+    Vertices.Add(PB);
+    Vertices.Add(PC);
+    Vertices.Add(PD);
 
     Normals.Add(Normal);
     Normals.Add(Normal);
     Normals.Add(Normal);
     Normals.Add(Normal);
 
-    UV0.Add(FVector2D(0.0f, 0.0f));
-    UV0.Add(FVector2D(1.0f, 0.0f));
-    UV0.Add(FVector2D(1.0f, 1.0f));
-    UV0.Add(FVector2D(0.0f, 1.0f));
+    if (bWater)
+    {
+        const float SafeVoxelSize =
+            FMath::Max(VoxelSize, 1.0f);
+
+        const FVector WorldA = WorldOrigin + PA;
+        const FVector WorldB = WorldOrigin + PB;
+        const FVector WorldC = WorldOrigin + PC;
+        const FVector WorldD = WorldOrigin + PD;
+
+        if (FMath::Abs(Normal.Z) > 0.5f)
+        {
+            UV0.Add(FVector2D(
+                WorldA.X / SafeVoxelSize,
+                WorldA.Y / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldB.X / SafeVoxelSize,
+                WorldB.Y / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldC.X / SafeVoxelSize,
+                WorldC.Y / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldD.X / SafeVoxelSize,
+                WorldD.Y / SafeVoxelSize));
+        }
+        else if (FMath::Abs(Normal.X) > 0.5f)
+        {
+            UV0.Add(FVector2D(
+                WorldA.Y / SafeVoxelSize,
+                WorldA.Z / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldB.Y / SafeVoxelSize,
+                WorldB.Z / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldC.Y / SafeVoxelSize,
+                WorldC.Z / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldD.Y / SafeVoxelSize,
+                WorldD.Z / SafeVoxelSize));
+        }
+        else
+        {
+            UV0.Add(FVector2D(
+                WorldA.X / SafeVoxelSize,
+                WorldA.Z / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldB.X / SafeVoxelSize,
+                WorldB.Z / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldC.X / SafeVoxelSize,
+                WorldC.Z / SafeVoxelSize));
+
+            UV0.Add(FVector2D(
+                WorldD.X / SafeVoxelSize,
+                WorldD.Z / SafeVoxelSize));
+        }
+    }
+    else
+    {
+        UV0.Add(FVector2D(0.0f, 0.0f));
+        UV0.Add(FVector2D(1.0f, 0.0f));
+        UV0.Add(FVector2D(1.0f, 1.0f));
+        UV0.Add(FVector2D(0.0f, 1.0f));
+    }
 
     VertexColors.Add(Color);
     VertexColors.Add(Color);
@@ -532,7 +605,9 @@ void FVoxelMesher::Build(
 
                         FVector(-1, 0, 0),
                         BlockColor,
-                        bWater);
+                        bWater,
+                        Input.WorldOrigin,
+                        VoxelSize);
                 }
 
 
@@ -557,7 +632,9 @@ void FVoxelMesher::Build(
 
                         FVector(1, 0, 0),
                         BlockColor,
-                        bWater);
+                        bWater,
+                        Input.WorldOrigin,
+                        VoxelSize);
                 }
 
 
@@ -582,7 +659,9 @@ void FVoxelMesher::Build(
 
                         FVector(0, -1, 0),
                         BlockColor,
-                        bWater);
+                        bWater,
+                        Input.WorldOrigin,
+                        VoxelSize);
                 }
 
 
@@ -607,7 +686,9 @@ void FVoxelMesher::Build(
 
                         FVector(0, 1, 0),
                         BlockColor,
-                        bWater);
+                        bWater,
+                        Input.WorldOrigin,
+                        VoxelSize);
                 }
 
 
@@ -632,7 +713,9 @@ void FVoxelMesher::Build(
 
                         FVector(0, 0, -1),
                         BlockColor,
-                        bWater);
+                        bWater,
+                        Input.WorldOrigin,
+                        VoxelSize);
                 }
 
 
@@ -657,7 +740,9 @@ void FVoxelMesher::Build(
 
                         FVector(0, 0, 1),
                         BlockColor,
-                        bWater);
+                        bWater,
+                        Input.WorldOrigin,
+                        VoxelSize);
                 }
             }
         }
