@@ -1349,17 +1349,29 @@ void AVoxelWorld::UpdateUnderwaterEffect()
 
     bUnderwaterEffectActive = bUnderwater;
 
-    PC->PlayerCameraManager->StartCameraFade(
-        bUnderwater ? 0.0f : 0.20f,
-        bUnderwater ? 0.20f : 0.0f,
-        0.20f,
-        FLinearColor(
-            0.02f,
-            0.16f,
-            0.42f,
-            1.0f),
-        false,
-        false);
+    if (bUnderwater)
+    {
+        /*
+         * Keep the blue tint active for the whole time the camera
+         * is inside a water voxel. StartCameraFade only animates a
+         * transition unless it is explicitly held.
+         */
+        PC->PlayerCameraManager->SetManualCameraFade(
+            0.20f,
+            FLinearColor(
+                0.02f,
+                0.16f,
+                0.42f,
+                1.0f),
+            false);
+    }
+    else
+    {
+        /*
+         * Remove the underwater overlay immediately after leaving water.
+         */
+        PC->PlayerCameraManager->StopCameraFade();
+    }
 }
 
 
