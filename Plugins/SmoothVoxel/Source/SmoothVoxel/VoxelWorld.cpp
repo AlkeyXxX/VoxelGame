@@ -846,6 +846,22 @@ void AVoxelWorld::GenerateChunkBlocks(
                         : uint8(Biome));
 
                 /*
+                 * Внутренние пещеры вырезаются только из твёрдого
+                 * процедурного грунта. SurfaceHeight и вода остаются
+                 * управляемыми отдельными правилами.
+                 */
+                if (IsVoxelSolid(Block) &&
+                    WorldGenerator.IsCave(
+                        WorldX,
+                        WorldY,
+                        WorldZ,
+                        Height))
+                {
+                    Block =
+                        uint8(EVoxelBlock::Air);
+                }
+
+                /*
                  * Сначала строим обычный процедурный блок.
                  * Затем накладываем изменение игрока, если
                  * этот локальный блок уже был изменён ранее.
