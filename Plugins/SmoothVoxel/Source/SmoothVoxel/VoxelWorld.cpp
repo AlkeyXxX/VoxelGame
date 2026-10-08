@@ -1995,10 +1995,6 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
                 UVoxelInventoryComponent>();
     }
 
-    /*
-     * Если inventory подключён, выбранный слот обязан
-     * содержать тот же блок, который мы ставим.
-     */
     if (Inventory &&
         (Inventory->GetSelectedBlock() != BlockToPlace ||
          Inventory->GetSelectedQuantity() <= 0))
@@ -2051,45 +2047,72 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
         return false;
     }
 
-    const FVector PlacePoint =
-        Hit.ImpactPoint +
-        Hit.ImpactNormal *
-        (VoxelSize * 0.51f);
+    /*
+     * The target cell is sampled outward from the impact point.
+     * On a smooth MC surface the exact adjacent voxel can change
+     * across a curved face, so we try a small series of positions.
+     */
+    const float SampleStep =
+        FMath::Max(
+            VoxelSize * 0.10f,
+            1.0f);
+
+    const int32 MaxSamples = 8;
 
     FIntVector WorldBlock;
+    bool bFoundPlacementCell = false;
 
-    if (!WorldToBlock(
-        PlacePoint,
-        WorldBlock))
+    for (int32 Sample = 1;
+         Sample <= MaxSamples;
+         ++Sample)
     {
-        return false;
+        const FVector PlacePoint =
+            Hit.ImpactPoint +
+            Hit.ImpactNormal *
+            (VoxelSize * 0.51f +
+             SampleStep * (Sample - 1));
+
+        FIntVector CandidateWorldBlock;
+
+        if (!WorldToBlock(
+            PlacePoint,
+            CandidateWorldBlock))
+        {
+            continue;
+        }
+
+        AVoxelChunk* TargetChunk =
+            GetChunk(
+                WorldBlockToChunk(
+                    CandidateWorldBlock));
+
+        if (!TargetChunk)
+        {
+            continue;
+        }
+
+        const FIntVector CandidateLocalBlock =
+            WorldBlockToLocal(
+                CandidateWorldBlock);
+
+        const EVoxelBlock ExistingBlock =
+            static_cast<EVoxelBlock>(
+                TargetChunk->GetBlock(
+                    CandidateLocalBlock.X,
+                    CandidateLocalBlock.Y,
+                    CandidateLocalBlock.Z));
+
+        if (ExistingBlock != EVoxelBlock::Air)
+        {
+            continue;
+        }
+
+        WorldBlock = CandidateWorldBlock;
+        bFoundPlacementCell = true;
+        break;
     }
 
-    const FIntVector LocalBlock =
-        WorldBlockToLocal(WorldBlock);
-
-    AVoxelChunk* TargetChunk =
-        GetChunk(
-            WorldBlockToChunk(
-                WorldBlock));
-
-    if (!TargetChunk)
-    {
-        return false;
-    }
-
-    /*
-     * Не перезаписываем существующий твёрдый блок.
-     * Воду также не считаем свободным местом для строительства.
-     */
-    const EVoxelBlock ExistingBlock =
-        static_cast<EVoxelBlock>(
-            TargetChunk->GetBlock(
-                LocalBlock.X,
-                LocalBlock.Y,
-                LocalBlock.Z));
-
-    if (ExistingBlock != EVoxelBlock::Air)
+    if (!bFoundPlacementCell)
     {
         return false;
     }
