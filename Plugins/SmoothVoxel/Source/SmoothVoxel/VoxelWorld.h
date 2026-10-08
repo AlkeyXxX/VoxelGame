@@ -188,7 +188,15 @@ public:
         BlueprintReadWrite,
         Category="Voxel|Streaming",
         meta=(ClampMin="1", ClampMax="16"))
-    int32 StreamingRadius = 3;
+    int32 StreamingRadius = 4;
+
+    /* Дальность LOD1 в чанках. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="32"))
+    int32 LOD1Radius = 8;
+
+    /* Дальность LOD2 в чанках. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="64"))
+    int32 LOD2Radius = 16;
 
 
     /*
@@ -202,7 +210,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|Streaming",
         meta=(ClampMin="1", ClampMax="20"))
-    int32 UnloadRadius = 4;
+    int32 UnloadRadius = 18;
 
 
     /*
@@ -495,6 +503,8 @@ private:
         const FIntVector& ChunkCoord);
 
     void UpdateChunkStreaming();
+    int32 GetChunkDistance(const FIntVector& A, const FIntVector& B) const;
+    void UpdateChunkLOD(AVoxelChunk* Chunk, int32 Distance);
     bool IsPositionInsideWater(const FVector& WorldPosition) const;
     void UpdateUnderwaterEffect();
 
