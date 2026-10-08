@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h" 
 #include "VoxelTypes.h" 
 #include "VoxelMesher.h"
+#include "VoxelMarchingCubesMesher.h"
 #include "VoxelWorldGenerator.h"
 #include "VoxelWorld.generated.h"
 
@@ -101,6 +102,10 @@ public:
     void BuildNeighborData(
         const FIntVector& ChunkCoord,
         FVoxelNeighborData& OutData) const;
+
+    void BuildMarchingCubesData(
+        const FIntVector& ChunkCoord,
+        FVoxelMarchingCubesBuildInput& OutData) const;
 
     /*
      * Debug helpers.
