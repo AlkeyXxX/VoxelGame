@@ -629,8 +629,10 @@ void AVoxelWorld::UpdateChunkStreaming()
     }
 
     /*
-     * Far LOD is updated much less frequently than normal chunk streaming.
-     * This avoids rebuilding the distant world every few meters while flying.
+     * Far LOD follows the streaming center so its inner boundary stays
+     * synchronized with the Full chunk ring. The build itself is performed
+     * asynchronously, so this does not block the game thread while the
+     * distant meshes are regenerated.
      */
     const int32 FarMoveX =
         FMath::Abs(
