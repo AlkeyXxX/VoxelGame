@@ -248,6 +248,10 @@ void AVoxelWorld::ConfigureWorldGenerator()
     FVoxelWorldGenerationSettings Settings;
 
     Settings.Seed = Seed;
+    Settings.WorldBlocksX =
+        FMath::Max(1, WorldSizeX * ChunkSize);
+    Settings.WorldBlocksY =
+        FMath::Max(1, WorldSizeY * ChunkSize);
     Settings.BaseHeight = BaseHeight;
     Settings.HeightVariation = HeightVariation;
     Settings.NoiseScale = NoiseScale;
@@ -261,6 +265,40 @@ void AVoxelWorld::ConfigureWorldGenerator()
     Settings.MoistureScale = MoistureScale;
 
     WorldGenerator.Configure(Settings);
+}
+
+
+/*
+ * Calculate the center start point from the same generator used by chunks.
+ * Configure here as well because GameMode may request a start location
+ * before AVoxelWorld::BeginPlay has finished initializing the world.
+ */
+FVector AVoxelWorld::GetCenterSpawnLocation()
+{
+    ConfigureWorldGenerator();
+
+    const int32 WorldBlocksX =
+        FMath::Max(1, WorldSizeX * ChunkSize);
+
+    const int32 WorldBlocksY =
+        FMath::Max(1, WorldSizeY * ChunkSize);
+
+    const int32 CenterBlockX =
+        FMath::Clamp(WorldBlocksX / 2, 0, WorldBlocksX - 1);
+
+    const int32 CenterBlockY =
+        FMath::Clamp(WorldBlocksY / 2, 0, WorldBlocksY - 1);
+
+    const int32 SurfaceHeight =
+        WorldGenerator.GetSurfaceHeight(
+            CenterBlockX,
+            CenterBlockY);
+
+    return GetActorLocation() +
+        FVector(
+            (static_cast<float>(CenterBlockX) + 0.5f) * VoxelSize,
+            (static_cast<float>(CenterBlockY) + 0.5f) * VoxelSize,
+            (static_cast<float>(SurfaceHeight) + 2.5f) * VoxelSize);
 }
 
 
@@ -787,8 +825,12 @@ void AVoxelWorld::GetTerrainDebugInfo(
         OutBiomeName = TEXT("Desert");
         break;
 
+    case EVoxelBiome::Snow:
+        OutBiomeName = TEXT("Snow");
+        break;
+
     case EVoxelBiome::Mountain:
-        OutBiomeName = TEXT("Mountain");
+        OutBiomeName = TEXT("Mountain (legacy)");
         break;
 
     case EVoxelBiome::Plains:
@@ -843,6 +885,11 @@ void AVoxelWorld::GenerateChunkBlocks(
                         WorldY,
                         Height);
 
+                const EVoxelLandform Landform =
+                    WorldGenerator.GetLandform(
+                        WorldX,
+                        WorldY);
+
                 uint8 Block =
                     uint8(EVoxelBlock::Air);
 
@@ -862,6 +909,7 @@ void AVoxelWorld::GenerateChunkBlocks(
                 else if (WorldZ == Height)
                 {
                     const bool bBeach =
+                        Biome != EVoxelBiome::Snow &&
                         Height < SeaLevel &&
                         Height >= SeaLevel - BeachWidth;
 
@@ -870,34 +918,53 @@ void AVoxelWorld::GenerateChunkBlocks(
                         Block =
                             uint8(EVoxelBlock::Sand);
                     }
-                    else
+                    else if (Biome == EVoxelBiome::Snow)
                     {
-                        switch (Biome)
+                        Block =
+                            uint8(EVoxelBlock::Snow);
+                    }
+                    else if (Landform == EVoxelLandform::Mountains)
+                    {
+                        if (Biome == EVoxelBiome::Desert)
                         {
-                        case EVoxelBiome::Desert:
                             Block =
-                                uint8(EVoxelBlock::Sand);
-                            break;
-
-                        case EVoxelBiome::Mountain:
+                                uint8(EVoxelBlock::Sandstone);
+                        }
+                        else
+                        {
                             Block =
                                 uint8(EVoxelBlock::Stone);
-                            break;
-
-                        case EVoxelBiome::Forest:
-                        case EVoxelBiome::Plains:
-                        default:
-                            Block =
-                                uint8(EVoxelBlock::Grass);
-                            break;
                         }
                     }
+                    else if (Biome == EVoxelBiome::Desert)
+                    {
+                        Block =
+                            uint8(EVoxelBlock::Sand);
+                    }
+                    else
+                    {
+                        Block =
+                            uint8(EVoxelBlock::Grass);
+                    }
+                }
+                else if (Biome == EVoxelBiome::Desert &&
+                         Landform == EVoxelLandform::Mountains &&
+                         WorldZ >= Height - 5)
+                {
+                    Block =
+                        uint8(EVoxelBlock::Sandstone);
                 }
                 else if (Biome == EVoxelBiome::Desert &&
                          WorldZ >= Height - 3)
                 {
                     Block =
                         uint8(EVoxelBlock::Sand);
+                }
+                else if (Landform == EVoxelLandform::Mountains &&
+                         WorldZ >= Height - 3)
+                {
+                    Block =
+                        uint8(EVoxelBlock::Stone);
                 }
                 else if (WorldZ >= Height - 3)
                 {
