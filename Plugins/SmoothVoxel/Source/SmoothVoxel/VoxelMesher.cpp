@@ -249,6 +249,8 @@ void FVoxelMesher::Build(
 
 
     const int32 MaxBlocks = Size * Size * Size;
+    const bool bStructureMode =
+        Input.StructureFlags.Num() == MaxBlocks;
 
     /*
      * В худшем случае один блок может иметь 6 граней.
@@ -272,7 +274,21 @@ void FVoxelMesher::Build(
 
                 const bool bWater = Block == uint8(EVoxelBlock::Water);
 
+                /*
+                 * В hybrid режиме обычные solid terrain blocks больше
+                 * не рисуются кубами: их отрисовывает Surface Nets.
+                 * Кубами остаются только blocks, изменённые игроком.
+                 * Water сохраняем отдельной старой секцией.
+                 */
                 if (!bWater && !IsVoxelSolid(Block))
+                {
+                    continue;
+                }
+
+                if (!bWater &&
+                    bStructureMode &&
+                    Input.StructureFlags[
+                        BlockIndex(X, Y, Z, Size)] == 0)
                 {
                     continue;
                 }
