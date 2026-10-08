@@ -293,7 +293,7 @@ float FVoxelWorldGenerator::GetMoisture(
 EVoxelBiome FVoxelWorldGenerator::GetBiome(
     int32 WorldX,
     int32 WorldY,
-    int32 SurfaceHeight) const
+    int32 /*SurfaceHeight*/) const
 {
     /*
      * Macro regions are diagonal bands across the normalized map:
