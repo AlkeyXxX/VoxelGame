@@ -175,12 +175,6 @@ void AVoxelWorld::ConfigureWorldGenerator()
     Settings.PlateauHeightStep = PlateauHeightStep;
     Settings.PlateauStrength = PlateauStrength;
     Settings.SeaLevel = SeaLevel;
-    Settings.bEnableCaves = bEnableCaves;
-    Settings.CaveNoiseScale = CaveNoiseScale;
-    Settings.CaveSecondaryScale = CaveSecondaryScale;
-    Settings.CaveThreshold = CaveThreshold;
-    Settings.CaveSecondaryThreshold = CaveSecondaryThreshold;
-    Settings.CaveMinDepth = CaveMinDepth;
     Settings.TemperatureScale = TemperatureScale;
     Settings.MoistureScale = MoistureScale;
 
@@ -844,22 +838,6 @@ void AVoxelWorld::GenerateChunkBlocks(
                     Block == uint8(EVoxelBlock::Water)
                         ? 4
                         : uint8(Biome));
-
-                /*
-                 * Внутренние пещеры вырезаются только из твёрдого
-                 * процедурного грунта. SurfaceHeight и вода остаются
-                 * управляемыми отдельными правилами.
-                 */
-                if (IsVoxelSolid(Block) &&
-                    WorldGenerator.IsCave(
-                        WorldX,
-                        WorldY,
-                        WorldZ,
-                        Height))
-                {
-                    Block =
-                        uint8(EVoxelBlock::Air);
-                }
 
                 /*
                  * Сначала строим обычный процедурный блок.
