@@ -1585,43 +1585,64 @@ bool AVoxelWorld::BreakBlockByRay()
 
 
     /*
-     * Чуть двигаемся внутрь блока,
-     * чтобы получить именно тот блок,
-     * по которому кликнули.
+     * Surface Nets surface is not aligned to the old cube face.
+     * Поэтому одной выборки в ImpactPoint недостаточно. Ищем реальный
+     * voxel под поверхностью, двигаясь внутрь по Hit.ImpactNormal.
      */
-    const FVector BlockPoint =
-        Hit.ImpactPoint -
-        Hit.ImpactNormal * 0.01f;
+    FIntVector WorldBlock = FIntVector::ZeroValue;
+    EVoxelBlock HitBlock = EVoxelBlock::Air;
 
+    const float BreakSamples[] =
+    {
+        FMath::Max(1.0f, VoxelSize * 0.02f),
+        VoxelSize * 0.20f,
+        VoxelSize * 0.40f,
+        VoxelSize * 0.60f,
+        VoxelSize * 0.90f
+    };
 
-    FIntVector WorldBlock;
+    for (const float SampleDistance : BreakSamples)
+    {
+        const FVector SamplePoint =
+            Hit.ImpactPoint -
+            Hit.ImpactNormal * SampleDistance;
 
+        FIntVector CandidateBlock;
 
-    if (!WorldToBlock(
-        BlockPoint,
-        WorldBlock))
+        if (!WorldToBlock(
+            SamplePoint,
+            CandidateBlock))
+        {
+            continue;
+        }
+
+        if (const AVoxelChunk* Chunk =
+            Chunks.FindRef(
+                WorldBlockToChunk(CandidateBlock)))
+        {
+            const FIntVector LocalBlock =
+                WorldBlockToLocal(CandidateBlock);
+
+            const EVoxelBlock CandidateVoxel =
+                static_cast<EVoxelBlock>(
+                    Chunk->GetBlock(
+                        LocalBlock.X,
+                        LocalBlock.Y,
+                        LocalBlock.Z));
+
+            if (CandidateVoxel != EVoxelBlock::Air)
+            {
+                WorldBlock = CandidateBlock;
+                HitBlock = CandidateVoxel;
+                break;
+            }
+        }
+    }
+
+    if (HitBlock == EVoxelBlock::Air)
     {
         return false;
     }
-
-
-    AVoxelChunk* Chunk =
-        GetChunk(WorldBlockToChunk(WorldBlock));
-
-    if (!Chunk)
-    {
-        return false;
-    }
-
-    const FIntVector LocalBlock =
-        WorldBlockToLocal(WorldBlock);
-
-    const EVoxelBlock HitBlock =
-        static_cast<EVoxelBlock>(
-            Chunk->GetBlock(
-                LocalBlock.X,
-                LocalBlock.Y,
-                LocalBlock.Z));
 
     /*
      * Вся игровая логика блока теперь смотрит в единый реестр.
@@ -1803,22 +1824,69 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
         return false;
     }
 
-    const FVector PlacePoint =
-        Hit.ImpactPoint +
-        Hit.ImpactNormal *
-        (VoxelSize * 0.51f);
+    /*
+     * На гладкой поверхности normal может проходить через несколько
+     * voxel boundaries. Ищем ближайшую свободную voxel-ячейку снаружи
+     * поверхности, двигаясь по нормали.
+     */
+    FIntVector WorldBlock = FIntVector::ZeroValue;
+    bool bFoundPlacementCell = false;
 
-    FIntVector WorldBlock;
+    const float PlaceSamples[] =
+    {
+        VoxelSize * 0.35f,
+        VoxelSize * 0.55f,
+        VoxelSize * 0.80f,
+        VoxelSize * 1.05f,
+        VoxelSize * 1.30f
+    };
 
-    if (!WorldToBlock(
-        PlacePoint,
-        WorldBlock))
+    for (const float SampleDistance : PlaceSamples)
+    {
+        const FVector SamplePoint =
+            Hit.ImpactPoint +
+            Hit.ImpactNormal * SampleDistance;
+
+        FIntVector CandidateBlock;
+
+        if (!WorldToBlock(
+            SamplePoint,
+            CandidateBlock))
+        {
+            continue;
+        }
+
+        const AVoxelChunk* CandidateChunk =
+            Chunks.FindRef(
+                WorldBlockToChunk(CandidateBlock));
+
+        if (!CandidateChunk)
+        {
+            continue;
+        }
+
+        const FIntVector CandidateLocal =
+            WorldBlockToLocal(CandidateBlock);
+
+        const EVoxelBlock ExistingBlock =
+            static_cast<EVoxelBlock>(
+                CandidateChunk->GetBlock(
+                    CandidateLocal.X,
+                    CandidateLocal.Y,
+                    CandidateLocal.Z));
+
+        if (ExistingBlock == EVoxelBlock::Air)
+        {
+            WorldBlock = CandidateBlock;
+            bFoundPlacementCell = true;
+            break;
+        }
+    }
+
+    if (!bFoundPlacementCell)
     {
         return false;
     }
-
-    const FIntVector LocalBlock =
-        WorldBlockToLocal(WorldBlock);
 
     AVoxelChunk* TargetChunk =
         GetChunk(
@@ -1826,22 +1894,6 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
                 WorldBlock));
 
     if (!TargetChunk)
-    {
-        return false;
-    }
-
-    /*
-     * Не перезаписываем существующий твёрдый блок.
-     * Воду также не считаем свободным местом для строительства.
-     */
-    const EVoxelBlock ExistingBlock =
-        static_cast<EVoxelBlock>(
-            TargetChunk->GetBlock(
-                LocalBlock.X,
-                LocalBlock.Y,
-                LocalBlock.Z));
-
-    if (ExistingBlock != EVoxelBlock::Air)
     {
         return false;
     }
