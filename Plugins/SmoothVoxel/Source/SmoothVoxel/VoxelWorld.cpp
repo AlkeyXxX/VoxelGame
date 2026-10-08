@@ -1526,8 +1526,8 @@ void AVoxelWorld::SetBlockInternal(
         LocalIndex,
         Block);
 
-    RefreshStructureFlagsAround(
-        ChunkCoord);
+    MarkStructureSeamAroundBlock(
+        WorldBlock);
 
 
     /*
@@ -1709,6 +1709,62 @@ void AVoxelWorld::RefreshStructureFlagsAround(
                 RebuildStructureFlagsForChunk(
                     ChunkCoord +
                     FIntVector(X, Y, Z));
+            }
+        }
+    }
+}
+
+
+void AVoxelWorld::MarkStructureSeamAroundBlock(
+    const FIntVector& WorldBlock)
+{
+    /*
+     * Runtime edits only affect the edited voxel and its immediate
+     * neighborhood. Structure seam flags are monotonic during runtime,
+     * so there is no need to scan all saved modifications again.
+     */
+    for (int32 DZ = -1; DZ <= 1; ++DZ)
+    {
+        for (int32 DY = -1; DY <= 1; ++DY)
+        {
+            for (int32 DX = -1; DX <= 1; ++DX)
+            {
+                const FIntVector SeamWorldBlock =
+                    WorldBlock +
+                    FIntVector(DX, DY, DZ);
+
+                const FIntVector TargetChunkCoord =
+                    WorldBlockToChunk(
+                        SeamWorldBlock);
+
+                AVoxelChunk* TargetChunk =
+                    GetChunk(
+                        TargetChunkCoord);
+
+                if (!TargetChunk)
+                {
+                    continue;
+                }
+
+                const FIntVector LocalBlock =
+                    WorldBlockToLocal(
+                        SeamWorldBlock);
+
+                const EVoxelBlock Block =
+                    static_cast<EVoxelBlock>(
+                        TargetChunk->GetBlock(
+                            LocalBlock.X,
+                            LocalBlock.Y,
+                            LocalBlock.Z));
+
+                if (IsVoxelSolid(Block))
+                {
+                    TargetChunk->SetStructureFlag(
+                        LocalBlock.X,
+                        LocalBlock.Y,
+                        LocalBlock.Z,
+                        true);
+                }
             }
         }
     }
