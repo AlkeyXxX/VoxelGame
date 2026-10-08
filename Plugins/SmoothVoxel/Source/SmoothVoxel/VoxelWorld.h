@@ -298,6 +298,30 @@ public:
         meta=(ClampMin="0", ClampMax="8"))
     int32 DetailHeightVariation = 2;
 
+    /*
+     * Масштаб широких зон плато.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain",
+        meta=(ClampMin="0.001"))
+    float PlateauScale = 0.007f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain",
+        meta=(ClampMin="1", ClampMax="8"))
+    int32 PlateauHeightStep = 2;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain",
+        meta=(ClampMin="0.0", ClampMax="1.0"))
+    float PlateauStrength = 0.68f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biome")
     float TemperatureScale = 0.006f;
 
