@@ -512,5 +512,24 @@ void FVoxelMesher::Build(
             }
         }
     }
+
+    /*
+     * Surface Nets currently places the extracted terrain surface one
+     * voxel lower than the legacy block boundary. The water volume still
+     * uses the old block-space convention, so shift only the rendered
+     * water geometry down by one voxel to make it meet the smooth shore.
+     */
+    if (Output.WaterVertices.Num() > 0)
+    {
+        const FVector WaterOffset(
+            0.0f,
+            0.0f,
+            -VoxelSize);
+
+        for (FVector& Vertex : Output.WaterVertices)
+        {
+            Vertex += WaterOffset;
+        }
+    }
 }
 
