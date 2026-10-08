@@ -8,6 +8,7 @@
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "ProceduralMeshComponent.h"
 
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Character.h"
