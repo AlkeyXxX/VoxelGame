@@ -274,6 +274,8 @@ void AVoxelWorld::GenerateWorld()
     /*
      * Удаляем только chunks, которые сейчас загружены.
      */
+    ClearFarLOD();
+
     for (TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
     {
         if (Pair.Value)
@@ -471,47 +473,35 @@ void AVoxelWorld::UpdateChunkStreaming()
     FIntVector CenterChunk;
 
     if (!GetStreamingCenterChunk(
-        CenterChunk))
+            CenterChunk))
     {
         return;
     }
 
-
     const bool bCenterChanged =
         !bStreamingInitialized ||
         CenterChunk != LastStreamingCenter;
-
 
     LastStreamingCenter =
         CenterChunk;
 
     bStreamingInitialized = true;
 
-
     /*
-     * Сначала выгружаем слишком далёкие chunks.
-     *
-     * UnloadRadius обычно немного больше
-     * StreamingRadius, чтобы не было дёрганья
-     * при переходе через границу.
+     * Full chunks are the only AVoxelChunk actors.
+     * Far terrain is rendered by lightweight world-owned tiles.
      */
-    TArray<FIntVector> ChunksToUnload;
-
-
-    const int32 EffectiveLOD2Radius =
-        FMath::Max(LOD2Radius, LOD1Radius);
-
     const int32 EffectiveUnloadRadius =
         FMath::Max(
             UnloadRadius,
-            EffectiveLOD2Radius + 1);
+            StreamingRadius + 1);
 
+    TArray<FIntVector> ChunksToUnload;
 
     for (const TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
     {
         const FIntVector& Coord =
             Pair.Key;
-
 
         const int32 DistanceX =
             FMath::Abs(
@@ -525,7 +515,6 @@ void AVoxelWorld::UpdateChunkStreaming()
             FMath::Abs(
                 Coord.Z - CenterChunk.Z);
 
-
         if (DistanceX > EffectiveUnloadRadius ||
             DistanceY > EffectiveUnloadRadius ||
             DistanceZ > EffectiveUnloadRadius)
@@ -534,7 +523,6 @@ void AVoxelWorld::UpdateChunkStreaming()
                 Coord);
         }
     }
-
 
     for (const FIntVector& Coord :
         ChunksToUnload)
@@ -550,42 +538,27 @@ void AVoxelWorld::UpdateChunkStreaming()
         Chunks.Remove(Coord);
     }
 
-
-    /*
-     * Дальняя зона теперь тоже стримится: её chunks нужны как
-     * дешёвая геометрия LOD. Полный mesh остаётся только внутри
-     * StreamingRadius.
-     */
-    const int32 EffectiveLoadRadius =
-        FMath::Max(StreamingRadius, FMath::Max(LOD1Radius, LOD2Radius));
-
     TArray<FIntVector> Candidates;
 
-
     for (int32 Z = CenterChunk.Z - StreamingRadius;
-         Z <= CenterChunk.Z + StreamingRadius;
-         ++Z)
+         Z <= CenterChunk.Z + StreamingRadius; ++Z)
     {
         for (int32 Y = CenterChunk.Y - StreamingRadius;
-             Y <= CenterChunk.Y + StreamingRadius;
-             ++Y)
+             Y <= CenterChunk.Y + StreamingRadius; ++Y)
         {
             for (int32 X = CenterChunk.X - StreamingRadius;
-                 X <= CenterChunk.X + StreamingRadius;
-                 ++X)
+                 X <= CenterChunk.X + StreamingRadius; ++X)
             {
                 const FIntVector Coord(
                     X,
                     Y,
                     Z);
 
-
                 if (!IsChunkInsideWorld(
-                    Coord))
+                        Coord))
                 {
                     continue;
                 }
-
 
                 Candidates.Add(
                     Coord);
@@ -593,9 +566,8 @@ void AVoxelWorld::UpdateChunkStreaming()
         }
     }
 
-
     /*
-     * Ближайшие chunks грузим первыми.
+     * Ближайшие Full chunks грузим первыми.
      */
     Candidates.Sort(
         [&CenterChunk](
@@ -620,7 +592,6 @@ void AVoxelWorld::UpdateChunkStreaming()
             const int32 BZ =
                 B.Z - CenterChunk.Z;
 
-
             const int32 DistanceA =
                 AX * AX +
                 AY * AY +
@@ -631,13 +602,10 @@ void AVoxelWorld::UpdateChunkStreaming()
                 BY * BY +
                 BZ * BZ;
 
-
             return DistanceA < DistanceB;
         });
 
-
     int32 LoadedThisTick = 0;
-
 
     for (const FIntVector& Coord :
         Candidates)
@@ -648,12 +616,10 @@ void AVoxelWorld::UpdateChunkStreaming()
             break;
         }
 
-
         if (Chunks.Contains(Coord))
         {
             continue;
         }
-
 
         if (CreateChunk(Coord))
         {
@@ -661,31 +627,39 @@ void AVoxelWorld::UpdateChunkStreaming()
         }
     }
 
-
     /*
-     * Применяем LOD ко всем уже загруженным chunks.
-     * Full: <= StreamingRadius
-     * LOD1: <= LOD1Radius
-     * LOD2: <= LOD2Radius
+     * Far LOD is updated much less frequently than normal chunk streaming.
+     * This avoids rebuilding the distant world every few meters while flying.
      */
-    for (const TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
+    const int32 FarMoveX =
+        FMath::Abs(
+            CenterChunk.X -
+            LastFarLODCenter.X);
+
+    const int32 FarMoveY =
+        FMath::Abs(
+            CenterChunk.Y -
+            LastFarLODCenter.Y);
+
+    const int32 FarMove =
+        FMath::Max(
+            FarMoveX,
+            FarMoveY);
+
+    if (!bFarLODInitialized ||
+        FarMove >= FMath::Max(1, LODUpdateChunkInterval))
     {
-        const FIntVector& Coord = Pair.Key;
-        AVoxelChunk* Chunk = Pair.Value;
+        LastFarLODCenter =
+            CenterChunk;
 
-        if (!Chunk)
-        {
-            continue;
-        }
+        bFarLODInitialized = true;
 
-        const int32 Distance = GetChunkDistance(Coord, CenterChunk);
-        UpdateChunkLOD(Chunk, Distance);
+        UpdateFarLOD(
+            CenterChunk);
     }
 
-
     /*
-     * После выгрузки соседний chunk мог потерять
-     * свой соседа. Восстанавливаем видимые границы.
+     * После выгрузки соседний Full chunk мог потерять своего соседа.
      */
     if (ChunksToUnload.Num() > 0)
     {
@@ -703,16 +677,9 @@ void AVoxelWorld::UpdateChunkStreaming()
                             FIntVector(X, Y, Z);
 
                         if (AVoxelChunk* Neighbor =
-                            GetChunk(NeighborCoord))
+                                GetChunk(NeighborCoord))
                         {
-                            const int32 NeighborDistance =
-                                GetChunkDistance(
-                                    NeighborCoord,
-                                    CenterChunk);
-
-                            UpdateChunkLOD(
-                                Neighbor,
-                                NeighborDistance);
+                            Neighbor->RebuildMesh();
                         }
                     }
                 }
@@ -720,18 +687,12 @@ void AVoxelWorld::UpdateChunkStreaming()
         }
     }
 
-
-    /*
-     * Если центр сменился, следующими Tick'ами
-     * продолжаем дозагружать недостающие chunks.
-     */
     if (!bCenterChanged &&
         LoadedThisTick == 0)
     {
         return;
     }
 }
-
 
 /*
  * Генерация terrain.
@@ -2269,5 +2230,357 @@ void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
         Movement->GravityScale = 1.0f;
         DebugFlyVerticalInput = 0.0f;
         bDebugFlyBoost = false;
+    }
+}
+
+
+void AVoxelWorld::ClearFarLOD()
+{
+    ++FarLODGenerationVersion;
+
+    for (TPair<FIntVector, UProceduralMeshComponent*>& Pair :
+        FarLODTiles)
+    {
+        if (Pair.Value)
+        {
+            Pair.Value->DestroyComponent();
+        }
+    }
+
+    FarLODTiles.Empty();
+    bFarLODInitialized = false;
+    LastFarLODCenter = FIntVector::ZeroValue;
+}
+
+
+void AVoxelWorld::UpdateFarLOD(
+    const FIntVector& CenterChunk)
+{
+    ++FarLODGenerationVersion;
+
+    const uint32 LocalGeneration =
+        FarLODGenerationVersion;
+
+    const int32 TileChunkSize =
+        FMath::Clamp(
+            LODTileChunkSize,
+            2,
+            8);
+
+    const int32 TileCountX =
+        FMath::DivideAndRoundUp(
+            WorldSizeX,
+            TileChunkSize);
+
+    const int32 TileCountY =
+        FMath::DivideAndRoundUp(
+            WorldSizeY,
+            TileChunkSize);
+
+    TSet<FIntVector> DesiredTiles;
+
+    for (int32 TileY = 0; TileY < TileCountY; ++TileY)
+    {
+        for (int32 TileX = 0; TileX < TileCountX; ++TileX)
+        {
+            const int32 MinX =
+                TileX * TileChunkSize;
+
+            const int32 MaxX =
+                FMath::Min(
+                    WorldSizeX - 1,
+                    MinX + TileChunkSize - 1);
+
+            const int32 MinY =
+                TileY * TileChunkSize;
+
+            const int32 MaxY =
+                FMath::Min(
+                    WorldSizeY - 1,
+                    MinY + TileChunkSize - 1);
+
+            auto DistanceToRange =
+                [](int32 Value, int32 MinValue, int32 MaxValue)
+                {
+                    if (Value < MinValue)
+                    {
+                        return MinValue - Value;
+                    }
+
+                    if (Value > MaxValue)
+                    {
+                        return Value - MaxValue;
+                    }
+
+                    return 0;
+                };
+
+            const int32 MinDX =
+                DistanceToRange(
+                    CenterChunk.X,
+                    MinX,
+                    MaxX);
+
+            const int32 MinDY =
+                DistanceToRange(
+                    CenterChunk.Y,
+                    MinY,
+                    MaxY);
+
+            const int32 MinDistance =
+                FMath::Max(MinDX, MinDY);
+
+            const int32 MaxDX =
+                FMath::Max(
+                    FMath::Abs(
+                        MinX - CenterChunk.X),
+                    FMath::Abs(
+                        MaxX - CenterChunk.X));
+
+            const int32 MaxDY =
+                FMath::Max(
+                    FMath::Abs(
+                        MinY - CenterChunk.Y),
+                    FMath::Abs(
+                        MaxY - CenterChunk.Y));
+
+            const int32 MaxDistance =
+                FMath::Max(MaxDX, MaxDY);
+
+            int32 LODLevel = 0;
+
+            if (MinDistance > LOD2Radius)
+            {
+                LODLevel = 2;
+            }
+            else if (MaxDistance > StreamingRadius)
+            {
+                LODLevel = 1;
+            }
+
+            if (LODLevel == 0)
+            {
+                continue;
+            }
+
+            const FIntVector TileCoord(
+                TileX,
+                TileY,
+                0);
+
+            DesiredTiles.Add(TileCoord);
+
+            UProceduralMeshComponent* Mesh =
+                FarLODTiles.FindRef(TileCoord);
+
+            if (!Mesh)
+            {
+                Mesh =
+                    NewObject<UProceduralMeshComponent>(
+                        this,
+                        *FString::Printf(
+                            TEXT("FarLODTile_%d_%d"),
+                            TileX,
+                            TileY));
+
+                if (!Mesh)
+                {
+                    continue;
+                }
+
+                Mesh->SetMobility(
+                    EComponentMobility::Static);
+
+                Mesh->bUseAsyncCooking = false;
+
+                Mesh->SetCollisionEnabled(
+                    ECollisionEnabled::NoCollision);
+
+                Mesh->SetGenerateOverlapEvents(false);
+
+                Mesh->RegisterComponent();
+
+                Mesh->SetMaterial(
+                    0,
+                    Material);
+
+                Mesh->SetMaterial(
+                    1,
+                    WaterMaterial);
+
+                FarLODTiles.Add(
+                    TileCoord,
+                    Mesh);
+            }
+
+            Mesh->SetMaterial(
+                0,
+                Material);
+
+            Mesh->SetMaterial(
+                1,
+                WaterMaterial);
+
+            const FVoxelWorldGenerator GeneratorCopy =
+                WorldGenerator;
+
+            FVoxelTerrainLODBuildInput BuildInput;
+            BuildInput.Generator =
+                GeneratorCopy;
+            BuildInput.WorldSizeX =
+                WorldSizeX;
+            BuildInput.WorldSizeY =
+                WorldSizeY;
+            BuildInput.ChunkSize =
+                ChunkSize;
+            BuildInput.VoxelSize =
+                VoxelSize;
+            BuildInput.BeachWidth =
+                BeachWidth;
+            BuildInput.SeaLevel =
+                SeaLevel;
+            BuildInput.CenterChunk =
+                CenterChunk;
+            BuildInput.TileCoord =
+                TileCoord;
+            BuildInput.TileChunkSize =
+                TileChunkSize;
+
+            const bool bUseLOD1 =
+                LODLevel == 1;
+
+            BuildInput.SampleStep =
+                bUseLOD1 ? 2 : 4;
+
+            BuildInput.InnerRadiusChunks =
+                bUseLOD1
+                    ? StreamingRadius
+                    : LOD1Radius;
+
+            BuildInput.OuterRadiusChunks =
+                bUseLOD1
+                    ? LOD1Radius
+                    : LOD2Radius;
+
+            const int32 TileBlocks =
+                TileChunkSize * ChunkSize;
+
+            const FVector MeshLocation =
+                GetActorLocation() +
+                FVector(
+                    TileCoord.X * TileBlocks * VoxelSize,
+                    TileCoord.Y * TileBlocks * VoxelSize,
+                    0.0f);
+
+            Mesh->SetWorldLocation(
+                MeshLocation);
+
+            TWeakObjectPtr<UProceduralMeshComponent> WeakMesh(Mesh);
+
+            Async(
+                EAsyncExecution::ThreadPool,
+                [
+                    BuildInput = MoveTemp(BuildInput),
+                    WeakMesh,
+                    LocalGeneration
+                ]() mutable
+                {
+                    FVoxelTerrainLODMeshOutput Output;
+
+                    FVoxelTerrainLODMesher::Build(
+                        BuildInput,
+                        Output);
+
+                    AsyncTask(
+                        ENamedThreads::GameThread,
+                        [
+                            Output = MoveTemp(Output),
+                            WeakMesh,
+                            LocalGeneration
+                        ]() mutable
+                        {
+                            if (!WeakMesh.IsValid())
+                            {
+                                return;
+                            }
+
+                            /*
+                             * A newer player position already scheduled
+                             * another far-LOD build.
+                             */
+                            UProceduralMeshComponent* Mesh =
+                                WeakMesh.Get();
+
+                            if (!Mesh)
+                            {
+                                return;
+                            }
+
+                            Mesh->ClearMeshSection(0);
+                            Mesh->ClearMeshSection(1);
+
+                            if (Output.Vertices.Num() > 0 &&
+                                Output.Triangles.Num() > 0)
+                            {
+                                Mesh->CreateMeshSection_LinearColor(
+                                    0,
+                                    Output.Vertices,
+                                    Output.Triangles,
+                                    Output.Normals,
+                                    Output.UV0,
+                                    TArray<FVector2D>(),
+                                    TArray<FVector2D>(),
+                                    TArray<FVector2D>(),
+                                    Output.VertexColors,
+                                    TArray<FProcMeshTangent>(),
+                                    false);
+                            }
+
+                            if (Output.WaterVertices.Num() > 0 &&
+                                Output.WaterTriangles.Num() > 0)
+                            {
+                                Mesh->CreateMeshSection_LinearColor(
+                                    1,
+                                    Output.WaterVertices,
+                                    Output.WaterTriangles,
+                                    Output.WaterNormals,
+                                    Output.WaterUV0,
+                                    TArray<FVector2D>(),
+                                    TArray<FVector2D>(),
+                                    TArray<FVector2D>(),
+                                    Output.WaterVertexColors,
+                                    TArray<FProcMeshTangent>(),
+                                    false);
+                            }
+                        });
+                });
+        }
+    }
+
+    TArray<FIntVector> TilesToRemove;
+
+    for (const TPair<FIntVector, UProceduralMeshComponent*>& Pair :
+        FarLODTiles)
+    {
+        if (!DesiredTiles.Contains(Pair.Key))
+        {
+            TilesToRemove.Add(
+                Pair.Key);
+        }
+    }
+
+    for (const FIntVector& TileCoord :
+        TilesToRemove)
+    {
+        if (UProceduralMeshComponent** MeshPtr =
+                FarLODTiles.Find(TileCoord))
+        {
+            if (*MeshPtr)
+            {
+                (*MeshPtr)->DestroyComponent();
+            }
+        }
+
+        FarLODTiles.Remove(TileCoord);
     }
 }
