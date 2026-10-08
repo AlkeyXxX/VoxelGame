@@ -9,8 +9,8 @@ struct FVoxelSurfaceNetsBuildInput
     float VoxelSize = 100.0f;
 
     /*
-     * Block data with a one-cell negative and two-cell positive halo.
-     * Valid block coordinates are [-1, Size + 1] on every axis.
+     * Block data with a two-cell negative and one-cell positive halo.
+     * Valid block coordinates are [-2, Size + 1] on every axis.
      */
     TArray<uint8> Blocks;
 
@@ -18,7 +18,7 @@ struct FVoxelSurfaceNetsBuildInput
     {
         Size = InSize;
 
-        const int32 Side = Size + 3;
+        const int32 Side = Size + 4;
         Blocks.SetNumZeroed(Side * Side * Side);
     }
 };
