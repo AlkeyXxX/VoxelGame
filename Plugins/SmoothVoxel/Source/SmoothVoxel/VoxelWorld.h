@@ -279,6 +279,25 @@ public:
         Category="Voxel|Terrain")
     float NoiseScale = 0.025f;
 
+    /*
+     * Более мелкий шум поверхности.
+     * Маленькая амплитуда добавляет естественную неровность,
+     * не ломая основную форму рельефа.
+     */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain",
+        meta=(ClampMin="0.001"))
+    float DetailNoiseScale = 0.08f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Terrain",
+        meta=(ClampMin="0", ClampMax="8"))
+    int32 DetailHeightVariation = 2;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biome")
     float TemperatureScale = 0.006f;
 
