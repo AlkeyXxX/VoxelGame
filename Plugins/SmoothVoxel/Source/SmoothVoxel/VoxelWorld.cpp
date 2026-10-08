@@ -169,6 +169,8 @@ void AVoxelWorld::ConfigureWorldGenerator()
     Settings.BaseHeight = BaseHeight;
     Settings.HeightVariation = HeightVariation;
     Settings.NoiseScale = NoiseScale;
+    Settings.DetailNoiseScale = DetailNoiseScale;
+    Settings.DetailHeightVariation = DetailHeightVariation;
     Settings.TemperatureScale = TemperatureScale;
     Settings.MoistureScale = MoistureScale;
 
