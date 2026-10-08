@@ -169,6 +169,11 @@ void AVoxelWorld::ConfigureWorldGenerator()
     Settings.BaseHeight = BaseHeight;
     Settings.HeightVariation = HeightVariation;
     Settings.NoiseScale = NoiseScale;
+    Settings.DetailNoiseScale = DetailNoiseScale;
+    Settings.DetailHeightVariation = DetailHeightVariation;
+    Settings.CaveNoiseScale = CaveNoiseScale;
+    Settings.CaveThreshold = CaveThreshold;
+    Settings.CaveMinDepth = CaveMinDepth;
     Settings.TemperatureScale = TemperatureScale;
     Settings.MoistureScale = MoistureScale;
 
@@ -760,7 +765,19 @@ void AVoxelWorld::GenerateChunkBlocks(
                 uint8 Block =
                     uint8(EVoxelBlock::Air);
 
-                if (WorldZ > Height)
+                const bool bCave =
+                    WorldGenerator.IsCave(
+                        WorldX,
+                        WorldY,
+                        WorldZ,
+                        Height);
+
+                if (bCave)
+                {
+                    Block =
+                        uint8(EVoxelBlock::Air);
+                }
+                else if (WorldZ > Height)
                 {
                     if (WorldZ <= SeaLevel)
                     {
