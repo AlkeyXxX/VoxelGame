@@ -16,11 +16,6 @@ struct FVoxelWorldGenerationSettings
     int32 BaseHeight = 12;
     int32 HeightVariation = 8;
     float NoiseScale = 0.025f;
-    float DetailNoiseScale = 0.08f;
-    float DetailHeightVariation = 2.0f;
-    float CaveNoiseScale = 0.045f;
-    float CaveThreshold = 0.24f;
-    int32 CaveMinDepth = 4;
     float TemperatureScale = 0.006f;
     float MoistureScale = 0.008f;
 };
@@ -36,7 +31,6 @@ public:
     float GetTerrainNoise(int32 WorldX, int32 WorldY) const;
     float GetTemperature(int32 WorldX, int32 WorldY) const;
     float GetMoisture(int32 WorldX, int32 WorldY) const;
-    bool IsCave(int32 WorldX, int32 WorldY, int32 WorldZ, int32 SurfaceHeight) const;
 
     EVoxelBiome GetBiome(
         int32 WorldX,
