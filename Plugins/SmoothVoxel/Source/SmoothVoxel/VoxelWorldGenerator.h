@@ -16,6 +16,8 @@ struct FVoxelWorldGenerationSettings
     int32 BaseHeight = 12;
     int32 HeightVariation = 8;
     float NoiseScale = 0.025f;
+    float DetailNoiseScale = 0.08f;
+    int32 DetailHeightVariation = 2;
     float TemperatureScale = 0.006f;
     float MoistureScale = 0.008f;
 };
