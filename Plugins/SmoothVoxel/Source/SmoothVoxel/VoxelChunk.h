@@ -76,9 +76,15 @@ public:
 
 
     /*
-     * Перестроение mesh.
+     * Перестроение полноценного mesh.
      */
     void RebuildMesh();
+
+    /*
+     * Перестроение упрощённого LOD mesh.
+     * DownsampleFactor=2 означает сетку 16x16x16 вместо 32x32x32.
+     */
+    void RebuildLODMesh(int32 DownsampleFactor);
 
 
     /*
@@ -214,6 +220,9 @@ private:
      */
     uint32 MeshGenerationVersion = 0;
 
+    bool bLOD = false;
+    int32 CurrentLODLevel = 0;
+
 
     int32 BlockIndex(
         int32 X,
@@ -223,6 +232,7 @@ private:
 
     void ApplyMesh(
         FVoxelMeshBuildOutput&& Output,
-        uint32 Version);
+        uint32 Version,
+        bool bEnableCollision);
 };
 
