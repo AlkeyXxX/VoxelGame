@@ -1026,17 +1026,27 @@ void FVoxelMarchingCubesMesher::Build(
                                 const int32 OriginalIndex =
                                     OriginalIndices[Vertex];
 
+                                /*
+                                 * Copy attributes before appending: each
+                                 * TArray may reallocate on Add(), so passing
+                                 * an element from that same array by reference
+                                 * would risk invalidating the source.
+                                 */
+                                const FVector OriginalNormal =
+                                    Output.Normals[OriginalIndex];
+                                const FVector2D OriginalUV =
+                                    Output.UV0[OriginalIndex];
+                                const FLinearColor OriginalColor =
+                                    Output.VertexColors[OriginalIndex];
+
                                 AdjustedIndices[Vertex] =
                                     Output.Vertices.Num();
 
                                 Output.Vertices.Add(
                                     AdjustedPositions[Vertex]);
-                                Output.Normals.Add(
-                                    Output.Normals[OriginalIndex]);
-                                Output.UV0.Add(
-                                    Output.UV0[OriginalIndex]);
-                                Output.VertexColors.Add(
-                                    Output.VertexColors[OriginalIndex]);
+                                Output.Normals.Add(OriginalNormal);
+                                Output.UV0.Add(OriginalUV);
+                                Output.VertexColors.Add(OriginalColor);
                             }
 
                             FinalI0 = AdjustedIndices[0];
