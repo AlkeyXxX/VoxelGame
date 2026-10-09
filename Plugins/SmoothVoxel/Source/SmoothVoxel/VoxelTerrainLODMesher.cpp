@@ -52,6 +52,26 @@ namespace
     const FLinearColor WaterColor(
         0.05f, 0.35f, 0.85f, 1.0f);
 
+    int32 GetEffectiveSurfaceHeight(
+        const FVoxelWorldGenerator& Generator,
+        int32 WorldX,
+        int32 WorldY,
+        int32 SeaLevel)
+    {
+        const int32 TerrainHeight =
+            Generator.GetSurfaceHeight(WorldX, WorldY);
+
+        const int32 WaterSurfaceBlockZ =
+            Generator.GetWaterSurfaceBlockZ(
+                WorldX,
+                WorldY,
+                TerrainHeight);
+
+        return WaterSurfaceBlockZ > SeaLevel
+            ? FMath::Min(TerrainHeight, WaterSurfaceBlockZ - 2)
+            : TerrainHeight;
+    }
+
     FORCEINLINE int32 GridIndex(
         int32 X,
         int32 Y,
@@ -260,10 +280,14 @@ void FVoxelTerrainLODMesher::Build(
             Input.SampleStep) + 1;
 
     TArray<int32> Heights;
+    TArray<int32> WaterSurfaceBlockZs;
     TArray<float> SurfaceHeights;
     TArray<FLinearColor> Colors;
 
     Heights.SetNumZeroed(
+        CountX * CountY);
+
+    WaterSurfaceBlockZs.SetNumUninitialized(
         CountX * CountY);
 
     SurfaceHeights.SetNumZeroed(
@@ -310,6 +334,17 @@ void FVoxelTerrainLODMesher::Build(
                     ClampedWorldX,
                     ClampedWorldY);
 
+            const int32 WaterSurfaceBlockZ =
+                Input.Generator.GetWaterSurfaceBlockZ(
+                    ClampedWorldX,
+                    ClampedWorldY,
+                    Height);
+
+            const int32 EffectiveHeight =
+                WaterSurfaceBlockZ > Input.SeaLevel
+                    ? FMath::Min(Height, WaterSurfaceBlockZ - 2)
+                    : Height;
+
             const EVoxelBiome Biome =
                 Input.Generator.GetBiome(
                     ClampedWorldX,
@@ -328,15 +363,28 @@ void FVoxelTerrainLODMesher::Build(
                     CountX);
 
             Heights[Index] =
-                Height;
+                EffectiveHeight;
 
-            Colors[Index] =
-                GetBiomeColor(
-                    Biome,
-                    Landform,
-                    Height,
-                    Input.SeaLevel,
-                    Input.BeachWidth);
+            WaterSurfaceBlockZs[Index] =
+                WaterSurfaceBlockZ;
+
+            if (WaterSurfaceBlockZ > Input.SeaLevel &&
+                EffectiveHeight < Height)
+            {
+                Colors[Index] =
+                    FLinearColor(
+                        0.85f, 0.72f, 0.42f, 1.0f);
+            }
+            else
+            {
+                Colors[Index] =
+                    GetBiomeColor(
+                        Biome,
+                        Landform,
+                        Height,
+                        Input.SeaLevel,
+                        Input.BeachWidth);
+            }
         }
     }
 
@@ -397,19 +445,25 @@ void FVoxelTerrainLODMesher::Build(
                     FMath::Max(0, WorldY - 1);
 
                 ColumnHeights[0] =
-                    Input.Generator.GetSurfaceHeight(
+                    GetEffectiveSurfaceHeight(
+                        Input.Generator,
                         PreviousWorldX,
-                        PreviousWorldY);
+                        PreviousWorldY,
+                        Input.SeaLevel);
 
                 ColumnHeights[1] =
-                    Input.Generator.GetSurfaceHeight(
+                    GetEffectiveSurfaceHeight(
+                        Input.Generator,
                         WorldX,
-                        PreviousWorldY);
+                        PreviousWorldY,
+                        Input.SeaLevel);
 
                 ColumnHeights[2] =
-                    Input.Generator.GetSurfaceHeight(
+                    GetEffectiveSurfaceHeight(
+                        Input.Generator,
                         PreviousWorldX,
-                        WorldY);
+                        WorldY,
+                        Input.SeaLevel);
 
                 ColumnHeights[3] =
                     Heights[Index];
@@ -590,8 +644,10 @@ void FVoxelTerrainLODMesher::Build(
             Output.Normals[I01] += N1;
 
             /*
-             * Water is continuous at world SeaLevel and is rendered
-             * only for cells outside the nearer ring.
+             * Keep the legacy sea surface driven by average terrain height,
+             * while inland rivers/lakes use their deterministic sampled level.
+             * Choosing the highest marked inland level keeps neighboring cells
+             * connected when a river meets a sea-level basin.
              */
             const float AverageHeight =
                 (
@@ -601,13 +657,41 @@ void FVoxelTerrainLODMesher::Build(
                     static_cast<float>(Heights[I11])
                 ) * 0.25f;
 
+            int32 WaterSurfaceBlockZ = INDEX_NONE;
+            const int32 CellWaterLevels[4] =
+            {
+                WaterSurfaceBlockZs[I00],
+                WaterSurfaceBlockZs[I10],
+                WaterSurfaceBlockZs[I01],
+                WaterSurfaceBlockZs[I11]
+            };
+
+            for (int32 WaterIndex = 0; WaterIndex < 4; ++WaterIndex)
+            {
+                if (CellWaterLevels[WaterIndex] > Input.SeaLevel)
+                {
+                    WaterSurfaceBlockZ =
+                        FMath::Max(
+                            WaterSurfaceBlockZ,
+                            CellWaterLevels[WaterIndex]);
+                }
+            }
+
             if (AverageHeight <
                 static_cast<float>(Input.SeaLevel))
+            {
+                WaterSurfaceBlockZ =
+                    FMath::Max(
+                        WaterSurfaceBlockZ,
+                        Input.SeaLevel);
+            }
+
+            if (WaterSurfaceBlockZ != INDEX_NONE)
             {
                 const float WaterZ =
                     (
                         static_cast<float>(
-                            Input.SeaLevel) +
+                            WaterSurfaceBlockZ) +
                         0.95f) *
                     Input.VoxelSize;
 
