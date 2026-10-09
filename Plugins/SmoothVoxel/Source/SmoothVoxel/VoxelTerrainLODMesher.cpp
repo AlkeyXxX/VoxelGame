@@ -676,6 +676,10 @@ void FVoxelTerrainLODMesher::Build(
     TArray<uint8> WaterMask;
     WaterMask.SetNumZeroed(WaterCountX * WaterCountY);
 
+    // Cache shared water-grid vertices to keep wide lakes inexpensive.
+    TArray<int32> WaterVertexIndices;
+    WaterVertexIndices.Init(-1, WaterCountX * WaterCountY);
+
     for (int32 Y = 0; Y < WaterCountY; ++Y)
     {
         if (Input.CancellationToken.IsValid() &&
@@ -733,6 +737,44 @@ void FVoxelTerrainLODMesher::Build(
     const float WaterZ =
         (static_cast<float>(Input.SeaLevel) + 0.95f) *
         Input.VoxelSize;
+
+    auto GetWaterVertexIndex =
+        [&](
+            int32 GridX,
+            int32 GridY,
+            int32 WorldX,
+            int32 WorldY)
+        {
+            int32& CachedIndex =
+                WaterVertexIndices[
+                    GridIndex(
+                        GridX,
+                        GridY,
+                        WaterCountX)];
+
+            if (CachedIndex != INDEX_NONE)
+            {
+                return CachedIndex;
+            }
+
+            CachedIndex =
+                Output.WaterVertices.Num();
+
+            Output.WaterVertices.Add(
+                FVector(
+                    static_cast<float>(WorldX) * Input.VoxelSize,
+                    static_cast<float>(WorldY) * Input.VoxelSize,
+                    WaterZ));
+
+            Output.WaterNormals.Add(FVector::UpVector);
+            Output.WaterVertexColors.Add(WaterColor);
+            Output.WaterUV0.Add(
+                FVector2D(
+                    static_cast<float>(WorldX) * 0.05f,
+                    static_cast<float>(WorldY) * 0.05f));
+
+            return CachedIndex;
+        };
 
     for (int32 Y = 0; Y < WaterCountY - 1; ++Y)
     {
@@ -811,66 +853,41 @@ void FVoxelTerrainLODMesher::Build(
                 continue;
             }
 
-            const int32 WaterStart =
-                Output.WaterVertices.Num();
+            const int32 V00 =
+                GetWaterVertexIndex(
+                    X,
+                    Y,
+                    WorldX0,
+                    WorldY0);
 
-            Output.WaterVertices.Add(
-                FVector(
-                    static_cast<float>(WorldX0) * Input.VoxelSize,
-                    static_cast<float>(WorldY0) * Input.VoxelSize,
-                    WaterZ));
+            const int32 V10 =
+                GetWaterVertexIndex(
+                    X + 1,
+                    Y,
+                    WorldX1,
+                    WorldY0);
 
-            Output.WaterVertices.Add(
-                FVector(
-                    static_cast<float>(WorldX1) * Input.VoxelSize,
-                    static_cast<float>(WorldY0) * Input.VoxelSize,
-                    WaterZ));
+            const int32 V11 =
+                GetWaterVertexIndex(
+                    X + 1,
+                    Y + 1,
+                    WorldX1,
+                    WorldY1);
 
-            Output.WaterVertices.Add(
-                FVector(
-                    static_cast<float>(WorldX1) * Input.VoxelSize,
-                    static_cast<float>(WorldY1) * Input.VoxelSize,
-                    WaterZ));
+            const int32 V01 =
+                GetWaterVertexIndex(
+                    X,
+                    Y + 1,
+                    WorldX0,
+                    WorldY1);
 
-            Output.WaterVertices.Add(
-                FVector(
-                    static_cast<float>(WorldX0) * Input.VoxelSize,
-                    static_cast<float>(WorldY1) * Input.VoxelSize,
-                    WaterZ));
+            Output.WaterTriangles.Add(V00);
+            Output.WaterTriangles.Add(V11);
+            Output.WaterTriangles.Add(V10);
 
-            Output.WaterTriangles.Add(WaterStart + 0);
-            Output.WaterTriangles.Add(WaterStart + 2);
-            Output.WaterTriangles.Add(WaterStart + 1);
-
-            Output.WaterTriangles.Add(WaterStart + 0);
-            Output.WaterTriangles.Add(WaterStart + 3);
-            Output.WaterTriangles.Add(WaterStart + 2);
-
-            for (int32 I = 0; I < 4; ++I)
-            {
-                Output.WaterNormals.Add(FVector::UpVector);
-                Output.WaterVertexColors.Add(WaterColor);
-            }
-
-            Output.WaterUV0.Add(
-                FVector2D(
-                    static_cast<float>(WorldX0) * 0.05f,
-                    static_cast<float>(WorldY0) * 0.05f));
-
-            Output.WaterUV0.Add(
-                FVector2D(
-                    static_cast<float>(WorldX1) * 0.05f,
-                    static_cast<float>(WorldY0) * 0.05f));
-
-            Output.WaterUV0.Add(
-                FVector2D(
-                    static_cast<float>(WorldX1) * 0.05f,
-                    static_cast<float>(WorldY1) * 0.05f));
-
-            Output.WaterUV0.Add(
-                FVector2D(
-                    static_cast<float>(WorldX0) * 0.05f,
-                    static_cast<float>(WorldY1) * 0.05f));
+            Output.WaterTriangles.Add(V00);
+            Output.WaterTriangles.Add(V01);
+            Output.WaterTriangles.Add(V11);
         }
     }
 
