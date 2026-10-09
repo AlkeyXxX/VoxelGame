@@ -513,20 +513,23 @@ void AVoxelChunk::RebuildMesh()
 
     CubicInput.Neighbors.Init(ChunkSize);
 
-    FVoxelMarchingCubesBuildInput SmoothInput;
-
-    SmoothInput.Init(ChunkSize);
-    SmoothInput.VoxelSize = VoxelSize;
+    FVoxelMarchingCubesDataSnapshot SmoothSnapshot;
 
     if (World)
     {
+        /*
+         * Copy only immutable generator/settings and local edit deltas here.
+         * Building the 34^3 Marching Cubes halo is intentionally deferred to
+         * the worker thread instead of doing procedural noise work on the
+         * Game Thread while the player is moving.
+         */
         World->BuildNeighborData(
             ChunkCoord,
             CubicInput.Neighbors);
 
-        World->BuildMarchingCubesData(
+        World->CaptureMarchingCubesDataSnapshot(
             ChunkCoord,
-            SmoothInput);
+            SmoothSnapshot);
     }
 
     TWeakObjectPtr<AVoxelChunk> WeakThis(this);
@@ -537,12 +540,15 @@ void AVoxelChunk::RebuildMesh()
         [
             WeakThis,
             CubicInput = MoveTemp(CubicInput),
-            SmoothInput = MoveTemp(SmoothInput),
+            SmoothSnapshot = MoveTemp(SmoothSnapshot),
             LocalVersion
         ]() mutable
         {
             FVoxelMeshBuildOutput Output;
             FVoxelMeshBuildOutput CubicOutput;
+            FVoxelMarchingCubesBuildInput SmoothInput;
+
+            SmoothSnapshot.Build(SmoothInput);
 
             FVoxelMarchingCubesMesher::Build(
                 SmoothInput,
