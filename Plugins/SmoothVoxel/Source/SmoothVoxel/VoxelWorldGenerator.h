@@ -75,6 +75,7 @@ struct FVoxelWaterColumn
 {
     int32 WaterSurfaceBlockZ = INDEX_NONE;
     int32 EffectiveTerrainHeight = 0;
+    float EffectiveSurfaceHeight = 0.0f;
     bool bCarved = false;
     bool bShoreAdjusted = false;
 };
@@ -88,6 +89,7 @@ public:
     void Configure(const FVoxelWorldGenerationSettings& InSettings);
 
     int32 GetSurfaceHeight(int32 WorldX, int32 WorldY) const;
+    float GetSurfaceHeightFloat(int32 WorldX, int32 WorldY) const;
 
     float GetTerrainNoise(int32 WorldX, int32 WorldY) const;
     float GetTemperature(int32 WorldX, int32 WorldY) const;
