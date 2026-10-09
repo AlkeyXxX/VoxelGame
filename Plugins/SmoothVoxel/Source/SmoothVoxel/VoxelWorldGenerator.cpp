@@ -44,9 +44,28 @@ float FVoxelWorldGenerator::GetLandformNoise(
      * hundreds of meters to about a kilometer. Their size scales with
      * the chosen world dimensions instead of becoming tiny on large maps.
      */
+    /*
+     * Warp the broad landform field before sampling it. A straight Perlin
+     * threshold tends to create round, isolated mountain blobs; warping makes
+     * hills and mountain regions merge into long, irregular ranges and valleys.
+     */
+    const FVector2D WarpXPosition(
+        NormalizedX * 2.4f + Settings.Seed * 0.023f,
+        NormalizedY * 2.4f - Settings.Seed * 0.017f);
+
+    const FVector2D WarpYPosition(
+        NormalizedX * 2.4f - Settings.Seed * 0.031f,
+        NormalizedY * 2.4f + Settings.Seed * 0.019f);
+
+    const float WarpX =
+        FMath::PerlinNoise2D(WarpXPosition) * 0.105f;
+
+    const float WarpY =
+        FMath::PerlinNoise2D(WarpYPosition) * 0.105f;
+
     const FVector2D SamplePosition(
-        NormalizedX * 6.5f + Settings.Seed * 0.0137f,
-        NormalizedY * 6.5f - Settings.Seed * 0.0211f);
+        (NormalizedX + WarpX) * 6.5f + Settings.Seed * 0.0137f,
+        (NormalizedY + WarpY) * 6.5f - Settings.Seed * 0.0211f);
 
     return FMath::PerlinNoise2D(SamplePosition);
 }
@@ -207,17 +226,52 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
     const float RidgeWarpY =
         FMath::PerlinNoise2D(RidgeWarpYPosition) * 0.085f;
 
-    const FVector2D RidgeSamplePosition(
-        (NormalizedX + RidgeWarpX) * 10.5f + Settings.Seed * 0.031f,
-        (NormalizedY + RidgeWarpY) * 10.5f - Settings.Seed * 0.017f);
+    /*
+     * Ridged multifractal layers approximate the broad sculpted peaks in the
+     * RWG/Teragon-style terrain pipeline: low frequency gives the main crest,
+     * the next octave breaks up the shoulders, and a restrained fine octave
+     * prevents distant mountains from looking like smooth melted blobs.
+     */
+    const FVector2D RidgeBroadPosition(
+        (NormalizedX + RidgeWarpX) * 7.5f + Settings.Seed * 0.031f,
+        (NormalizedY + RidgeWarpY) * 7.5f - Settings.Seed * 0.017f);
 
-    const float RidgeSource =
-        FMath::PerlinNoise2D(RidgeSamplePosition);
+    const FVector2D RidgeMediumPosition(
+        (NormalizedX + RidgeWarpX) * 15.0f - Settings.Seed * 0.023f,
+        (NormalizedY + RidgeWarpY) * 15.0f + Settings.Seed * 0.029f);
+
+    const FVector2D RidgeFinePosition(
+        (NormalizedX + RidgeWarpX) * 30.0f + Settings.Seed * 0.013f,
+        (NormalizedY + RidgeWarpY) * 30.0f - Settings.Seed * 0.037f);
+
+    const float RidgeBroadSource =
+        FMath::PerlinNoise2D(RidgeBroadPosition);
+
+    const float RidgeMediumSource =
+        FMath::PerlinNoise2D(RidgeMediumPosition);
+
+    const float RidgeFineSource =
+        FMath::PerlinNoise2D(RidgeFinePosition);
+
+    const float RidgeBroad =
+        FMath::Pow(
+            FMath::Clamp(1.0f - FMath::Abs(RidgeBroadSource), 0.0f, 1.0f),
+            1.45f);
+
+    const float RidgeMedium =
+        FMath::Pow(
+            FMath::Clamp(1.0f - FMath::Abs(RidgeMediumSource), 0.0f, 1.0f),
+            1.55f);
+
+    const float RidgeFine =
+        FMath::Pow(
+            FMath::Clamp(1.0f - FMath::Abs(RidgeFineSource), 0.0f, 1.0f),
+            1.7f);
 
     const float RidgeNoise =
-        FMath::Pow(
-            FMath::Clamp(1.0f - FMath::Abs(RidgeSource), 0.0f, 1.0f),
-            1.65f);
+        RidgeBroad * 0.62f +
+        RidgeMedium * 0.27f +
+        RidgeFine * 0.11f;
 
     const FVector2D MountainShoulderPosition(
         NormalizedX * 6.8f - Settings.Seed * 0.014f,
@@ -304,6 +358,42 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
                 Height,
                 static_cast<float>(Settings.SeaLevel - 1));
     }
+
+    /*
+     * Avoid square-cut map edges by fading the landscape into a shallow
+     * coastal shelf. The warp is attenuated at the border so every map edge
+     * is safely below sea level, while the shoreline itself remains irregular.
+     * This mirrors the sea-edge masks commonly used by external 7DTD map
+     * generation presets without imposing a perfectly straight coastline.
+     */
+    const float EdgeDistance =
+        FMath::Min(
+            FMath::Min(NormalizedX, 1.0f - NormalizedX),
+            FMath::Min(NormalizedY, 1.0f - NormalizedY));
+
+    const FVector2D CoastWarpPosition(
+        NormalizedX * 3.2f + Settings.Seed * 0.041f,
+        NormalizedY * 3.2f - Settings.Seed * 0.027f);
+
+    const float CoastWarp =
+        FMath::PerlinNoise2D(CoastWarpPosition) *
+        0.025f *
+        SmoothStep(0.0f, 0.06f, EdgeDistance);
+
+    const float CoastalBlend =
+        SmoothStep(
+            0.006f,
+            0.075f,
+            EdgeDistance + CoastWarp);
+
+    const float CoastalShelfHeight =
+        static_cast<float>(Settings.SeaLevel - 4);
+
+    Height =
+        FMath::Lerp(
+            CoastalShelfHeight,
+            Height,
+            CoastalBlend);
 
     return FMath::Clamp(
         Height,
