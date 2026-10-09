@@ -499,6 +499,26 @@ void FVoxelMarchingCubesMesher::Build(
                     continue;
                 }
 
+                /*
+                 * Do not let the smooth surface drape over the top of an
+                 * exposed placed block. In that case the cell above is Air
+                 * in the terrain-only data, but neighbouring solid samples
+                 * can still create MC triangles over the cube. The cubic
+                 * mesher already owns that top face.
+                 *
+                 * If actual terrain occupies the cell above, keep the MC
+                 * surface so blocks placed underground remain buried.
+                 */
+                const bool bPlacedSolidBelow =
+                    !IsVoxelSolid(GetBlock(Input, X, Y, Z - 1)) &&
+                    IsVoxelSolid(GetDensityBlock(Input, X, Y, Z - 1));
+
+                if (bPlacedSolidBelow &&
+                    !IsVoxelSolid(GetBlock(Input, X, Y, Z)))
+                {
+                    continue;
+                }
+
                 float CornerDensity[8];
 
                 int32 CubeIndex = 0;
