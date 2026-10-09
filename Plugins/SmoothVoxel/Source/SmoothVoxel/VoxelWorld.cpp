@@ -721,6 +721,8 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
         RWGRoadMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         RWGRoadMesh->SetGenerateOverlapEvents(false);
         RWGRoadMesh->SetCanEverAffectNavigation(false);
+        RWGRoadMesh->SetVisibility(true, true);
+        RWGRoadMesh->SetHiddenInGame(false);
         RWGRoadMesh->CastShadow = false;
 
         if (GetRootComponent())
@@ -735,9 +737,11 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
     }
 
     RWGRoadMesh->ClearAllMeshSections();
+    // Do not inherit a voxel/terrain material by default: it may depend on
+    // per-voxel texture data that the road ribbon does not provide.
     UMaterialInterface* EffectiveRoadMaterial = RWGRoadMaterial
         ? RWGRoadMaterial
-        : (Material ? Material : UMaterial::GetDefaultMaterial(MD_Surface));
+        : UMaterial::GetDefaultMaterial(MD_Surface);
 
     const int32 SafeWorldBlocksX = FMath::Max(1, WorldSizeX * ChunkSize);
     const int32 SafeWorldBlocksY = FMath::Max(1, WorldSizeY * ChunkSize);
@@ -748,10 +752,14 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
         const int32 BlockY = FMath::Clamp(FMath::RoundToInt(Y), 0, SafeWorldBlocksY - 1);
         const float RawHeight = WorldGenerator.GetSurfaceHeightFloat(BlockX, BlockY);
         const FVoxelWaterColumn Water = WorldGenerator.GetWaterColumn(BlockX, BlockY, RawHeight);
-        const float VisibleSurface = Water.WaterSurfaceBlockZ != INDEX_NONE
-            ? FMath::Max(Water.EffectiveSurfaceHeight, static_cast<float>(Water.WaterSurfaceBlockZ))
-            : Water.EffectiveSurfaceHeight;
-        return VisibleSurface + 0.22f;
+
+        // Marching Cubes renders the top of the highest solid/water voxel,
+        // not the unrounded continuous height field. Follow the same discrete
+        // block level, then lift the ribbon slightly above the generated mesh.
+        const int32 TopVisibleBlockZ = Water.WaterSurfaceBlockZ != INDEX_NONE
+            ? FMath::Max(Water.EffectiveTerrainHeight, Water.WaterSurfaceBlockZ)
+            : Water.EffectiveTerrainHeight;
+        return static_cast<float>(TopVisibleBlockZ) + 0.82f;
     };
 
     const auto BuildRoadTypeSection = [this, &Planner, &SampleSurfaceHeight,
@@ -869,6 +877,10 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                 VertexColors, Tangents, false);
             RWGRoadMesh->SetMaterial(SectionIndex, EffectiveRoadMaterial);
         }
+
+        UE_LOG(LogTemp, Display,
+            TEXT("RWG road section %d: vertices=%d triangles=%d"),
+            SectionIndex, Vertices.Num(), Triangles.Num());
     };
 
     // Sections stay separate to allow future per-road materials and LOD rules.
