@@ -33,8 +33,7 @@ struct FVoxelMarchingCubesBuildInput
         Blocks.SetNumZeroed(
             Side * Side * Side);
 
-        TerrainSurfaceHeights.SetNumZeroed(
-            Side * Side);
+
     }
 };
 
