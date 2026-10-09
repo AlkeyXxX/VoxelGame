@@ -572,7 +572,7 @@ FString FVoxelRWGPlanner::GetSummary() const
 FString FVoxelRWGPlanner::ToCSV() const
 {
     FString CSV = TEXT("Record,Id,Subtype,FromId,ToId,PointIndex,X,Y,Z,Biome,SettlementId,Radius,Value\n");
-    CSV += FString::Printf(TEXT("META,0,Seed,,,,,,,,,,,%d\n"), Settings.Seed);
+    CSV += FString::Printf(TEXT("META,0,Seed,,,,,,,,,,%d\n"), Settings.Seed);
     CSV += FString::Printf(TEXT("META,0,WorldSize,,,,%d,%d,,,,,%d\n"),
         Settings.WorldBlocksX, Settings.WorldBlocksY, Settings.GridSpacing);
 
