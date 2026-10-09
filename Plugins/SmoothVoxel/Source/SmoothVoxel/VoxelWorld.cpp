@@ -718,7 +718,10 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
 
         AddInstanceComponent(RWGRoadMesh);
         RWGRoadMesh->SetMobility(EComponentMobility::Movable);
-        RWGRoadMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        RWGRoadMesh->bUseAsyncCooking = true;
+        RWGRoadMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        RWGRoadMesh->SetCollisionObjectType(ECC_WorldStatic);
+        RWGRoadMesh->SetCollisionResponseToAllChannels(ECR_Block);
         RWGRoadMesh->SetGenerateOverlapEvents(false);
         RWGRoadMesh->SetCanEverAffectNavigation(false);
         RWGRoadMesh->SetVisibility(true, true);
@@ -737,6 +740,8 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
     }
 
     RWGRoadMesh->ClearAllMeshSections();
+    RWGRoadMesh->SetCollisionEnabled(
+        bEnableRWGRoadCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
     // Do not inherit a voxel/terrain material by default: it may depend on
     // per-voxel texture data that the road ribbon does not provide.
     UMaterialInterface* EffectiveRoadMaterial = RWGRoadMaterial
@@ -941,7 +946,7 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
         {
             RWGRoadMesh->CreateMeshSection_LinearColor(
                 SectionIndex, Vertices, Triangles, Normals, UVs,
-                VertexColors, Tangents, false);
+                VertexColors, Tangents, bEnableRWGRoadCollision);
             RWGRoadMesh->SetMaterial(SectionIndex, EffectiveRoadMaterial);
         }
 
@@ -958,9 +963,10 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
     BuildRoadTypeSection(EVoxelRWGRoadType::Local, 2, RWGRoadWidthLocalBlocks,
         FLinearColor(0.28f, 0.26f, 0.22f, 1.0f));
 
-    UE_LOG(LogTemp, Display, TEXT("RWG road surface built: %d road paths, grid widths main=%.1f connector=%.1f local=%.1f blocks; collision disabled."),
+    UE_LOG(LogTemp, Display, TEXT("RWG road surface built: %d road paths, grid widths main=%.1f connector=%.1f local=%.1f blocks; collision %s."),
         Planner.GetRoads().Num(),
-        RWGRoadWidthMainBlocks, RWGRoadWidthConnectorBlocks, RWGRoadWidthLocalBlocks);
+        RWGRoadWidthMainBlocks, RWGRoadWidthConnectorBlocks, RWGRoadWidthLocalBlocks,
+        bEnableRWGRoadCollision ? TEXT("enabled") : TEXT("disabled"));
 }
 
 
