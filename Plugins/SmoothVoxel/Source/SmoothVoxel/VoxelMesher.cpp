@@ -348,6 +348,10 @@ void FVoxelMesher::Build(
                             1.0f);
                     break;
 
+                case EVoxelBlock::Snow:
+                    BlockColor = FLinearColor(0.88f, 0.93f, 1.0f, 1.0f);
+                    break;
+
                 case EVoxelBlock::Water:
                     BlockColor =
                         FLinearColor(
