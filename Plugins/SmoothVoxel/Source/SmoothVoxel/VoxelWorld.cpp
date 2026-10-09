@@ -119,6 +119,7 @@ namespace
         int32 SeaLevel,
         int32 BeachWidth,
         const TMap<int32, uint8>& ChunkModifications,
+        const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe>& CancellationToken,
         TArray<uint8>& OutBlocks,
         TArray<uint8>& OutBaseBlocks,
         TArray<uint8>& OutBiomes,
@@ -134,6 +135,12 @@ namespace
 
         for (int32 Y = 0; Y < ChunkSize; ++Y)
         {
+            if (CancellationToken.IsValid() &&
+                static_cast<bool>(*CancellationToken))
+            {
+                return;
+            }
+
             for (int32 X = 0; X < ChunkSize; ++X)
             {
                 const int32 WorldX =
@@ -1209,6 +1216,7 @@ void AVoxelWorld::GenerateChunkBlocks(
         SeaLevel,
         BeachWidth,
         ChunkModifications,
+        TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe>(),
         Blocks,
         BaseBlocks,
         Biomes,
@@ -1245,6 +1253,17 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
         ChunkModifications = *FoundMods;
     }
 
+    if (Chunk->DataGenerationCancellationToken.IsValid())
+    {
+        Chunk->DataGenerationCancellationToken->AtomicSet(true);
+    }
+
+    Chunk->DataGenerationCancellationToken =
+        MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+
+    const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> GenerationCancellationToken =
+        Chunk->DataGenerationCancellationToken;
+
     TWeakObjectPtr<AVoxelWorld> WeakWorld(this);
     TWeakObjectPtr<AVoxelChunk> WeakChunk(Chunk);
 
@@ -1259,6 +1278,7 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
             LocalChunkSize,
             LocalSeaLevel,
             LocalBeachWidth,
+            GenerationCancellationToken,
             ChunkModifications = MoveTemp(ChunkModifications)
         ]() mutable
         {
@@ -1274,10 +1294,16 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
                 LocalSeaLevel,
                 LocalBeachWidth,
                 ChunkModifications,
+                GenerationCancellationToken,
                 Blocks,
                 BaseBlocks,
                 Biomes,
                 ModificationFlags);
+
+            if (static_cast<bool>(*GenerationCancellationToken))
+            {
+                return;
+            }
 
             AsyncTask(
                 ENamedThreads::GameThread,
