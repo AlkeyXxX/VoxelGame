@@ -52,13 +52,13 @@ namespace
     const FLinearColor WaterColor(
         0.05f, 0.35f, 0.85f, 1.0f);
 
-    int32 GetEffectiveSurfaceHeight(
+    float GetEffectiveSurfaceHeight(
         const FVoxelWorldGenerator& Generator,
         int32 WorldX,
         int32 WorldY)
     {
-        const int32 TerrainHeight =
-            Generator.GetSurfaceHeight(WorldX, WorldY);
+        const float TerrainHeight =
+            Generator.GetSurfaceHeightFloat(WorldX, WorldY);
 
         const FVoxelWaterColumn WaterColumn =
             Generator.GetWaterColumn(
@@ -66,7 +66,7 @@ namespace
                 WorldY,
                 TerrainHeight);
 
-        return WaterColumn.EffectiveTerrainHeight;
+        return WaterColumn.EffectiveSurfaceHeight;
     }
 
     FORCEINLINE int32 GridIndex(
@@ -127,12 +127,12 @@ namespace
      * the LOD directly at the integer generator height.
      */
     float GetMCSurfaceHeightFromColumns(
-        const int32 ColumnHeights[4])
+        const float ColumnHeights[4])
     {
         constexpr float LODIsoLevel = 0.49f;
 
-        int32 MinHeight = ColumnHeights[0];
-        int32 MaxHeight = ColumnHeights[0];
+        float MinHeight = ColumnHeights[0];
+        float MaxHeight = ColumnHeights[0];
 
         for (int32 I = 1; I < 4; ++I)
         {
@@ -143,23 +143,39 @@ namespace
         auto DensityAtNodeZ =
             [ColumnHeights](int32 NodeZ)
             {
-                int32 SolidSamples = 0;
+                float SolidSamples = 0.0f;
 
                 for (int32 I = 0; I < 4; ++I)
                 {
-                    SolidSamples +=
-                        ColumnHeights[I] >= NodeZ - 1 ? 1 : 0;
-                    SolidSamples +=
-                        ColumnHeights[I] >= NodeZ ? 1 : 0;
+                    /*
+                     * Match the continuous top-cell occupancy used by the
+                     * full-resolution MC mesh. Integer terrain reduces to
+                     * binary samples; fractional heights move the surface
+                     * smoothly within each voxel layer.
+                     */
+                    SolidSamples += FMath::Clamp(
+                        ColumnHeights[I] -
+                            static_cast<float>(NodeZ - 1) + 1.0f,
+                        0.0f,
+                        1.0f);
+
+                    SolidSamples += FMath::Clamp(
+                        ColumnHeights[I] -
+                            static_cast<float>(NodeZ) + 1.0f,
+                        0.0f,
+                        1.0f);
                 }
 
-                return static_cast<float>(SolidSamples) / 8.0f;
+                return SolidSamples / 8.0f;
             };
 
-        int32 PreviousNodeZ = MinHeight - 1;
+        const int32 MinNodeZ = FMath::FloorToInt(MinHeight);
+        const int32 MaxNodeZ = FMath::CeilToInt(MaxHeight) + 2;
+
+        int32 PreviousNodeZ = MinNodeZ - 1;
         float PreviousDensity = DensityAtNodeZ(PreviousNodeZ);
 
-        for (int32 NodeZ = MinHeight; NodeZ <= MaxHeight + 2; ++NodeZ)
+        for (int32 NodeZ = MinNodeZ; NodeZ <= MaxNodeZ; ++NodeZ)
         {
             const float CurrentDensity = DensityAtNodeZ(NodeZ);
 
@@ -183,9 +199,7 @@ namespace
             PreviousDensity = CurrentDensity;
         }
 
-        // Flat, fully solid columns have their MC surface just above
-        // Height + 1; this is a defensive fallback for malformed input.
-        return static_cast<float>(MaxHeight) + 1.02f;
+        return MaxHeight + 1.02f;
     }
 }
 
@@ -276,7 +290,7 @@ void FVoxelTerrainLODMesher::Build(
             HeightBlocks,
             Input.SampleStep) + 1;
 
-    TArray<int32> Heights;
+    TArray<float> Heights;
     TArray<uint8> InlandWaterMask;
     TArray<float> SurfaceHeights;
     TArray<FLinearColor> Colors;
@@ -326,19 +340,22 @@ void FVoxelTerrainLODMesher::Build(
                     0,
                     WorldBlocksY - 1);
 
-            const int32 Height =
-                Input.Generator.GetSurfaceHeight(
+            const float SmoothSurfaceHeight =
+                Input.Generator.GetSurfaceHeightFloat(
                     ClampedWorldX,
                     ClampedWorldY);
+
+            const int32 Height =
+                FMath::RoundToInt(SmoothSurfaceHeight);
 
             const FVoxelWaterColumn WaterColumn =
                 Input.Generator.GetWaterColumn(
                     ClampedWorldX,
                     ClampedWorldY,
-                    Height);
+                    SmoothSurfaceHeight);
 
-            const int32 EffectiveHeight =
-                WaterColumn.EffectiveTerrainHeight;
+            const float EffectiveHeight =
+                WaterColumn.EffectiveSurfaceHeight;
 
             const EVoxelBiome Biome =
                 Input.Generator.GetBiome(
@@ -403,7 +420,7 @@ void FVoxelTerrainLODMesher::Build(
             const int32 Index =
                 GridIndex(X, Y, CountX);
 
-            int32 ColumnHeights[4];
+            float ColumnHeights[4];
 
             if (Input.SampleStep == 1)
             {
