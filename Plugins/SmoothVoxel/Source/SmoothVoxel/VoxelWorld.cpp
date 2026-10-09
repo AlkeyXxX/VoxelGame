@@ -705,13 +705,17 @@ void AVoxelWorld::GetTerrainDebugInfo(
         OutBiomeName = TEXT("Desert");
         break;
 
-    case EVoxelBiome::Mountain:
-        OutBiomeName = TEXT("Mountain");
+    case EVoxelBiome::SnowyForest:
+        OutBiomeName = TEXT("SnowyForest");
         break;
 
-    case EVoxelBiome::Plains:
+    case EVoxelBiome::Wasteland:
+        OutBiomeName = TEXT("Wasteland");
+        break;
+
+    case EVoxelBiome::Forest:
     default:
-        OutBiomeName = TEXT("Plains");
+        OutBiomeName = TEXT("Forest");
         break;
     }
 }
@@ -796,19 +800,26 @@ void AVoxelWorld::GenerateChunkBlocks(
                                 uint8(EVoxelBlock::Sand);
                             break;
 
-                        case EVoxelBiome::Mountain:
-                            Block =
-                                uint8(EVoxelBlock::Stone);
+                        case EVoxelBiome::SnowyForest:
+                            Block = uint8(EVoxelBlock::Snow);
+                            break;
+
+                        case EVoxelBiome::Wasteland:
+                            Block = uint8(EVoxelBlock::Stone);
                             break;
 
                         case EVoxelBiome::Forest:
-                        case EVoxelBiome::Plains:
                         default:
                             Block =
                                 uint8(EVoxelBlock::Grass);
                             break;
                         }
                     }
+                }
+                else if (Biome == EVoxelBiome::SnowyForest &&
+                         WorldZ >= Height - 1)
+                {
+                    Block = uint8(EVoxelBlock::Snow);
                 }
                 else if (Biome == EVoxelBiome::Desert &&
                          WorldZ >= Height - 3)
