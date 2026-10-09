@@ -1234,6 +1234,17 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
         return false;
     }
 
+    // Publish an immutable stamp map first, then regenerate loaded chunks
+    // against it. Future streamed chunks will use the same map automatically.
+    BuildRWGRoadTerrainStamps(Planner);
+    for (TPair<FIntVector, AVoxelChunk*>& Pair : Chunks)
+    {
+        if (Pair.Value)
+        {
+            GenerateChunkBlocksAsync(Pair.Value);
+        }
+    }
+
     BuildRWGRoadSurface(Planner);
 
     if (bDrawRWGDebugPreview && GetWorld())
@@ -1412,6 +1423,9 @@ void AVoxelWorld::GenerateWorld()
      */
     ConfigureWorldGenerator();
 
+    // A full world regeneration clears the previous road plan and its terrain edits.
+    RWGRoadSurfaceStamps.Reset();
+    ClearRWGRoadSurface();
 
     /*
      * Удаляем только chunks, которые сейчас загружены.
