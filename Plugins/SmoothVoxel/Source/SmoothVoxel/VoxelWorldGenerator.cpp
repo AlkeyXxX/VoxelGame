@@ -265,7 +265,7 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
         static_cast<float>(Settings.BaseHeight) +
         TerrainNoise * HeightVariation;
 
-    if (GetLandformNoise(WorldX, WorldY) <= 0.10f &&
+    if ((bStartArea || LandformNoise <= 0.10f) &&
         RawMacroHeight <= static_cast<float>(Settings.SeaLevel))
     {
         Height =
