@@ -366,6 +366,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="8", ClampMax="128"))
     int32 RWGGridSpacing = 32;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="128", ClampMax="2048"))
+    int32 RWGCellSizeBlocks = 512;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG")
+    bool bDrawRWGCellOverlay = true;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG")
     bool bDrawRWGDebugPreview = true;
 
