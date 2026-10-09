@@ -17,6 +17,29 @@ class UDataTable;
 class UProceduralMeshComponent;
 
 
+/*
+ * Immutable inputs needed to build the Marching Cubes halo.
+ * Captured on the Game Thread, evaluated on a worker thread without
+ * reading Actors, Components, or AVoxelWorld containers.
+ */
+struct FVoxelMarchingCubesDataSnapshot
+{
+    FVoxelWorldGenerator Generator;
+    FIntVector ChunkCoord = FIntVector::ZeroValue;
+    int32 ChunkSize = 0;
+    int32 WorldSizeX = 0;
+    int32 WorldSizeY = 0;
+    int32 WorldSizeZ = 0;
+    int32 SeaLevel = 0;
+    int32 BeachWidth = 0;
+    float VoxelSize = 100.0f;
+
+    TMap<FIntVector, TMap<int32, uint8>> ChunkModifications;
+
+    void Build(FVoxelMarchingCubesBuildInput& OutData) const;
+};
+
+
 UCLASS()
 class SMOOTHVOXEL_API AVoxelWorld : public AActor
 {
@@ -113,6 +136,10 @@ public:
     void BuildMarchingCubesData(
         const FIntVector& ChunkCoord,
         FVoxelMarchingCubesBuildInput& OutData) const;
+
+    void CaptureMarchingCubesDataSnapshot(
+        const FIntVector& ChunkCoord,
+        FVoxelMarchingCubesDataSnapshot& OutSnapshot) const;
 
     /*
      * Debug helpers.
