@@ -38,6 +38,18 @@ void AVoxelChunk::BeginPlay()
 }
 
 
+void AVoxelChunk::EndPlay(
+    const EEndPlayReason::Type EndPlayReason)
+{
+    if (MeshBuildCancellationToken.IsValid())
+    {
+        MeshBuildCancellationToken->AtomicSet(true);
+    }
+
+    Super::EndPlay(EndPlayReason);
+}
+
+
 void AVoxelChunk::InitializeChunk(
     AVoxelWorld* InWorld,
     const FIntVector& InChunkCoord)
@@ -498,6 +510,22 @@ void AVoxelChunk::RebuildMesh()
 {
     ++MeshGenerationVersion;
 
+    /*
+     * Superseded mesh jobs are allowed to finish only until their next
+     * cancellation check. They must never consume CPU building geometry
+     * that is already known to be stale.
+     */
+    if (MeshBuildCancellationToken.IsValid())
+    {
+        MeshBuildCancellationToken->AtomicSet(true);
+    }
+
+    MeshBuildCancellationToken =
+        MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+
+    const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> LocalCancellationToken =
+        MeshBuildCancellationToken;
+
     const uint32 LocalVersion =
         MeshGenerationVersion;
 
@@ -506,6 +534,7 @@ void AVoxelChunk::RebuildMesh()
     CubicInput.Size = ChunkSize;
     CubicInput.VoxelSize = VoxelSize;
     CubicInput.WorldOrigin = GetActorLocation();
+    CubicInput.CancellationToken = LocalCancellationToken;
 
     CopyBlockData(CubicInput.Blocks);
     CopyBiomeData(CubicInput.Biomes);
@@ -532,15 +561,21 @@ void AVoxelChunk::RebuildMesh()
             SmoothSnapshot);
     }
 
+    SmoothSnapshot.CancellationToken =
+        LocalCancellationToken;
+
     TWeakObjectPtr<AVoxelChunk> WeakThis(this);
+    TWeakObjectPtr<AVoxelWorld> WeakWorld(World);
 
     Async(
         EAsyncExecution::ThreadPool,
 
         [
             WeakThis,
+            WeakWorld,
             CubicInput = MoveTemp(CubicInput),
             SmoothSnapshot = MoveTemp(SmoothSnapshot),
+            LocalCancellationToken,
             LocalVersion
         ]() mutable
         {
@@ -550,13 +585,28 @@ void AVoxelChunk::RebuildMesh()
 
             SmoothSnapshot.Build(SmoothInput);
 
+            if (static_cast<bool>(*LocalCancellationToken))
+            {
+                return;
+            }
+
             FVoxelMarchingCubesMesher::Build(
                 SmoothInput,
                 Output);
 
+            if (static_cast<bool>(*LocalCancellationToken))
+            {
+                return;
+            }
+
             FVoxelMesher::Build(
                 CubicInput,
                 CubicOutput);
+
+            if (static_cast<bool>(*LocalCancellationToken))
+            {
+                return;
+            }
 
             const int32 VertexOffset =
                 Output.Vertices.Num();
@@ -605,36 +655,32 @@ void AVoxelChunk::RebuildMesh()
 
                 [
                     WeakThis,
+                    WeakWorld,
                     Output = MoveTemp(Output),
+                    LocalCancellationToken,
                     LocalVersion
                 ]() mutable
                 {
                     AVoxelChunk* Chunk = WeakThis.Get();
 
                     if (!Chunk ||
+                        static_cast<bool>(*LocalCancellationToken) ||
                         Chunk->GetMeshGenerationVersion() != LocalVersion)
                     {
                         return;
                     }
 
-                    if (Chunk->World)
+                    if (AVoxelWorld* WorldActor = WeakWorld.Get())
                     {
                         /*
                          * Mesh section creation can itself be expensive on
                          * the Game Thread. Queue completed geometry so only
                          * a bounded number of chunks upload per frame.
                          */
-                        Chunk->World->QueueChunkMeshResult(
+                        WorldActor->QueueChunkMeshResult(
                             Chunk,
                             MoveTemp(Output),
                             LocalVersion);
-                    }
-                    else
-                    {
-                        Chunk->ApplyMesh(
-                            MoveTemp(Output),
-                            LocalVersion,
-                            true);
                     }
                 });
         });
