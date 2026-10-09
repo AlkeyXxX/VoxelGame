@@ -71,6 +71,14 @@ struct FVoxelWorldGenerationSettings
     float MoistureScale = 0.008f;
 };
 
+struct FVoxelWaterColumn
+{
+    int32 WaterSurfaceBlockZ = INDEX_NONE;
+    int32 EffectiveTerrainHeight = 0;
+    bool bCarved = false;
+};
+
+
 class FVoxelWorldGenerator
 {
 public:
@@ -84,8 +92,8 @@ public:
     float GetTemperature(int32 WorldX, int32 WorldY) const;
     float GetMoisture(int32 WorldX, int32 WorldY) const;
 
-    /* Highest water-block Z for this column, or INDEX_NONE when dry. */
-    int32 GetWaterSurfaceBlockZ(int32 WorldX, int32 WorldY, int32 SurfaceHeight) const;
+    /* Actual water cap and effective terrain bed for one global XY column. */
+    FVoxelWaterColumn GetWaterColumn(int32 WorldX, int32 WorldY, int32 SurfaceHeight) const;
 
     EVoxelBiome GetBiome(
         int32 WorldX,
