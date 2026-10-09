@@ -4,6 +4,7 @@
 
 // Map-wide RWG coordinates are in voxel blocks, not Unreal centimeters.
 enum class EVoxelRWGSettlementType : uint8 { City, Town, Village, Rural, Industrial };
+enum class EVoxelRWGCellType : uint8 { Wilderness, Rural, Town, City, Industrial };
 enum class EVoxelRWGPOIType : uint8 { Residential, Commercial, Industrial, Farm, Civic, Trader, Utility, Ruin };
 enum class EVoxelRWGRoadType : uint8 { Main, Connector, Local };
 
@@ -14,11 +15,26 @@ struct FVoxelRWGPlanSettings
     int32 WorldBlocksY = 4096;
     int32 SeaLevel = 10;
     int32 GridSpacing = 32;
+    int32 CellSizeBlocks = 512;
     int32 TargetSettlementCount = 12;
     int32 TargetPOICount = 72;
     float MinimumSettlementDistance = 540.0f;
     float MinimumPOIDistance = 42.0f;
     float EdgeMargin = 96.0f;
+};
+
+struct FVoxelRWGCell
+{
+    int32 Id = INDEX_NONE;
+    FIntPoint GridCoord = FIntPoint::ZeroValue;
+    FVector Center = FVector::ZeroVector; // block-space XYZ
+    FVector SuggestedHubPosition = FVector::ZeroVector;
+    EVoxelRWGCellType Type = EVoxelRWGCellType::Wilderness;
+    EVoxelBiome Biome = EVoxelBiome::Plains;
+    EVoxelLandform Landform = EVoxelLandform::Flatlands;
+    float UrbanScore = 0.0f;
+    bool bBuildable = false;
+    int32 SettlementId = INDEX_NONE;
 };
 
 struct FVoxelRWGSettlement
@@ -58,6 +74,7 @@ class FVoxelRWGPlanner
 {
 public:
     bool Generate(const FVoxelRWGPlanSettings& InSettings, const FVoxelWorldGenerator& Generator);
+    const TArray<FVoxelRWGCell>& GetCells() const { return Cells; }
     const TArray<FVoxelRWGSettlement>& GetSettlements() const { return Settlements; }
     const TArray<FVoxelRWGPOI>& GetPOIs() const { return POIs; }
     const TArray<FVoxelRWGRoad>& GetRoads() const { return Roads; }
@@ -66,7 +83,10 @@ public:
 
 private:
     FVoxelRWGPlanSettings Settings;
+    TArray<FVoxelRWGCell> Cells;
     TArray<FVoxelRWGSettlement> Settlements;
+    int32 CellColumns = 0;
+    int32 CellRows = 0;
     TArray<FVoxelRWGPOI> POIs;
     TArray<FVoxelRWGRoad> Roads;
     int32 ConnectedSettlementCount = 0;
@@ -82,6 +102,8 @@ private:
     int32 WorldToGridY(float Y) const;
     bool IsValidSite(const FVector2D& Position, const FVoxelWorldGenerator& Generator, float MaxGrade) const;
     void BuildTerrainCostField(const FVoxelWorldGenerator& Generator);
+    void BuildCellGrid(const FVoxelWorldGenerator& Generator);
+    void ClaimCellForSettlement(const FVoxelRWGSettlement& Settlement);
     void PlaceSettlements(const FVoxelWorldGenerator& Generator);
     void PlacePOIs(const FVoxelWorldGenerator& Generator);
     void BuildRoadNetwork();
@@ -90,6 +112,7 @@ private:
     int32 FindNearestWalkable(int32 X, int32 Y) const;
     FVector GetBlockPosition(float X, float Y, const FVoxelWorldGenerator& Generator) const;
 
+    static FString CellTypeName(EVoxelRWGCellType Type);
     static FString SettlementTypeName(EVoxelRWGSettlementType Type);
     static FString POITypeName(EVoxelRWGPOIType Type);
     static FString RoadTypeName(EVoxelRWGRoadType Type);
