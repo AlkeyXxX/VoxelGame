@@ -42,6 +42,11 @@ public:
         TArray<uint8>&& InBiomes,
         TArray<uint8>&& InModificationFlags);
 
+    bool HasGeneratedData() const
+    {
+        return bGeneratedDataReady;
+    }
+
 
     /*
      * Работа с блоками.
@@ -221,6 +226,7 @@ private:
      * его результат будет проигнорирован.
      */
     uint32 MeshGenerationVersion = 0;
+    bool bGeneratedDataReady = false;
 
 
 
