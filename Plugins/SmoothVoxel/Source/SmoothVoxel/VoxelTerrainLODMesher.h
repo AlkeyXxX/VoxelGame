@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/ThreadSafeBool.h"
 #include "VoxelWorldGenerator.h"
 
 struct FVoxelTerrainLODBuildInput
@@ -21,6 +22,9 @@ struct FVoxelTerrainLODBuildInput
 
     int32 InnerRadiusChunks = 8;
     int32 OuterRadiusChunks = 16;
+
+    /* Cancellation flag shared with obsolete background LOD builds. */
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancellationToken;
 };
 
 struct FVoxelTerrainLODMeshOutput
