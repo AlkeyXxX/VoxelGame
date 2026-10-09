@@ -1773,6 +1773,7 @@ void AVoxelWorld::GenerateChunkBlocks(
         SeaLevel,
         BeachWidth,
         ChunkModifications,
+        RWGRoadSurfaceStamps,
         TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe>(),
         Blocks,
         BaseBlocks,
@@ -1802,6 +1803,8 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
     const int32 LocalChunkSize = ChunkSize;
     const int32 LocalSeaLevel = SeaLevel;
     const int32 LocalBeachWidth = BeachWidth;
+    const TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> RoadStampsCopy =
+        RWGRoadSurfaceStamps;
 
     TMap<int32, uint8> ChunkModifications;
     if (const TMap<int32, uint8>* FoundMods =
@@ -1835,6 +1838,7 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
             LocalChunkSize,
             LocalSeaLevel,
             LocalBeachWidth,
+            RoadStampsCopy,
             GenerationCancellationToken,
             ChunkModifications = MoveTemp(ChunkModifications)
         ]() mutable
@@ -1851,6 +1855,7 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
                 LocalSeaLevel,
                 LocalBeachWidth,
                 ChunkModifications,
+                RoadStampsCopy,
                 GenerationCancellationToken,
                 Blocks,
                 BaseBlocks,
@@ -2268,6 +2273,7 @@ void AVoxelWorld::CaptureMarchingCubesDataSnapshot(
     const FIntVector& ChunkCoord,
     FVoxelMarchingCubesDataSnapshot& OutSnapshot) const
 {
+    OutSnapshot.RoadStamps = RWGRoadSurfaceStamps;
     OutSnapshot.Generator = WorldGenerator;
     OutSnapshot.ChunkCoord = ChunkCoord;
     OutSnapshot.ChunkSize = ChunkSize;
