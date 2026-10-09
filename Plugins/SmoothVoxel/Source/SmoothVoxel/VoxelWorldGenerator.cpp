@@ -402,43 +402,57 @@ bool FVoxelWorldGenerator::IsLakeMask(
 }
 
 
-int32 FVoxelWorldGenerator::GetWaterSurfaceBlockZ(
+FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
     int32 WorldX,
     int32 WorldY,
     int32 SurfaceHeight) const
 {
+    FVoxelWaterColumn Column;
+    Column.WaterSurfaceBlockZ = INDEX_NONE;
+    Column.EffectiveTerrainHeight = SurfaceHeight;
+    Column.bCarved = false;
+
     /*
-     * Preserve the existing sea/low-basin behavior. Water below sea level
-     * still rises to the configured SeaLevel; explicit rivers and lakes
-     * raise their water surface by one block to make inland water visible.
+     * Existing submerged lowlands remain filled up to SeaLevel. Explicit
+     * lakes and river channels use that same surface level, avoiding a
+     * one-block step where inland water joins the sea or a low basin.
      */
     if (SurfaceHeight < Settings.SeaLevel)
     {
-        return Settings.SeaLevel;
+        Column.WaterSurfaceBlockZ = Settings.SeaLevel;
+        return Column;
     }
 
     if (SurfaceHeight > Settings.SeaLevel + 3)
     {
-        return INDEX_NONE;
+        return Column;
     }
 
     if (GetLandform(WorldX, WorldY) == EVoxelLandform::Mountains)
     {
-        return INDEX_NONE;
+        return Column;
     }
 
-    if (SurfaceHeight <= Settings.SeaLevel + 2 &&
-        IsLakeMask(WorldX, WorldY))
+    const bool bLake =
+        SurfaceHeight <= Settings.SeaLevel + 2 &&
+        IsLakeMask(WorldX, WorldY);
+
+    const bool bRiver =
+        IsRiverMask(WorldX, WorldY);
+
+    if (bLake || bRiver)
     {
-        return Settings.SeaLevel + 1;
+        Column.WaterSurfaceBlockZ = Settings.SeaLevel;
+        Column.EffectiveTerrainHeight =
+            FMath::Min(
+                SurfaceHeight,
+                Settings.SeaLevel - 2);
+
+        Column.bCarved =
+            Column.EffectiveTerrainHeight < SurfaceHeight;
     }
 
-    if (IsRiverMask(WorldX, WorldY))
-    {
-        return Settings.SeaLevel + 1;
-    }
-
-    return INDEX_NONE;
+    return Column;
 }
 
 
