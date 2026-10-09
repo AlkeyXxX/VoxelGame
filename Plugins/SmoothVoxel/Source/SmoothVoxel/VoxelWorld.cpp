@@ -749,7 +749,11 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
             const float RawHeight = WorldGenerator.GetSurfaceHeightFloat(BlockX, BlockY);
             const FVoxelWaterColumn WaterColumn =
                 WorldGenerator.GetWaterColumn(BlockX, BlockY, RawHeight);
-            return WaterColumn.EffectiveSurfaceHeight + 1.25f;
+            const float VisibleSurface = WaterColumn.WaterSurfaceBlockZ != INDEX_NONE
+                ? FMath::Max(WaterColumn.EffectiveSurfaceHeight,
+                    static_cast<float>(WaterColumn.WaterSurfaceBlockZ))
+                : WaterColumn.EffectiveSurfaceHeight;
+            return VisibleSurface + 1.25f;
         };
 
         if (bDrawRWGCellOverlay)
