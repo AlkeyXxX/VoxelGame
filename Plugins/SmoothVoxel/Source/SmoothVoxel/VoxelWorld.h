@@ -7,6 +7,8 @@
 #include "VoxelMesher.h"
 #include "VoxelMarchingCubesMesher.h"
 #include "VoxelWorldGenerator.h"
+#include "VoxelTerrainLODMesher.h"
+#include "HAL/ThreadSafeBool.h"
 #include "VoxelWorld.generated.h"
 
 
@@ -46,6 +48,13 @@ struct FPendingVoxelChunkMeshResult
     TWeakObjectPtr<AVoxelChunk> Chunk;
     FVoxelMeshBuildOutput Output;
     uint32 Version = 0;
+};
+
+struct FPendingVoxelLODMeshResult
+{
+    TWeakObjectPtr<UProceduralMeshComponent> Mesh;
+    FVoxelTerrainLODMeshOutput Output;
+    uint32 GenerationVersion = 0;
 };
 
 
@@ -154,6 +163,11 @@ public:
         AVoxelChunk* Chunk,
         FVoxelMeshBuildOutput&& Output,
         uint32 Version);
+
+    void QueueFarLODMeshResult(
+        UProceduralMeshComponent* Mesh,
+        FVoxelTerrainLODMeshOutput&& Output,
+        uint32 GenerationVersion);
 
     /*
      * Debug helpers.
@@ -294,13 +308,13 @@ public:
         meta=(ClampMin="1", ClampMax="32"))
     int32 MaxChunkMeshRebuildsPerTick = 2;
 
-    /* Limit expensive ProceduralMesh section updates on the Game Thread. */
+    /* Limit expensive chunk/LOD ProceduralMesh uploads on the Game Thread. */
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
         Category="Voxel|Streaming",
-        meta=(ClampMin="1", ClampMax="4"))
-    int32 MaxChunkMeshAppliesPerFrame = 1;
+        meta=(ClampMin="1", ClampMax="2"))
+    int32 MaxMeshSectionUploadsPerFrame = 1;
 
 
     /*
@@ -514,6 +528,7 @@ private:
     /* Unique chunk coordinates waiting for their mesh input to be snapshotted. */
     TArray<FIntVector> PendingChunkMeshRebuilds;
     TArray<FPendingVoxelChunkMeshResult> PendingChunkMeshResults;
+    TArray<FPendingVoxelLODMeshResult> PendingVoxelLODMeshResults;
 
     TMap<int64, uint8> PersistentObjectStates;
     float TimeSinceLastAutoSave = 0.0f;
@@ -580,7 +595,7 @@ private:
         const FIntVector& ChunkCoord);
 
     void ProcessPendingChunkMeshRebuilds();
-    void ProcessPendingChunkMeshResults();
+    void ProcessPendingMeshUploads();
 
 
     /*
@@ -623,6 +638,7 @@ private:
     UProceduralMeshComponent* FarLOD4Mesh = nullptr;
 
     uint32 FarLODGenerationVersion = 0;
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> FarLODCancellationToken;
     FIntVector LastFarLODCenter = FIntVector::ZeroValue;
     bool bFarLODInitialized = false;
 
