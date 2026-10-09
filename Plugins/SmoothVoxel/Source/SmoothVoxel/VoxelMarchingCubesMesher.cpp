@@ -444,6 +444,132 @@ void FVoxelMarchingCubesMesher::Build(
         }
     }
 
+    /*
+     * Finds a placed solid block whose top is under a mesh vertex.
+     * The target height is returned in voxel coordinates; geometry edits
+     * are made per upward-facing triangle later, never on cached shared
+     * vertices, so cave walls cannot be stretched by the undercut.
+     */
+    const auto FindUndercutTarget = [&Input, Size](
+        const FVector& VertexPosition,
+        float& OutTargetZ)
+    {
+        if (Input.VoxelSize <= KINDA_SMALL_NUMBER)
+        {
+            return false;
+        }
+
+        const FVector LocalPosition =
+            VertexPosition / Input.VoxelSize;
+
+        const int32 SurfaceCellZ =
+            FMath::FloorToInt(LocalPosition.Z);
+        const int32 CandidateBlockZ[2] =
+        {
+            SurfaceCellZ,
+            SurfaceCellZ - 1
+        };
+
+        const int32 FloorX =
+            FMath::FloorToInt(LocalPosition.X);
+        const int32 FloorY =
+            FMath::FloorToInt(LocalPosition.Y);
+        const int32 RoundedX =
+            FMath::RoundToInt(LocalPosition.X);
+        const int32 RoundedY =
+            FMath::RoundToInt(LocalPosition.Y);
+        const bool bOnXBoundary =
+            FMath::Abs(
+                LocalPosition.X -
+                static_cast<float>(RoundedX)) < 0.0001f;
+        const bool bOnYBoundary =
+            FMath::Abs(
+                LocalPosition.Y -
+                static_cast<float>(RoundedY)) < 0.0001f;
+
+        const int32 CandidateX[2] =
+        {
+            FloorX,
+            bOnXBoundary ? RoundedX - 1 : FloorX
+        };
+        const int32 CandidateY[2] =
+        {
+            FloorY,
+            bOnYBoundary ? RoundedY - 1 : FloorY
+        };
+        const int32 CandidateXCount =
+            bOnXBoundary ? 2 : 1;
+        const int32 CandidateYCount =
+            bOnYBoundary ? 2 : 1;
+
+        bool bFoundPlacedBlock = false;
+        float BestTargetZ = 0.0f;
+
+        for (int32 CZ = 0; CZ < 2; ++CZ)
+        {
+            const int32 BlockZ = CandidateBlockZ[CZ];
+
+            if (BlockZ < -1 || BlockZ > Size)
+            {
+                continue;
+            }
+
+            for (int32 CY = 0; CY < CandidateYCount; ++CY)
+            {
+                for (int32 CX = 0; CX < CandidateXCount; ++CX)
+                {
+                    const int32 BlockX = CandidateX[CX];
+                    const int32 BlockY = CandidateY[CY];
+
+                    const bool bTerrainHasBlock =
+                        IsVoxelSolid(
+                            GetBlock(
+                                Input,
+                                BlockX,
+                                BlockY,
+                                BlockZ));
+
+                    const bool bDensityHasBlock =
+                        IsVoxelSolid(
+                            GetDensityBlock(
+                                Input,
+                                BlockX,
+                                BlockY,
+                                BlockZ));
+
+                    // Only edits in the cubic layer, not natural terrain.
+                    if (bTerrainHasBlock || !bDensityHasBlock)
+                    {
+                        continue;
+                    }
+
+                    const float CandidateTargetZ =
+                        static_cast<float>(BlockZ + 1) -
+                        1.0f / 13.0f;
+
+                    if (LocalPosition.Z < CandidateTargetZ)
+                    {
+                        continue;
+                    }
+
+                    if (!bFoundPlacedBlock ||
+                        CandidateTargetZ > BestTargetZ)
+                    {
+                        BestTargetZ = CandidateTargetZ;
+                        bFoundPlacedBlock = true;
+                    }
+                }
+            }
+        }
+
+        if (bFoundPlacedBlock)
+        {
+            OutTargetZ = BestTargetZ * Input.VoxelSize;
+        }
+
+        return bFoundPlacedBlock;
+    };
+
     const int32 XEdgeCount =
         Size * (Size + 1) * (Size + 1);
 
@@ -694,167 +820,18 @@ void FVoxelMarchingCubesMesher::Build(
                                 Z,
                                 CornerDensity);
 
+                        const int32 VertexIndex =
+                            Output.Vertices.Num();
+
                         const FVector Gradient =
                             ComputeGradient(
                                 Densities,
                                 Size,
                                 SurfacePosition);
 
-                        /*
-                         * Undercut applies only to upward-facing ground.
-                         * Do not move vertical cave walls or downward-facing
-                         * cave ceilings: moving those vertices along Z can
-                         * stretch triangles and open holes into the terrain.
-                         * Blend the offset near sloped ground edges.
-                         */
-                        FVector SurfaceNormal = -Gradient;
-                        const bool bHasSurfaceNormal =
-                            SurfaceNormal.Normalize();
-
-                        const float UpFacingWeight =
-                            bHasSurfaceNormal
-                                ? FMath::Clamp(
-                                    (SurfaceNormal.Z - 0.25f) / 0.65f,
-                                    0.0f,
-                                    1.0f)
-                                : 0.0f;
-
-                        FVector MeshPosition = SurfacePosition;
-
-                        if (UpFacingWeight > 0.0f)
-                        {
-                            const int32 SurfaceCellZ =
-                                FMath::FloorToInt(SurfacePosition.Z);
-                            const int32 CandidateBlockZ[2] =
-                            {
-                                SurfaceCellZ,
-                                SurfaceCellZ - 1
-                            };
-
-                            const int32 FloorX =
-                                FMath::FloorToInt(SurfacePosition.X);
-                            const int32 FloorY =
-                                FMath::FloorToInt(SurfacePosition.Y);
-                            const int32 RoundedX =
-                                FMath::RoundToInt(SurfacePosition.X);
-                            const int32 RoundedY =
-                                FMath::RoundToInt(SurfacePosition.Y);
-                            const bool bOnXBoundary =
-                                FMath::Abs(
-                                    SurfacePosition.X -
-                                    static_cast<float>(RoundedX)) < 0.0001f;
-                            const bool bOnYBoundary =
-                                FMath::Abs(
-                                    SurfacePosition.Y -
-                                    static_cast<float>(RoundedY)) < 0.0001f;
-
-                            const int32 CandidateX[2] =
-                            {
-                                FloorX,
-                                bOnXBoundary ? RoundedX - 1 : FloorX
-                            };
-                            const int32 CandidateY[2] =
-                            {
-                                FloorY,
-                                bOnYBoundary ? RoundedY - 1 : FloorY
-                            };
-                            const int32 CandidateXCount =
-                                bOnXBoundary ? 2 : 1;
-                            const int32 CandidateYCount =
-                                bOnYBoundary ? 2 : 1;
-
-                            bool bFoundPlacedBlock = false;
-                            float UndercutTargetZ = 0.0f;
-
-                            /*
-                             * Only consider placed blocks whose top is at
-                             * or below this surface point. This allows points
-                             * just under the top plane to find the block in
-                             * their current Z cell, without mistaking an
-                             * arbitrary wall block at the same height for
-                             * ground underneath the vertex.
-                             */
-                            for (int32 CZ = 0; CZ < 2; ++CZ)
-                            {
-                                const int32 BlockZ = CandidateBlockZ[CZ];
-                                if (BlockZ < -1 || BlockZ > Size)
-                                {
-                                    continue;
-                                }
-
-                                for (int32 CY = 0;
-                                     CY < CandidateYCount;
-                                     ++CY)
-                                {
-                                    for (int32 CX = 0;
-                                         CX < CandidateXCount;
-                                         ++CX)
-                                    {
-                                        const int32 BlockX = CandidateX[CX];
-                                        const int32 BlockY = CandidateY[CY];
-
-                                        const bool bTerrainHasBlock =
-                                            IsVoxelSolid(
-                                                GetBlock(
-                                                    Input,
-                                                    BlockX,
-                                                    BlockY,
-                                                    BlockZ));
-
-                                        const bool bDensityHasBlock =
-                                            IsVoxelSolid(
-                                                GetDensityBlock(
-                                                    Input,
-                                                    BlockX,
-                                                    BlockY,
-                                                    BlockZ));
-
-                                        if (bTerrainHasBlock || !bDensityHasBlock)
-                                        {
-                                            continue;
-                                        }
-
-                                        const float CandidateTargetZ =
-                                            static_cast<float>(BlockZ + 1) -
-                                            1.0f / 13.0f;
-
-                                        if (SurfacePosition.Z < CandidateTargetZ)
-                                        {
-                                            continue;
-                                        }
-
-                                        if (!bFoundPlacedBlock ||
-                                            CandidateTargetZ > UndercutTargetZ)
-                                        {
-                                            UndercutTargetZ = CandidateTargetZ;
-                                            bFoundPlacedBlock = true;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (bFoundPlacedBlock)
-                            {
-                                /*
-                                 * On flat ground use the full 1/13-voxel
-                                 * undercut. Sloped surfaces transition into
-                                 * it progressively; vertical surfaces get no
-                                 * vertical deformation at all.
-                                 */
-                                const float TargetZ =
-                                    FMath::Min(
-                                        MeshPosition.Z,
-                                        UndercutTargetZ);
-
-                                MeshPosition.Z =
-                                    FMath::Lerp(
-                                        MeshPosition.Z,
-                                        TargetZ,
-                                        UpFacingWeight);
-                            }
-                        }
-
-                        const int32 VertexIndex =
+                        Output.Vertices.Add(
+                            SurfacePosition *
+                            Input.VoxelSize);                        const int32 VertexIndex =
                             Output.Vertices.Num();
 
                         Output.Vertices.Add(
@@ -998,19 +975,92 @@ void FVoxelMarchingCubesMesher::Build(
                      * along the density gradient so the reversed UE winding
                      * faces outward.
                      */
-                    if (FVector::DotProduct(
+                    const bool bReverseWinding =
+                        FVector::DotProduct(
                             FaceNormal,
-                            Gradient) < 0.0f)
+                            Gradient) < 0.0f;
+
+                    /*
+                     * Restrict the undercut to triangles whose actual face
+                     * points upward. Duplicate only triangles that change;
+                     * shared cached vertices used by vertical cave walls are
+                     * never moved. This avoids long stretched wall triangles
+                     * and holes around placed wall blocks.
+                     */
+                    const FVector RenderedOutwardNormal =
+                        bReverseWinding
+                            ? FaceNormal
+                            : -FaceNormal;
+
+                    int32 FinalI0 = I0;
+                    int32 FinalI1 = I1;
+                    int32 FinalI2 = I2;
+
+                    if (RenderedOutwardNormal.Z > 0.65f)
                     {
-                        Output.Triangles.Add(I0);
-                        Output.Triangles.Add(I2);
-                        Output.Triangles.Add(I1);
+                        const int32 OriginalIndices[3] = { I0, I1, I2 };
+                        FVector AdjustedPositions[3] =
+                        {
+                            Output.Vertices[I0],
+                            Output.Vertices[I1],
+                            Output.Vertices[I2]
+                        };
+
+                        bool bPositionChanged = false;
+
+                        for (int32 Vertex = 0; Vertex < 3; ++Vertex)
+                        {
+                            float TargetZ = 0.0f;
+
+                            if (FindUndercutTarget(
+                                    AdjustedPositions[Vertex],
+                                    TargetZ) &&
+                                AdjustedPositions[Vertex].Z > TargetZ)
+                            {
+                                AdjustedPositions[Vertex].Z = TargetZ;
+                                bPositionChanged = true;
+                            }
+                        }
+
+                        if (bPositionChanged)
+                        {
+                            int32 AdjustedIndices[3];
+
+                            for (int32 Vertex = 0; Vertex < 3; ++Vertex)
+                            {
+                                const int32 OriginalIndex =
+                                    OriginalIndices[Vertex];
+
+                                AdjustedIndices[Vertex] =
+                                    Output.Vertices.Num();
+
+                                Output.Vertices.Add(
+                                    AdjustedPositions[Vertex]);
+                                Output.Normals.Add(
+                                    Output.Normals[OriginalIndex]);
+                                Output.UV0.Add(
+                                    Output.UV0[OriginalIndex]);
+                                Output.VertexColors.Add(
+                                    Output.VertexColors[OriginalIndex]);
+                            }
+
+                            FinalI0 = AdjustedIndices[0];
+                            FinalI1 = AdjustedIndices[1];
+                            FinalI2 = AdjustedIndices[2];
+                        }
+                    }
+
+                    if (bReverseWinding)
+                    {
+                        Output.Triangles.Add(FinalI0);
+                        Output.Triangles.Add(FinalI2);
+                        Output.Triangles.Add(FinalI1);
                     }
                     else
                     {
-                        Output.Triangles.Add(I0);
-                        Output.Triangles.Add(I1);
-                        Output.Triangles.Add(I2);
+                        Output.Triangles.Add(FinalI0);
+                        Output.Triangles.Add(FinalI1);
+                        Output.Triangles.Add(FinalI2);
                     }
                 }
             }
