@@ -322,12 +322,15 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
     int32 /*SurfaceHeight*/) const
 {
     /*
-     * Macro regions are diagonal bands across the normalized map:
-     * northwest = winter/snow, middle = green, southeast = desert.
+     * Keep the existing large-scale map layout: a diagonal winter region,
+     * a central green belt and a diagonal desert region. Broad normalized
+     * noise bends the climate borders over large distances; a much smaller
+     * detail signal prevents them from looking perfectly geometric.
      *
-     * The offset is small enough that the exact map center always stays
-     * in the green band, but it makes the borders slightly irregular.
-     * The two outer bands occupy approximately one third of the map each.
+     * Temperature only nudges these borders, so local climate noise cannot
+     * turn the three macro regions into a patchwork. All sampling uses global
+     * coordinates and the world seed, keeping results deterministic across
+     * chunk boundaries and generation order.
      */
     const int32 SafeSizeX = FMath::Max(1, Settings.WorldBlocksX);
     const int32 SafeSizeY = FMath::Max(1, Settings.WorldBlocksY);
@@ -341,8 +344,8 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
         static_cast<float>(SafeSizeY);
 
     /*
-     * Ensure the start is always in a green Plains patch. The surrounding
-     * green band still uses the seeded 38/62 Plains/Forest distribution.
+     * Preserve a guaranteed Plains starting area around the map center.
+     * This early return intentionally takes priority over climate noise.
      */
     if (FMath::Abs(NormalizedX - 0.5f) <= 0.01f &&
         FMath::Abs(NormalizedY - 0.5f) <= 0.01f)
@@ -350,15 +353,35 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
         return EVoxelBiome::Plains;
     }
 
-    const FVector2D BorderSamplePosition(
-        NormalizedX * 5.0f + Settings.Seed * 0.037f,
-        NormalizedY * 5.0f - Settings.Seed * 0.021f);
+    const float Temperature = GetTemperature(WorldX, WorldY);
 
-    const float BorderNoise =
-        FMath::PerlinNoise2D(BorderSamplePosition) * 0.035f;
+    const FVector2D MacroBorderSamplePosition(
+        NormalizedX * 3.2f + Settings.Seed * 0.037f,
+        NormalizedY * 3.2f - Settings.Seed * 0.021f);
+
+    const FVector2D FineBorderSamplePosition(
+        NormalizedX * 8.5f - Settings.Seed * 0.017f,
+        NormalizedY * 8.5f + Settings.Seed * 0.029f);
+
+    const float MacroBorderNoise =
+        FMath::PerlinNoise2D(MacroBorderSamplePosition) * 0.030f;
+
+    const float FineBorderNoise =
+        FMath::PerlinNoise2D(FineBorderSamplePosition) * 0.006f;
+
+    /*
+     * Warmer columns very slightly push the classification away from Snow
+     * and toward Desert. The offset is deliberately small: macro geography
+     * remains recognizable, while border shape responds to the climate map.
+     */
+    const float TemperatureBorderOffset =
+        (Temperature - 0.5f) * 0.012f;
 
     const float DiagonalPosition =
-        NormalizedX - NormalizedY + BorderNoise;
+        NormalizedX - NormalizedY +
+        MacroBorderNoise +
+        FineBorderNoise +
+        TemperatureBorderOffset;
 
     const float BandBoundary =
         1.0f - FMath::Sqrt(2.0f / 3.0f);
@@ -374,9 +397,10 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
     }
 
     /*
-     * Split only the central green band into Plains and Forest.
-     * A normalized, seeded noise gives large patches that scale with
-     * world size. The threshold targets roughly 38% Plains / 62% Forest.
+     * In the central green belt, blend local moisture with a broad normalized
+     * patch field. Moisture favors forest in humid locations, while the broad
+     * field keeps forests and plains in coherent, world-sized patches instead
+     * of allowing every moisture fluctuation to create a tiny biome island.
      */
     const FVector2D GreenBiomeSamplePosition(
         NormalizedX * 8.0f + Settings.Seed * 0.011f,
@@ -385,12 +409,28 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
     const float GreenBiomeNoise =
         FMath::PerlinNoise2D(GreenBiomeSamplePosition);
 
-    if (GreenBiomeNoise > -0.08f)
-    {
-        return EVoxelBiome::Forest;
-    }
+    const float GreenPatchScore =
+        GreenBiomeNoise * 0.5f + 0.5f;
 
-    return EVoxelBiome::Plains;
+    const float Moisture =
+        GetMoisture(WorldX, WorldY);
+
+    const float ForestScore =
+        Moisture * 0.65f +
+        GreenPatchScore * 0.35f;
+
+    /*
+     * Warmer green locations can support forest at a slightly lower score;
+     * colder locations favor open Plains. Moisture remains the dominant
+     * local signal, and thresholds stay near the middle to retain a healthy
+     * mix of both biomes.
+     */
+    const float ForestThreshold =
+        0.47f + (0.5f - Temperature) * 0.08f;
+
+    return ForestScore >= ForestThreshold
+        ? EVoxelBiome::Forest
+        : EVoxelBiome::Plains;
 }
 
 EVoxelMajorBiome FVoxelWorldGenerator::GetMajorBiome(
