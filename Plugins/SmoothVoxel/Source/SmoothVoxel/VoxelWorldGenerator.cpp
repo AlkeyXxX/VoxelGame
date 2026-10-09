@@ -423,90 +423,162 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
     Column.bCarved = false;
     Column.bShoreAdjusted = false;
 
+    const float SeaLevel = static_cast<float>(Settings.SeaLevel);
+
+    const auto SmoothStep = [](float Edge0, float Edge1, float Value)
+    {
+        const float T =
+            FMath::Clamp((Value - Edge0) / (Edge1 - Edge0), 0.0f, 1.0f);
+        return T * T * (3.0f - 2.0f * T);
+    };
+
     /*
-     * Keep existing low basins filled to the global sea level.
+     * Existing low basins are still filled to the common water level.
+     * Their beds deepen gradually as terrain descends below the shoreline,
+     * instead of creating a sudden four-block drop at the water edge.
      */
-    if (SurfaceHeight < Settings.SeaLevel)
+    if (SurfaceHeight < SeaLevel)
     {
         Column.WaterSurfaceBlockZ = Settings.SeaLevel;
+
+        const float BasinBedHeight =
+            FMath::Min(SurfaceHeight, SeaLevel - 4.0f);
+
+        const float BasinDepthWeight =
+            1.0f - SmoothStep(
+                SeaLevel - 4.5f,
+                SeaLevel - 0.25f,
+                SurfaceHeight);
+
+        Column.EffectiveSurfaceHeight =
+            FMath::Lerp(
+                SurfaceHeight,
+                BasinBedHeight,
+                BasinDepthWeight);
+    }
+
+    const EVoxelLandform Landform =
+        GetLandform(WorldX, WorldY);
+
+    // Keep rivers and lakes out of mountain massifs.
+    if (Landform == EVoxelLandform::Mountains)
+    {
+        Column.EffectiveTerrainHeight =
+            FMath::RoundToInt(Column.EffectiveSurfaceHeight);
+        Column.bCarved =
+            Column.EffectiveSurfaceHeight < SurfaceHeight - KINDA_SMALL_NUMBER;
         return Column;
     }
 
-    if (GetLandform(WorldX, WorldY) == EVoxelLandform::Mountains)
+    /*
+     * The river/lake corridor is allowed to cut through rolling hills,
+     * but not through high uplands. The broad transition lets terrain
+     * descend gradually before reaching the water surface.
+     */
+    if (SurfaceHeight > SeaLevel + 12.0f)
     {
-        return Column;
-    }
-
-    if (SurfaceHeight > Settings.SeaLevel + 3)
-    {
+        Column.EffectiveTerrainHeight =
+            FMath::RoundToInt(Column.EffectiveSurfaceHeight);
+        Column.bCarved =
+            Column.EffectiveSurfaceHeight < SurfaceHeight - KINDA_SMALL_NUMBER;
         return Column;
     }
 
     const float RiverField = GetRiverField(WorldX, WorldY);
     const float LakeScore = GetLakeScore(WorldX, WorldY);
+    const float RiverDistance = FMath::Abs(RiverField);
 
-    const bool bRiver =
-        FMath::Abs(RiverField) <= 0.0045f;
+    /*
+     * Widths are field-space values, not block counts. The narrow core
+     * makes a channel several blocks wide; the wider bank interval feathers
+     * the profile into the surrounding terrain with a zero-slope edge.
+     */
+    constexpr float RiverCoreWidth = 0.0085f;
+    constexpr float RiverBankWidth = 0.045f;
+    constexpr float LakeBankScore = 0.30f;
+    constexpr float LakeCoreScore = 0.42f;
 
-    const bool bLake =
-        SurfaceHeight <= Settings.SeaLevel + 2 &&
-        LakeScore >= 0.42f;
+    const float RiverInfluence =
+        1.0f - SmoothStep(
+            RiverCoreWidth,
+            RiverBankWidth,
+            RiverDistance);
 
-    if (bLake || bRiver)
+    const float LakeInfluence =
+        SmoothStep(
+            LakeBankScore,
+            LakeCoreScore,
+            LakeScore);
+
+    const float FeatureInfluence =
+        FMath::Max(RiverInfluence, LakeInfluence);
+
+    if (FeatureInfluence > KINDA_SMALL_NUMBER)
     {
-        Column.WaterSurfaceBlockZ = Settings.SeaLevel;
+        float BedDepth = 4.0f;
 
-        // Two water layers keep the river/lake readable without a deep trench.
-        Column.EffectiveTerrainHeight =
-            FMath::Min(
-                FMath::RoundToInt(SurfaceHeight),
-                Settings.SeaLevel - 2);
+        if (RiverInfluence >= LakeInfluence)
+        {
+            // The channel is deepest along its centerline and shallower
+            // toward the inner banks, giving the river a rounded cross-section.
+            const float CenterDepth =
+                1.0f - FMath::Clamp(
+                    RiverDistance / RiverBankWidth,
+                    0.0f,
+                    1.0f);
 
-        Column.EffectiveSurfaceHeight =
+            BedDepth = 4.0f + CenterDepth * 2.0f;
+        }
+        else
+        {
+            // Vary lake depth gently across the basin rather than making
+            // every lake a perfectly flat, identical bowl.
+            const float BasinDepth =
+                SmoothStep(
+                    LakeBankScore,
+                    LakeCoreScore,
+                    LakeScore);
+
+            BedDepth = 4.0f + BasinDepth * 2.0f;
+        }
+
+        const float FeatureBedHeight =
             FMath::Min(
                 SurfaceHeight,
-                static_cast<float>(Settings.SeaLevel - 2));
+                SeaLevel - BedDepth);
 
-        Column.bCarved =
-            Column.EffectiveSurfaceHeight < SurfaceHeight;
+        const float PreviousEffectiveHeight =
+            Column.EffectiveSurfaceHeight;
 
-        return Column;
+        Column.EffectiveSurfaceHeight =
+            FMath::Lerp(
+                PreviousEffectiveHeight,
+                FeatureBedHeight,
+                FeatureInfluence);
+
+        Column.bShoreAdjusted =
+            FeatureInfluence < 0.999f &&
+            Column.EffectiveSurfaceHeight < SurfaceHeight - KINDA_SMALL_NUMBER;
     }
 
     /*
-     * A narrow, dry shelf around water keeps the shoreline no more than one
-     * block above the water surface. The field thresholds are slightly wider
-     * than the wet masks, so this blends the edge without extra neighbor-noise
-     * sampling or chunk-order dependence.
+     * A column becomes water when the smoothed ground profile reaches
+     * the water plane. This fills newly carved sections consistently in
+     * generated chunks and Marching Cubes halo samples.
      */
-    const bool bRiverShore =
-        FMath::Abs(RiverField) <= 0.0090f;
-
-    const bool bLakeShore =
-        LakeScore >= 0.385f;
-
-    if (bRiverShore || bLakeShore)
+    if (Column.EffectiveSurfaceHeight < SeaLevel)
     {
-        const int32 ShoreHeight =
-            Settings.SeaLevel + 1;
-
-        Column.EffectiveTerrainHeight =
-            FMath::Min(
-                FMath::RoundToInt(SurfaceHeight),
-                ShoreHeight);
-
-        Column.EffectiveSurfaceHeight =
-            FMath::Min(
-                SurfaceHeight,
-                static_cast<float>(ShoreHeight));
-
-        Column.bShoreAdjusted =
-            Column.EffectiveSurfaceHeight < SurfaceHeight;
+        Column.WaterSurfaceBlockZ = Settings.SeaLevel;
     }
+
+    Column.EffectiveTerrainHeight =
+        FMath::RoundToInt(Column.EffectiveSurfaceHeight);
+
+    Column.bCarved =
+        Column.EffectiveSurfaceHeight < SurfaceHeight - KINDA_SMALL_NUMBER;
 
     return Column;
 }
-
 
 EVoxelBiome FVoxelWorldGenerator::GetBiome(
     int32 WorldX,
