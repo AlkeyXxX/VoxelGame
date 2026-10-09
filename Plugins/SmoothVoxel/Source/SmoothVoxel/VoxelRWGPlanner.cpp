@@ -72,6 +72,8 @@ bool FVoxelRWGPlanner::Generate(
     Settlements.Reset();
     POIs.Reset();
     Roads.Reset();
+    ConnectedSettlementCount = 0;
+    FailedSettlementRoadCount = 0;
     GridHeights.Reset();
     GridCosts.Reset();
 
@@ -466,9 +468,18 @@ void FVoxelRWGPlanner::BuildRoadNetwork()
                 // Don't retry a route that cannot cross the current landmass;
                 // the next iteration tries the next-best reachable connection.
                 FailedPairs.Add(PairKey(BestFrom, BestTo));
+                ++FailedSettlementRoadCount;
             }
         }
+        ConnectedSettlementCount = Connected.Num();
+    }
+    else if (Settlements.Num() == 1)
+    {
+        ConnectedSettlementCount = 1;
+    }
 
+    if (Settlements.Num() >= 2)
+    {
         // Some nearby towns get loop roads so the result is not only a tree.
         FRandomStream Random(Settings.Seed ^ 0x70AD5);
         int32 Extra = 0;
@@ -563,8 +574,9 @@ FString FVoxelRWGPlanner::GetSummary() const
         else ++Local;
     }
     return FString::Printf(
-        TEXT("RWG plan seed=%d; settlements=%d/%d; POIs=%d/%d; roads=%d (main=%d, connector=%d, local=%d); grid=%dx%d @ %d blocks"),
+        TEXT("RWG plan seed=%d; settlements=%d/%d; connected hubs=%d/%d; failed hub links=%d; POIs=%d/%d; roads=%d (main=%d, connector=%d, local=%d); grid=%dx%d @ %d blocks"),
         Settings.Seed, Settlements.Num(), Settings.TargetSettlementCount,
+        ConnectedSettlementCount, Settlements.Num(), FailedSettlementRoadCount,
         POIs.Num(), Settings.TargetPOICount, Roads.Num(), Main, Connector, Local,
         GridWidth, GridHeight, Settings.GridSpacing);
 }
