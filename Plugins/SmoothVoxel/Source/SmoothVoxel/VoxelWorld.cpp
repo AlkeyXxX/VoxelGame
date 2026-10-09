@@ -9,6 +9,7 @@
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "ProceduralMeshComponent.h"
+#include "Async/Async.h"
 
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Character.h"
@@ -106,6 +107,143 @@ namespace
             OutStart,
             OutDirection);
     }
+
+    /*
+     * Pure voxel-data generation. This function deliberately uses no
+     * UObject or AVoxelWorld members, so it is safe on a worker thread.
+     */
+    void BuildGeneratedChunkData(
+        const FVoxelWorldGenerator& Generator,
+        const FIntVector& ChunkCoord,
+        int32 ChunkSize,
+        int32 SeaLevel,
+        int32 BeachWidth,
+        const TMap<int32, uint8>& ChunkModifications,
+        TArray<uint8>& OutBlocks,
+        TArray<uint8>& OutBaseBlocks,
+        TArray<uint8>& OutBiomes,
+        TArray<uint8>& OutModificationFlags)
+    {
+        const int32 BlockCount =
+            ChunkSize * ChunkSize * ChunkSize;
+
+        OutBlocks.SetNumZeroed(BlockCount);
+        OutBaseBlocks.SetNumZeroed(BlockCount);
+        OutBiomes.SetNumZeroed(BlockCount);
+        OutModificationFlags.SetNumZeroed(BlockCount);
+
+        for (int32 Y = 0; Y < ChunkSize; ++Y)
+        {
+            for (int32 X = 0; X < ChunkSize; ++X)
+            {
+                const int32 WorldX =
+                    ChunkCoord.X * ChunkSize + X;
+
+                const int32 WorldY =
+                    ChunkCoord.Y * ChunkSize + Y;
+
+                const int32 Height =
+                    Generator.GetSurfaceHeight(WorldX, WorldY);
+
+                const EVoxelBiome Biome =
+                    Generator.GetBiome(WorldX, WorldY, Height);
+
+                const EVoxelLandform Landform =
+                    Generator.GetLandform(WorldX, WorldY);
+
+                for (int32 Z = 0; Z < ChunkSize; ++Z)
+                {
+                    const int32 WorldZ =
+                        ChunkCoord.Z * ChunkSize + Z;
+
+                    uint8 Block = uint8(EVoxelBlock::Air);
+
+                    if (WorldZ > Height)
+                    {
+                        Block = WorldZ <= SeaLevel
+                            ? uint8(EVoxelBlock::Water)
+                            : uint8(EVoxelBlock::Air);
+                    }
+                    else if (WorldZ == Height)
+                    {
+                        const bool bBeach =
+                            Biome != EVoxelBiome::Snow &&
+                            Height < SeaLevel &&
+                            Height >= SeaLevel - BeachWidth;
+
+                        if (bBeach)
+                        {
+                            Block = uint8(EVoxelBlock::Sand);
+                        }
+                        else if (Biome == EVoxelBiome::Snow)
+                        {
+                            Block = uint8(EVoxelBlock::Snow);
+                        }
+                        else if (Landform == EVoxelLandform::Mountains)
+                        {
+                            Block = Biome == EVoxelBiome::Desert
+                                ? uint8(EVoxelBlock::Sandstone)
+                                : uint8(EVoxelBlock::Stone);
+                        }
+                        else if (Biome == EVoxelBiome::Desert)
+                        {
+                            Block = uint8(EVoxelBlock::Sand);
+                        }
+                        else
+                        {
+                            Block = uint8(EVoxelBlock::Grass);
+                        }
+                    }
+                    else if (Biome == EVoxelBiome::Desert &&
+                             Landform == EVoxelLandform::Mountains &&
+                             WorldZ >= Height - 5)
+                    {
+                        Block = uint8(EVoxelBlock::Sandstone);
+                    }
+                    else if (Biome == EVoxelBiome::Desert &&
+                             WorldZ >= Height - 3)
+                    {
+                        Block = uint8(EVoxelBlock::Sand);
+                    }
+                    else if (Landform == EVoxelLandform::Mountains &&
+                             WorldZ >= Height - 3)
+                    {
+                        Block = uint8(EVoxelBlock::Stone);
+                    }
+                    else if (WorldZ >= Height - 3)
+                    {
+                        Block = uint8(EVoxelBlock::Dirt);
+                    }
+                    else
+                    {
+                        Block = uint8(EVoxelBlock::Stone);
+                    }
+
+                    const int32 LocalIndex =
+                        X + Y * ChunkSize + Z * ChunkSize * ChunkSize;
+
+                    OutBaseBlocks[LocalIndex] = Block;
+                    OutBiomes[LocalIndex] =
+                        Block == uint8(EVoxelBlock::Water)
+                            ? 4
+                            : uint8(Biome);
+
+                    if (const uint8* ModifiedBlock =
+                        ChunkModifications.Find(LocalIndex))
+                    {
+                        OutBlocks[LocalIndex] = *ModifiedBlock;
+                        OutModificationFlags[LocalIndex] = 1;
+                    }
+                    else
+                    {
+                        OutBlocks[LocalIndex] = Block;
+                        OutModificationFlags[LocalIndex] = 0;
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 
@@ -492,18 +630,11 @@ AVoxelChunk* AVoxelWorld::CreateChunk(
         ChunkCoord,
         Chunk);
 
-
-    GenerateChunkBlocks(
-        Chunk);
-
-
     /*
-     * Новый chunk и его уже загруженные соседи
-     * получают корректные границы mesh.
+     * Expensive terrain generation runs on a worker. Mesh creation and
+     * collision remain on the Game Thread through the normal rebuild path.
      */
-    RebuildChunkAndNeighbors(
-        ChunkCoord);
-
+    GenerateChunkBlocksAsync(Chunk);
 
     return Chunk;
 }
@@ -851,175 +982,125 @@ void AVoxelWorld::GenerateChunkBlocks(
         return;
     }
 
-    Chunk->ClearModificationFlags();
+    const FIntVector ChunkCoord = Chunk->GetChunkCoord();
 
-    const FIntVector ChunkCoord =
-        Chunk->GetChunkCoord();
-
-    /*
-     * Height, biome and landform depend only on global X/Y.
-     * Calculate them once per column, not once for every Z block.
-     * This cuts repeated Perlin calls during chunk creation by roughly
-     * ChunkSize times without changing generated block results.
-     */
-    for (int32 Y = 0; Y < ChunkSize; ++Y)
+    TMap<int32, uint8> ChunkModifications;
+    if (const TMap<int32, uint8>* FoundMods =
+        ModifiedBlocks.Find(ChunkCoord))
     {
-        for (int32 X = 0; X < ChunkSize; ++X)
-        {
-            const int32 WorldX =
-                ChunkCoord.X * ChunkSize + X;
-
-            const int32 WorldY =
-                ChunkCoord.Y * ChunkSize + Y;
-
-            const int32 Height =
-                WorldGenerator.GetSurfaceHeight(
-                    WorldX,
-                    WorldY);
-
-            const EVoxelBiome Biome =
-                WorldGenerator.GetBiome(
-                    WorldX,
-                    WorldY,
-                    Height);
-
-            const EVoxelLandform Landform =
-                WorldGenerator.GetLandform(
-                    WorldX,
-                    WorldY);
-
-            for (int32 Z = 0; Z < ChunkSize; ++Z)
-            {
-                const int32 WorldZ =
-                    ChunkCoord.Z * ChunkSize + Z;
-
-                uint8 Block =
-                    uint8(EVoxelBlock::Air);
-
-                if (WorldZ > Height)
-                {
-                    if (WorldZ <= SeaLevel)
-                    {
-                        Block =
-                            uint8(EVoxelBlock::Water);
-                    }
-                    else
-                    {
-                        Block =
-                            uint8(EVoxelBlock::Air);
-                    }
-                }
-                else if (WorldZ == Height)
-                {
-                    const bool bBeach =
-                        Biome != EVoxelBiome::Snow &&
-                        Height < SeaLevel &&
-                        Height >= SeaLevel - BeachWidth;
-
-                    if (bBeach)
-                    {
-                        Block =
-                            uint8(EVoxelBlock::Sand);
-                    }
-                    else if (Biome == EVoxelBiome::Snow)
-                    {
-                        Block =
-                            uint8(EVoxelBlock::Snow);
-                    }
-                    else if (Landform == EVoxelLandform::Mountains)
-                    {
-                        Block =
-                            Biome == EVoxelBiome::Desert
-                                ? uint8(EVoxelBlock::Sandstone)
-                                : uint8(EVoxelBlock::Stone);
-                    }
-                    else if (Biome == EVoxelBiome::Desert)
-                    {
-                        Block =
-                            uint8(EVoxelBlock::Sand);
-                    }
-                    else
-                    {
-                        Block =
-                            uint8(EVoxelBlock::Grass);
-                    }
-                }
-                else if (Biome == EVoxelBiome::Desert &&
-                         Landform == EVoxelLandform::Mountains &&
-                         WorldZ >= Height - 5)
-                {
-                    Block =
-                        uint8(EVoxelBlock::Sandstone);
-                }
-                else if (Biome == EVoxelBiome::Desert &&
-                         WorldZ >= Height - 3)
-                {
-                    Block =
-                        uint8(EVoxelBlock::Sand);
-                }
-                else if (Landform == EVoxelLandform::Mountains &&
-                         WorldZ >= Height - 3)
-                {
-                    Block =
-                        uint8(EVoxelBlock::Stone);
-                }
-                else if (WorldZ >= Height - 3)
-                {
-                    Block =
-                        uint8(EVoxelBlock::Dirt);
-                }
-                else
-                {
-                    Block =
-                        uint8(EVoxelBlock::Stone);
-                }
-
-                Chunk->SetBiome(
-                    X,
-                    Y,
-                    Z,
-                    Block == uint8(EVoxelBlock::Water)
-                        ? 4
-                        : uint8(Biome));
-
-                const int32 LocalIndex =
-                    X +
-                    Y * ChunkSize +
-                    Z * ChunkSize * ChunkSize;
-
-                Chunk->SetBaseBlock(
-                    X,
-                    Y,
-                    Z,
-                    Block);
-
-                bool bModified = false;
-
-                if (const TMap<int32, uint8>* ChunkModifications =
-                    ModifiedBlocks.Find(ChunkCoord))
-                {
-                    if (const uint8* ModifiedBlock =
-                        ChunkModifications->Find(LocalIndex))
-                    {
-                        Block = *ModifiedBlock;
-                        bModified = true;
-                    }
-                }
-
-                Chunk->SetModificationFlag(
-                    X,
-                    Y,
-                    Z,
-                    bModified);
-
-                Chunk->SetBlock(
-                    X,
-                    Y,
-                    Z,
-                    Block);
-            }
-        }
+        ChunkModifications = *FoundMods;
     }
+
+    TArray<uint8> Blocks;
+    TArray<uint8> BaseBlocks;
+    TArray<uint8> Biomes;
+    TArray<uint8> ModificationFlags;
+
+    BuildGeneratedChunkData(
+        WorldGenerator,
+        ChunkCoord,
+        ChunkSize,
+        SeaLevel,
+        BeachWidth,
+        ChunkModifications,
+        Blocks,
+        BaseBlocks,
+        Biomes,
+        ModificationFlags);
+
+    Chunk->SetGeneratedData(
+        MoveTemp(Blocks),
+        MoveTemp(BaseBlocks),
+        MoveTemp(Biomes),
+        MoveTemp(ModificationFlags));
+}
+
+
+void AVoxelWorld::GenerateChunkBlocksAsync(
+    AVoxelChunk* Chunk)
+{
+    if (!Chunk)
+    {
+        return;
+    }
+
+    const FIntVector ChunkCoord = Chunk->GetChunkCoord();
+    const FVoxelWorldGenerator GeneratorCopy = WorldGenerator;
+    const int32 LocalChunkSize = ChunkSize;
+    const int32 LocalSeaLevel = SeaLevel;
+    const int32 LocalBeachWidth = BeachWidth;
+
+    TMap<int32, uint8> ChunkModifications;
+    if (const TMap<int32, uint8>* FoundMods =
+        ModifiedBlocks.Find(ChunkCoord))
+    {
+        ChunkModifications = *FoundMods;
+    }
+
+    TWeakObjectPtr<AVoxelWorld> WeakWorld(this);
+    TWeakObjectPtr<AVoxelChunk> WeakChunk(Chunk);
+
+    Async(
+        EAsyncExecution::ThreadPool,
+        [
+            WeakWorld,
+            WeakChunk,
+            GeneratorCopy,
+            ChunkCoord,
+            LocalChunkSize,
+            LocalSeaLevel,
+            LocalBeachWidth,
+            ChunkModifications = MoveTemp(ChunkModifications)
+        ]() mutable
+        {
+            TArray<uint8> Blocks;
+            TArray<uint8> BaseBlocks;
+            TArray<uint8> Biomes;
+            TArray<uint8> ModificationFlags;
+
+            BuildGeneratedChunkData(
+                GeneratorCopy,
+                ChunkCoord,
+                LocalChunkSize,
+                LocalSeaLevel,
+                LocalBeachWidth,
+                ChunkModifications,
+                Blocks,
+                BaseBlocks,
+                Biomes,
+                ModificationFlags);
+
+            AsyncTask(
+                ENamedThreads::GameThread,
+                [
+                    WeakWorld,
+                    WeakChunk,
+                    ChunkCoord,
+                    Blocks = MoveTemp(Blocks),
+                    BaseBlocks = MoveTemp(BaseBlocks),
+                    Biomes = MoveTemp(Biomes),
+                    ModificationFlags = MoveTemp(ModificationFlags)
+                ]() mutable
+                {
+                    AVoxelWorld* World = WeakWorld.Get();
+                    AVoxelChunk* ReadyChunk = WeakChunk.Get();
+
+                    if (!World || !ReadyChunk ||
+                        World->GetChunk(ChunkCoord) != ReadyChunk)
+                    {
+                        return;
+                    }
+
+                    ReadyChunk->SetGeneratedData(
+                        MoveTemp(Blocks),
+                        MoveTemp(BaseBlocks),
+                        MoveTemp(Biomes),
+                        MoveTemp(ModificationFlags));
+
+                    /* Neighbour snapshots are gathered only after data commits. */
+                    World->RebuildChunkAndNeighbors(ChunkCoord);
+                });
+        });
 }
 
 void AVoxelWorld::SaveWorld()
