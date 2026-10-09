@@ -672,6 +672,7 @@ private:
 
     UFUNCTION()
     void ToggleDebugFly();
+    void GenerateRWGLayoutFromInput();
 
     void DebugFlyUpPressed();
     void DebugFlyUpReleased();
