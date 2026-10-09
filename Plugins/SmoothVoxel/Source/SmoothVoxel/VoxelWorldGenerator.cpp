@@ -577,10 +577,20 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
     if (Column.EffectiveSurfaceHeight < SeaLevel)
     {
         Column.WaterSurfaceBlockZ = Settings.SeaLevel;
-    }
 
-    Column.EffectiveTerrainHeight =
-        FMath::RoundToInt(Column.EffectiveSurfaceHeight);
+        /*
+         * A wet column must start filling water above the actual bed cell.
+         * Floor keeps a fractional shoreline below the water plane from
+         * rounding up to the water level and leaving a dry one-cell gap.
+         */
+        Column.EffectiveTerrainHeight =
+            FMath::FloorToInt(Column.EffectiveSurfaceHeight);
+    }
+    else
+    {
+        Column.EffectiveTerrainHeight =
+            FMath::RoundToInt(Column.EffectiveSurfaceHeight);
+    }
 
     Column.bCarved =
         Column.EffectiveSurfaceHeight < SurfaceHeight - KINDA_SMALL_NUMBER;
