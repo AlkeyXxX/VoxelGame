@@ -254,6 +254,32 @@ uint8 FVoxelMarchingCubesMesher::GetBlock(
 }
 
 
+uint8 FVoxelMarchingCubesMesher::GetDensityBlock(
+    const FVoxelMarchingCubesBuildInput& Input,
+    int32 X,
+    int32 Y,
+    int32 Z)
+{
+    if (X < -1 || X > Input.Size ||
+        Y < -1 || Y > Input.Size ||
+        Z < -1 || Z > Input.Size)
+    {
+        return uint8(EVoxelBlock::Air);
+    }
+
+    const int32 Index =
+        MarchingCubesBlockIndex(
+            X,
+            Y,
+            Z,
+            Input.Size);
+
+    return Input.DensityBlocks.IsValidIndex(Index)
+        ? Input.DensityBlocks[Index]
+        : GetBlock(Input, X, Y, Z);
+}
+
+
 float FVoxelMarchingCubesMesher::GetDensity(
     const FVoxelMarchingCubesBuildInput& Input,
     int32 X,
@@ -270,7 +296,7 @@ float FVoxelMarchingCubesMesher::GetDensity(
             {
                 const EVoxelBlock Block =
                     static_cast<EVoxelBlock>(
-                        GetBlock(
+                        GetDensityBlock(
                             Input,
                             X - 1 + DX,
                             Y - 1 + DY,
@@ -461,6 +487,18 @@ void FVoxelMarchingCubesMesher::Build(
         {
             for (int32 X = 0; X < Size; ++X)
             {
+                /*
+                 * A player-placed solid block is kept in DensityBlocks so
+                 * surrounding terrain can meet its cubic side, but the cell
+                 * itself is rendered only by the cubic mesher. This avoids
+                 * duplicate surfaces/collision inside the placed block.
+                 */
+                if (!IsVoxelSolid(GetBlock(Input, X, Y, Z)) &&
+                    IsVoxelSolid(GetDensityBlock(Input, X, Y, Z)))
+                {
+                    continue;
+                }
+
                 float CornerDensity[8];
 
                 int32 CubeIndex = 0;
