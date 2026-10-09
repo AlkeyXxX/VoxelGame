@@ -40,6 +40,15 @@ struct FVoxelMarchingCubesDataSnapshot
 };
 
 
+/* Mesh results are applied on the Game Thread with a per-frame budget. */
+struct FPendingVoxelChunkMeshResult
+{
+    TWeakObjectPtr<AVoxelChunk> Chunk;
+    FVoxelMeshBuildOutput Output;
+    uint32 Version = 0;
+};
+
+
 UCLASS()
 class SMOOTHVOXEL_API AVoxelWorld : public AActor
 {
@@ -140,6 +149,11 @@ public:
     void CaptureMarchingCubesDataSnapshot(
         const FIntVector& ChunkCoord,
         FVoxelMarchingCubesDataSnapshot& OutSnapshot) const;
+
+    void QueueChunkMeshResult(
+        AVoxelChunk* Chunk,
+        FVoxelMeshBuildOutput&& Output,
+        uint32 Version);
 
     /*
      * Debug helpers.
@@ -278,7 +292,15 @@ public:
         BlueprintReadWrite,
         Category="Voxel|Streaming",
         meta=(ClampMin="1", ClampMax="32"))
-    int32 MaxChunkMeshRebuildsPerTick = 4;
+    int32 MaxChunkMeshRebuildsPerTick = 2;
+
+    /* Limit expensive ProceduralMesh section updates on the Game Thread. */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Streaming",
+        meta=(ClampMin="1", ClampMax="4"))
+    int32 MaxChunkMeshAppliesPerFrame = 1;
 
 
     /*
@@ -491,6 +513,7 @@ private:
 
     /* Unique chunk coordinates waiting for their mesh input to be snapshotted. */
     TArray<FIntVector> PendingChunkMeshRebuilds;
+    TArray<FPendingVoxelChunkMeshResult> PendingChunkMeshResults;
 
     TMap<int64, uint8> PersistentObjectStates;
     float TimeSinceLastAutoSave = 0.0f;
@@ -553,8 +576,11 @@ private:
 
     void QueueChunkNeighborhoodRebuilds(
         const FIntVector& ChunkCoord);
+    void QueueChunkFaceNeighborRebuilds(
+        const FIntVector& ChunkCoord);
 
     void ProcessPendingChunkMeshRebuilds();
+    void ProcessPendingChunkMeshResults();
 
 
     /*
