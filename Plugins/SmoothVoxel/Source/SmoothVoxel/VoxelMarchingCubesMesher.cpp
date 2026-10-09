@@ -294,20 +294,119 @@ float FVoxelMarchingCubesMesher::GetDensity(
         {
             for (int32 DX = 0; DX <= 1; ++DX)
             {
-                /*
-                 * Only original terrain contributes to the smooth 3D field.
-                 * Placed cubes are handled by their own cubic mesh and must
-                 * not pull nearby cave terrain sideways through walls.
-                 */
-                const EVoxelBlock Block =
+                const int32 BlockX = X - 1 + DX;
+                const int32 BlockY = Y - 1 + DY;
+                const int32 BlockZ = Z - 1 + DZ;
+
+                const EVoxelBlock TerrainBlock =
                     static_cast<EVoxelBlock>(
                         GetBlock(
                             Input,
-                            X - 1 + DX,
-                            Y - 1 + DY,
-                            Z - 1 + DZ));
+                            BlockX,
+                            BlockY,
+                            BlockZ));
 
-                if (IsVoxelSolid(Block))
+                if (IsVoxelSolid(TerrainBlock))
+                {
+                    Sum += 1.0f;
+                    continue;
+                }
+
+                /*
+                 * Player-placed cubes are not part of the base smooth field.
+                 * To close the tiny air gap between a placed cube and the
+                 * original terrain, count that cube only at density nodes
+                 * shared with a face-adjacent, unmodified solid terrain cell.
+                 *
+                 * This is directional: a cube touching terrain on its outer
+                 * side contributes there, but it does not pull terrain across
+                 * its opposite face into the interior of a tunnel/room.
+                 */
+                const EVoxelBlock CurrentBlock =
+                    static_cast<EVoxelBlock>(
+                        GetDensityBlock(
+                            Input,
+                            BlockX,
+                            BlockY,
+                            BlockZ));
+
+                if (!IsVoxelSolid(CurrentBlock))
+                {
+                    continue;
+                }
+
+                bool bTouchesTerrainAcrossNode = false;
+
+                if (DX == 0)
+                {
+                    bTouchesTerrainAcrossNode =
+                        IsVoxelSolid(
+                            GetBlock(
+                                Input,
+                                X,
+                                BlockY,
+                                BlockZ));
+                }
+                else
+                {
+                    bTouchesTerrainAcrossNode =
+                        IsVoxelSolid(
+                            GetBlock(
+                                Input,
+                                X - 1,
+                                BlockY,
+                                BlockZ));
+                }
+
+                if (!bTouchesTerrainAcrossNode)
+                {
+                    if (DY == 0)
+                    {
+                        bTouchesTerrainAcrossNode =
+                            IsVoxelSolid(
+                                GetBlock(
+                                    Input,
+                                    BlockX,
+                                    Y,
+                                    BlockZ));
+                    }
+                    else
+                    {
+                        bTouchesTerrainAcrossNode =
+                            IsVoxelSolid(
+                                GetBlock(
+                                    Input,
+                                    BlockX,
+                                    Y - 1,
+                                    BlockZ));
+                    }
+                }
+
+                if (!bTouchesTerrainAcrossNode)
+                {
+                    if (DZ == 0)
+                    {
+                        bTouchesTerrainAcrossNode =
+                            IsVoxelSolid(
+                                GetBlock(
+                                    Input,
+                                    BlockX,
+                                    BlockY,
+                                    Z));
+                    }
+                    else
+                    {
+                        bTouchesTerrainAcrossNode =
+                            IsVoxelSolid(
+                                GetBlock(
+                                    Input,
+                                    BlockX,
+                                    BlockY,
+                                    Z - 1));
+                    }
+                }
+
+                if (bTouchesTerrainAcrossNode)
                 {
                     Sum += 1.0f;
                 }
