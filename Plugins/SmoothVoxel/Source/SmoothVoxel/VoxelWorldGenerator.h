@@ -84,6 +84,9 @@ public:
     float GetTemperature(int32 WorldX, int32 WorldY) const;
     float GetMoisture(int32 WorldX, int32 WorldY) const;
 
+    /* Highest water-block Z for this column, or INDEX_NONE when dry. */
+    int32 GetWaterSurfaceBlockZ(int32 WorldX, int32 WorldY, int32 SurfaceHeight) const;
+
     EVoxelBiome GetBiome(
         int32 WorldX,
         int32 WorldY,
@@ -103,4 +106,7 @@ private:
     float GetLandformNoise(
         int32 WorldX,
         int32 WorldY) const;
+
+    bool IsRiverMask(int32 WorldX, int32 WorldY) const;
+    bool IsLakeMask(int32 WorldX, int32 WorldY) const;
 };
