@@ -694,109 +694,134 @@ void FVoxelMarchingCubesMesher::Build(
                                 Z,
                                 CornerDensity);
 
+                        const FVector Gradient =
+                            ComputeGradient(
+                                Densities,
+                                Size,
+                                SurfacePosition);
+
                         /*
-                         * A placed block must stay visible, but the smooth
-                         * terrain should still connect to its sides. Instead
-                         * of removing the MC cell above it (which leaves a
-                         * hole), lower vertices over its footprint by 1/13
-                         * of a voxel. This is about 7.7% of block height and
-                         * creates a subtle, continuous undercut.
-                         *
-                         * Check both sides of an integer X/Y boundary so
-                         * shared edge vertices receive the same offset no
-                         * matter which MC cell creates them first.
+                         * Undercut applies only to upward-facing ground.
+                         * Do not move vertical cave walls or downward-facing
+                         * cave ceilings: moving those vertices along Z can
+                         * stretch triangles and open holes into the terrain.
+                         * Blend the offset near sloped ground edges.
                          */
+                        FVector SurfaceNormal = -Gradient;
+                        const bool bHasSurfaceNormal =
+                            SurfaceNormal.Normalize();
+
+                        const float UpFacingWeight =
+                            bHasSurfaceNormal
+                                ? FMath::Clamp(
+                                    (SurfaceNormal.Z - 0.25f) / 0.65f,
+                                    0.0f,
+                                    1.0f)
+                                : 0.0f;
+
                         FVector MeshPosition = SurfacePosition;
-                        const int32 SurfaceCellZ =
-                            FMath::FloorToInt(SurfacePosition.Z);
-                        const int32 CandidateBlockZ[2] =
-                        {
-                            SurfaceCellZ,
-                            SurfaceCellZ - 1
-                        };
 
-                        const int32 FloorX =
-                            FMath::FloorToInt(SurfacePosition.X);
-                        const int32 FloorY =
-                            FMath::FloorToInt(SurfacePosition.Y);
-                        const int32 RoundedX =
-                            FMath::RoundToInt(SurfacePosition.X);
-                        const int32 RoundedY =
-                            FMath::RoundToInt(SurfacePosition.Y);
-                        const bool bOnXBoundary =
-                            FMath::Abs(
-                                SurfacePosition.X -
-                                static_cast<float>(RoundedX)) < 0.0001f;
-                        const bool bOnYBoundary =
-                            FMath::Abs(
-                                SurfacePosition.Y -
-                                static_cast<float>(RoundedY)) < 0.0001f;
-
-                        const int32 CandidateX[2] =
+                        if (UpFacingWeight > 0.0f)
                         {
-                            FloorX,
-                            bOnXBoundary ? RoundedX - 1 : FloorX
-                        };
-                        const int32 CandidateY[2] =
-                        {
-                            FloorY,
-                            bOnYBoundary ? RoundedY - 1 : FloorY
-                        };
-                        const int32 CandidateXCount =
-                            bOnXBoundary ? 2 : 1;
-                        const int32 CandidateYCount =
-                            bOnYBoundary ? 2 : 1;
-
-                        bool bFoundPlacedBlock = false;
-                        float UndercutTargetZ = 0.0f;
-
-                        /*
-                         * A vertex can sit just below the block's top plane
-                         * or just above it, so test the voxel at Floor(Z) and
-                         * the voxel directly below. The shared vertex then
-                         * gets the same target no matter which MC cell owns
-                         * its edge cache.
-                         */
-                        for (int32 CZ = 0; CZ < 2; ++CZ)
-                        {
-                            const int32 BlockZ = CandidateBlockZ[CZ];
-                            if (BlockZ < -1 || BlockZ > Size)
+                            const int32 SurfaceCellZ =
+                                FMath::FloorToInt(SurfacePosition.Z);
+                            const int32 CandidateBlockZ[2] =
                             {
-                                continue;
-                            }
+                                SurfaceCellZ,
+                                SurfaceCellZ - 1
+                            };
 
-                            for (int32 CY = 0;
-                                 CY < CandidateYCount;
-                                 ++CY)
+                            const int32 FloorX =
+                                FMath::FloorToInt(SurfacePosition.X);
+                            const int32 FloorY =
+                                FMath::FloorToInt(SurfacePosition.Y);
+                            const int32 RoundedX =
+                                FMath::RoundToInt(SurfacePosition.X);
+                            const int32 RoundedY =
+                                FMath::RoundToInt(SurfacePosition.Y);
+                            const bool bOnXBoundary =
+                                FMath::Abs(
+                                    SurfacePosition.X -
+                                    static_cast<float>(RoundedX)) < 0.0001f;
+                            const bool bOnYBoundary =
+                                FMath::Abs(
+                                    SurfacePosition.Y -
+                                    static_cast<float>(RoundedY)) < 0.0001f;
+
+                            const int32 CandidateX[2] =
                             {
-                                for (int32 CX = 0;
-                                     CX < CandidateXCount;
-                                     ++CX)
+                                FloorX,
+                                bOnXBoundary ? RoundedX - 1 : FloorX
+                            };
+                            const int32 CandidateY[2] =
+                            {
+                                FloorY,
+                                bOnYBoundary ? RoundedY - 1 : FloorY
+                            };
+                            const int32 CandidateXCount =
+                                bOnXBoundary ? 2 : 1;
+                            const int32 CandidateYCount =
+                                bOnYBoundary ? 2 : 1;
+
+                            bool bFoundPlacedBlock = false;
+                            float UndercutTargetZ = 0.0f;
+
+                            /*
+                             * Only consider placed blocks whose top is at
+                             * or below this surface point. This allows points
+                             * just under the top plane to find the block in
+                             * their current Z cell, without mistaking an
+                             * arbitrary wall block at the same height for
+                             * ground underneath the vertex.
+                             */
+                            for (int32 CZ = 0; CZ < 2; ++CZ)
+                            {
+                                const int32 BlockZ = CandidateBlockZ[CZ];
+                                if (BlockZ < -1 || BlockZ > Size)
                                 {
-                                    const int32 BlockX = CandidateX[CX];
-                                    const int32 BlockY = CandidateY[CY];
+                                    continue;
+                                }
 
-                                    const bool bTerrainHasBlock =
-                                        IsVoxelSolid(
-                                            GetBlock(
-                                                Input,
-                                                BlockX,
-                                                BlockY,
-                                                BlockZ));
-
-                                    const bool bDensityHasBlock =
-                                        IsVoxelSolid(
-                                            GetDensityBlock(
-                                                Input,
-                                                BlockX,
-                                                BlockY,
-                                                BlockZ));
-
-                                    if (!bTerrainHasBlock && bDensityHasBlock)
+                                for (int32 CY = 0;
+                                     CY < CandidateYCount;
+                                     ++CY)
+                                {
+                                    for (int32 CX = 0;
+                                         CX < CandidateXCount;
+                                         ++CX)
                                     {
+                                        const int32 BlockX = CandidateX[CX];
+                                        const int32 BlockY = CandidateY[CY];
+
+                                        const bool bTerrainHasBlock =
+                                            IsVoxelSolid(
+                                                GetBlock(
+                                                    Input,
+                                                    BlockX,
+                                                    BlockY,
+                                                    BlockZ));
+
+                                        const bool bDensityHasBlock =
+                                            IsVoxelSolid(
+                                                GetDensityBlock(
+                                                    Input,
+                                                    BlockX,
+                                                    BlockY,
+                                                    BlockZ));
+
+                                        if (bTerrainHasBlock || !bDensityHasBlock)
+                                        {
+                                            continue;
+                                        }
+
                                         const float CandidateTargetZ =
                                             static_cast<float>(BlockZ + 1) -
                                             1.0f / 13.0f;
+
+                                        if (SurfacePosition.Z < CandidateTargetZ)
+                                        {
+                                            continue;
+                                        }
 
                                         if (!bFoundPlacedBlock ||
                                             CandidateTargetZ > UndercutTargetZ)
@@ -807,30 +832,30 @@ void FVoxelMarchingCubesMesher::Build(
                                     }
                                 }
                             }
-                        }
 
-                        if (bFoundPlacedBlock)
-                        {
-                            /*
-                             * Put the smooth surface at least 1/13 voxel
-                             * below the placed block top. Using a target
-                             * plane (rather than just subtracting an offset)
-                             * guarantees the cube top cannot remain covered.
-                             */
-                            MeshPosition.Z =
-                                FMath::Min(
-                                    MeshPosition.Z,
-                                    UndercutTargetZ);
+                            if (bFoundPlacedBlock)
+                            {
+                                /*
+                                 * On flat ground use the full 1/13-voxel
+                                 * undercut. Sloped surfaces transition into
+                                 * it progressively; vertical surfaces get no
+                                 * vertical deformation at all.
+                                 */
+                                const float TargetZ =
+                                    FMath::Min(
+                                        MeshPosition.Z,
+                                        UndercutTargetZ);
+
+                                MeshPosition.Z =
+                                    FMath::Lerp(
+                                        MeshPosition.Z,
+                                        TargetZ,
+                                        UpFacingWeight);
+                            }
                         }
 
                         const int32 VertexIndex =
                             Output.Vertices.Num();
-
-                        const FVector Gradient =
-                            ComputeGradient(
-                                Densities,
-                                Size,
-                                SurfacePosition);
 
                         Output.Vertices.Add(
                             MeshPosition *
