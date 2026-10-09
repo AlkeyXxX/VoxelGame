@@ -50,9 +50,9 @@ The planner is deliberately data-only at this stage. It now builds a determinist
 
 F2 now also builds a non-colliding `UProceduralMeshComponent` road surface from the planned routes:
 
-- Main, connector and local roads are separate mesh sections with independent width controls in voxel blocks. Current defaults are 10 blocks for main roads, 6 for connectors, and 3.5 for local/gravel access roads.
+- Main, connector and local roads are separate mesh sections with independent width controls in voxel blocks. Current defaults are 10 blocks for main roads, 6 for connectors, and 3.5 for local/gravel access roads. Mesh collision is enabled by default using async cooking; navigation-mesh registration remains disabled.
 - Centerlines are resampled at short intervals; both road shoulders are sampled against the voxel terrain to reduce buried edges. Where a backbone path crosses a detected water span, the preview interpolates a bridge deck between dry banks instead of dipping to the waterline. POIs near an existing backbone road can connect to that road, and local access ribbons stop near the POI footprint rather than at its center. Local access roads are not allowed to cross a detected water span.
-- The road surface and bridge deck are visual geometry only: they do not modify voxel blocks, create collision, or yet generate A21-style road tiles, terrain cut/fill, bridge supports, intersections, or driveway transitions.
+- The road ribbon and bridge-deck preview now generates triangle collision by default, so the player can stand/walk on the surface and cross water spans. Toggle `bEnableRWGRoadCollision` to disable it. The mesh still does not modify voxel blocks; terrain cut/fill, bridge supports, intersections, and driveway transitions remain future work.
 - In the `VoxelWorld` Details panel, optionally assign `RWGRoadMaterial`; otherwise the mesh uses Unreal's default surface material. Tune `RWGRoadWidthMainBlocks`, `RWGRoadWidthConnectorBlocks`, and `RWGRoadWidthLocalBlocks` as needed. Widths are in voxel blocks: with `VoxelSize=100 cm`, for example, main width 10 is about 10 metres. Turn off `bBuildRWGRoadSurface` to suppress the mesh while keeping the CSV/debug plan.
 
 ## Validation checklist
