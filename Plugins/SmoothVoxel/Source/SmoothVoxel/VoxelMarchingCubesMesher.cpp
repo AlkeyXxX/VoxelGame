@@ -8,7 +8,16 @@
 
 namespace
 {
-    constexpr float IsoLevel = 0.5f;
+    /*
+     * Density samples are averages of eight binary voxel values, so every
+     * sample is a multiple of 1/8. An exact 0.5 iso-level can put MC vertices
+     * directly on density nodes; several edge caches then create coincident
+     * vertices and degenerate triangles. The triangle cleanup may discard
+     * those triangles and leave visible holes. A nearby non-sample threshold
+     * keeps the same solid/air classification for all node values while
+     * moving intersections a small, non-zero distance off the nodes.
+     */
+    constexpr float IsoLevel = 0.49f;
 
     FORCEINLINE int32 MarchingCubesBlockIndex(
         int32 X,
