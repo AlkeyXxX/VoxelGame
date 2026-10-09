@@ -831,11 +831,6 @@ void FVoxelMarchingCubesMesher::Build(
 
                         Output.Vertices.Add(
                             SurfacePosition *
-                            Input.VoxelSize);                        const int32 VertexIndex =
-                            Output.Vertices.Num();
-
-                        Output.Vertices.Add(
-                            MeshPosition *
                             Input.VoxelSize);
 
                         FVector VertexNormal = -Gradient;
