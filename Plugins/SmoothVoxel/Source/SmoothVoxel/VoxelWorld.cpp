@@ -255,7 +255,7 @@ AVoxelWorld::AVoxelWorld()
      * при смене чанка или пока есть недогруженные chunks.
      */
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f;
+    PrimaryActorTick.TickInterval = 0.0f;
 }
 
 
@@ -365,7 +365,20 @@ void AVoxelWorld::Tick(
         }
     }
 
-    UpdateChunkStreaming();
+    /*
+     * Keep streaming decisions throttled to 10 Hz, but drain the mesh
+     * rebuild queue every frame so each frame handles only a small amount
+     * of synchronous snapshot work.
+     */
+    TimeSinceLastStreamingUpdate += DeltaSeconds;
+    if (TimeSinceLastStreamingUpdate >= 0.1f)
+    {
+        TimeSinceLastStreamingUpdate =
+            FMath::Fmod(TimeSinceLastStreamingUpdate, 0.1f);
+        UpdateChunkStreaming();
+    }
+
+    ProcessPendingChunkMeshRebuilds();
     UpdateUnderwaterEffect();
 
     if (AutoSaveInterval > 0.0f)
@@ -845,8 +858,6 @@ void AVoxelWorld::UpdateChunkStreaming()
             QueueChunkNeighborhoodRebuilds(UnloadedCoord);
         }
     }
-
-    ProcessPendingChunkMeshRebuilds();
 
     if (!bCenterChanged &&
         LoadedThisTick == 0)
