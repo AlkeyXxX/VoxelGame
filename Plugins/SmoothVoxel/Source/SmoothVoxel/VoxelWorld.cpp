@@ -577,7 +577,7 @@ void AVoxelWorld::Tick(
         UpdateChunkStreaming();
     }
 
-    ProcessPendingChunkMeshResults();
+    ProcessPendingMeshUploads();
     ProcessPendingChunkMeshRebuilds();
     UpdateUnderwaterEffect();
 
@@ -2137,36 +2137,154 @@ void AVoxelWorld::QueueChunkMeshResult(
 }
 
 
-void AVoxelWorld::ProcessPendingChunkMeshResults()
+void AVoxelWorld::QueueFarLODMeshResult(
+    UProceduralMeshComponent* Mesh,
+    FVoxelTerrainLODMeshOutput&& Output,
+    uint32 GenerationVersion)
 {
-    const int32 ApplyBudget =
-        FMath::Clamp(MaxChunkMeshAppliesPerFrame, 1, 4);
-
-    int32 AppliedThisFrame = 0;
-
-    while (PendingChunkMeshResults.Num() > 0 &&
-           AppliedThisFrame < ApplyBudget)
+    if (!Mesh ||
+        GenerationVersion != FarLODGenerationVersion)
     {
-        FPendingVoxelChunkMeshResult Pending =
-            MoveTemp(PendingChunkMeshResults[0]);
+        return;
+    }
 
-        PendingChunkMeshResults.RemoveAt(0, 1, false);
+    /* Coalesce outputs so each LOD component has at most one pending upload. */
+    for (FPendingVoxelLODMeshResult& Pending : PendingVoxelLODMeshResults)
+    {
+        if (Pending.Mesh.Get() == Mesh)
+        {
+            Pending.GenerationVersion = GenerationVersion;
+            Pending.Output = MoveTemp(Output);
+            return;
+        }
+    }
 
-        AVoxelChunk* Chunk = Pending.Chunk.Get();
+    FPendingVoxelLODMeshResult& Pending =
+        PendingVoxelLODMeshResults.AddDefaulted_GetRef();
 
-        if (!Chunk ||
-            Chunk->GetMeshGenerationVersion() != Pending.Version ||
-            GetChunk(Chunk->GetChunkCoord()) != Chunk)
+    Pending.Mesh = Mesh;
+    Pending.GenerationVersion = GenerationVersion;
+    Pending.Output = MoveTemp(Output);
+}
+
+
+void AVoxelWorld::ProcessPendingMeshUploads()
+{
+    const int32 UploadBudget =
+        FMath::Clamp(MaxMeshSectionUploadsPerFrame, 1, 2);
+
+    int32 UploadedThisFrame = 0;
+
+    while (UploadedThisFrame < UploadBudget)
+    {
+        bool bUploaded = false;
+
+        /*
+         * Near chunks take priority over far LOD. Apply only one current
+         * result at a time; stale outputs are discarded without touching UObjects.
+         */
+        int32 InspectedChunkResults = 0;
+
+        while (PendingChunkMeshResults.Num() > 0 &&
+               InspectedChunkResults < 8)
+        {
+            ++InspectedChunkResults;
+
+            FPendingVoxelChunkMeshResult Pending =
+                MoveTemp(PendingChunkMeshResults[0]);
+
+            PendingChunkMeshResults.RemoveAt(0, 1, false);
+
+            AVoxelChunk* Chunk = Pending.Chunk.Get();
+
+            if (!Chunk ||
+                Chunk->GetMeshGenerationVersion() != Pending.Version ||
+                GetChunk(Chunk->GetChunkCoord()) != Chunk)
+            {
+                continue;
+            }
+
+            Chunk->ApplyMesh(
+                MoveTemp(Pending.Output),
+                Pending.Version,
+                true);
+
+            bUploaded = true;
+            ++UploadedThisFrame;
+            break;
+        }
+
+        if (bUploaded)
         {
             continue;
         }
 
-        Chunk->ApplyMesh(
-            MoveTemp(Pending.Output),
-            Pending.Version,
-            true);
+        int32 InspectedLODResults = 0;
 
-        ++AppliedThisFrame;
+        while (PendingVoxelLODMeshResults.Num() > 0 &&
+               InspectedLODResults < 8)
+        {
+            ++InspectedLODResults;
+
+            FPendingVoxelLODMeshResult Pending =
+                MoveTemp(PendingVoxelLODMeshResults[0]);
+
+            PendingVoxelLODMeshResults.RemoveAt(0, 1, false);
+
+            UProceduralMeshComponent* Mesh = Pending.Mesh.Get();
+
+            if (!Mesh ||
+                Pending.GenerationVersion != FarLODGenerationVersion)
+            {
+                continue;
+            }
+
+            Mesh->ClearMeshSection(0);
+            Mesh->ClearMeshSection(1);
+
+            if (Pending.Output.Vertices.Num() > 0 &&
+                Pending.Output.Triangles.Num() > 0)
+            {
+                Mesh->CreateMeshSection_LinearColor(
+                    0,
+                    Pending.Output.Vertices,
+                    Pending.Output.Triangles,
+                    Pending.Output.Normals,
+                    Pending.Output.UV0,
+                    TArray<FVector2D>(),
+                    TArray<FVector2D>(),
+                    TArray<FVector2D>(),
+                    Pending.Output.VertexColors,
+                    TArray<FProcMeshTangent>(),
+                    false);
+            }
+
+            if (Pending.Output.WaterVertices.Num() > 0 &&
+                Pending.Output.WaterTriangles.Num() > 0)
+            {
+                Mesh->CreateMeshSection_LinearColor(
+                    1,
+                    Pending.Output.WaterVertices,
+                    Pending.Output.WaterTriangles,
+                    Pending.Output.WaterNormals,
+                    Pending.Output.WaterUV0,
+                    TArray<FVector2D>(),
+                    TArray<FVector2D>(),
+                    TArray<FVector2D>(),
+                    Pending.Output.WaterVertexColors,
+                    TArray<FProcMeshTangent>(),
+                    false);
+            }
+
+            bUploaded = true;
+            ++UploadedThisFrame;
+            break;
+        }
+
+        if (!bUploaded)
+        {
+            break;
+        }
     }
 }
 
@@ -2754,6 +2872,14 @@ void AVoxelWorld::ClearFarLOD()
 {
     ++FarLODGenerationVersion;
 
+    if (FarLODCancellationToken.IsValid())
+    {
+        FarLODCancellationToken->AtomicSet(true);
+        FarLODCancellationToken.Reset();
+    }
+
+    PendingVoxelLODMeshResults.Empty();
+
     UProceduralMeshComponent* FarMeshes[] =
     {
         FarLOD1Mesh,
@@ -2834,6 +2960,24 @@ void AVoxelWorld::UpdateFarLOD(
     const FIntVector& CenterChunk)
 {
     ++FarLODGenerationVersion;
+
+    /*
+     * Do not let old large-ring builds continue consuming the worker pool
+     * after the player enters a new chunk. Their results would be discarded
+     * anyway, so cancel the previous generation cooperatively.
+     */
+    if (FarLODCancellationToken.IsValid())
+    {
+        FarLODCancellationToken->AtomicSet(true);
+    }
+
+    FarLODCancellationToken =
+        MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(false);
+
+    const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> LocalCancellationToken =
+        FarLODCancellationToken;
+
+    PendingVoxelLODMeshResults.Empty();
 
     const uint32 LocalGeneration =
         FarLODGenerationVersion;
@@ -2929,7 +3073,8 @@ void AVoxelWorld::UpdateFarLOD(
             LODVoxelSize,
             LODBeachWidth,
             LODSeaLevel,
-            LocalGeneration
+            LocalGeneration,
+            LocalCancellationToken
         ](
             UProceduralMeshComponent* Mesh,
             int32 SampleStep,
@@ -2976,6 +3121,9 @@ void AVoxelWorld::UpdateFarLOD(
             BuildInput.OuterRadiusChunks =
                 OuterRadius;
 
+            BuildInput.CancellationToken =
+                LocalCancellationToken;
+
             TWeakObjectPtr<UProceduralMeshComponent> WeakMesh(
                 Mesh);
 
@@ -2994,6 +3142,12 @@ void AVoxelWorld::UpdateFarLOD(
                         BuildInput,
                         Output);
 
+                    if (BuildInput.CancellationToken.IsValid() &&
+                        BuildInput.CancellationToken->AtomicRead())
+                    {
+                        return;
+                    }
+
                     AsyncTask(
                         ENamedThreads::GameThread,
                         [
@@ -3003,58 +3157,20 @@ void AVoxelWorld::UpdateFarLOD(
                             LocalGeneration
                         ]() mutable
                         {
-                            if (!WeakWorld.IsValid() ||
-                                WeakWorld->FarLODGenerationVersion !=
-                                    LocalGeneration ||
-                                !WeakMesh.IsValid())
+                            AVoxelWorld* World = WeakWorld.Get();
+                            UProceduralMeshComponent* Mesh = WeakMesh.Get();
+
+                            if (!World ||
+                                !Mesh ||
+                                World->FarLODGenerationVersion != LocalGeneration)
                             {
                                 return;
                             }
 
-                            UProceduralMeshComponent* Mesh =
-                                WeakMesh.Get();
-
-                            if (!Mesh)
-                            {
-                                return;
-                            }
-
-                            Mesh->ClearMeshSection(0);
-                            Mesh->ClearMeshSection(1);
-
-                            if (Output.Vertices.Num() > 0 &&
-                                Output.Triangles.Num() > 0)
-                            {
-                                Mesh->CreateMeshSection_LinearColor(
-                                    0,
-                                    Output.Vertices,
-                                    Output.Triangles,
-                                    Output.Normals,
-                                    Output.UV0,
-                                    TArray<FVector2D>(),
-                                    TArray<FVector2D>(),
-                                    TArray<FVector2D>(),
-                                    Output.VertexColors,
-                                    TArray<FProcMeshTangent>(),
-                                    false);
-                            }
-
-                            if (Output.WaterVertices.Num() > 0 &&
-                                Output.WaterTriangles.Num() > 0)
-                            {
-                                Mesh->CreateMeshSection_LinearColor(
-                                    1,
-                                    Output.WaterVertices,
-                                    Output.WaterTriangles,
-                                    Output.WaterNormals,
-                                    Output.WaterUV0,
-                                    TArray<FVector2D>(),
-                                    TArray<FVector2D>(),
-                                    TArray<FVector2D>(),
-                                    Output.WaterVertexColors,
-                                    TArray<FProcMeshTangent>(),
-                                    false);
-                            }
+                            World->QueueFarLODMeshResult(
+                                Mesh,
+                                MoveTemp(Output),
+                                LocalGeneration);
                         });
                 });
         };
