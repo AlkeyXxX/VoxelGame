@@ -177,7 +177,7 @@ void FVoxelTerrainLODMesher::Build(
     FVoxelTerrainLODMeshOutput& Output)
 {
     if (Input.CancellationToken.IsValid() &&
-        Input.CancellationToken->AtomicRead())
+        static_cast<bool>(*Input.CancellationToken))
     {
         return;
     }
@@ -275,7 +275,7 @@ void FVoxelTerrainLODMesher::Build(
     for (int32 Y = 0; Y < CountY; ++Y)
     {
         if (Input.CancellationToken.IsValid() &&
-            Input.CancellationToken->AtomicRead())
+            static_cast<bool>(*Input.CancellationToken))
         {
             return;
         }
@@ -351,7 +351,7 @@ void FVoxelTerrainLODMesher::Build(
     for (int32 Y = 0; Y < CountY; ++Y)
     {
         if (Input.CancellationToken.IsValid() &&
-            Input.CancellationToken->AtomicRead())
+            static_cast<bool>(*Input.CancellationToken))
         {
             return;
         }
@@ -435,7 +435,7 @@ void FVoxelTerrainLODMesher::Build(
     for (int32 Y = 0; Y < CountY; ++Y)
     {
         if (Input.CancellationToken.IsValid() &&
-            Input.CancellationToken->AtomicRead())
+            static_cast<bool>(*Input.CancellationToken))
         {
             return;
         }
@@ -480,7 +480,7 @@ void FVoxelTerrainLODMesher::Build(
     for (int32 Y = 0; Y < CountY - 1; ++Y)
     {
         if (Input.CancellationToken.IsValid() &&
-            Input.CancellationToken->AtomicRead())
+            static_cast<bool>(*Input.CancellationToken))
         {
             return;
         }
