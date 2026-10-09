@@ -464,6 +464,7 @@ void AVoxelWorld::GenerateWorld()
     }
 
     Chunks.Empty();
+    PendingChunkMeshRebuilds.Empty();
 
     /*
      * GenerateWorld() означает полную генерацию мира заново,
@@ -1011,6 +1012,8 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
     }
 
     const FIntVector ChunkCoord = Chunk->GetChunkCoord();
+    const uint32 ExpectedDataGenerationVersion =
+        Chunk->GetDataGenerationVersion();
     const FVoxelWorldGenerator GeneratorCopy = WorldGenerator;
     const int32 LocalChunkSize = ChunkSize;
     const int32 LocalSeaLevel = SeaLevel;
@@ -1032,6 +1035,7 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
             WeakWorld,
             WeakChunk,
             GeneratorCopy,
+            ExpectedDataGenerationVersion,
             ChunkCoord,
             LocalChunkSize,
             LocalSeaLevel,
@@ -1061,6 +1065,7 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
                 [
                     WeakWorld,
                     WeakChunk,
+                    ExpectedDataGenerationVersion,
                     ChunkCoord,
                     Blocks = MoveTemp(Blocks),
                     BaseBlocks = MoveTemp(BaseBlocks),
@@ -1072,7 +1077,9 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
                     AVoxelChunk* ReadyChunk = WeakChunk.Get();
 
                     if (!World || !ReadyChunk ||
-                        World->GetChunk(ChunkCoord) != ReadyChunk)
+                        World->GetChunk(ChunkCoord) != ReadyChunk ||
+                        ReadyChunk->GetDataGenerationVersion() !=
+                            ExpectedDataGenerationVersion)
                     {
                         return;
                     }
@@ -1881,11 +1888,14 @@ void AVoxelWorld::ProcessPendingChunkMeshRebuilds()
     const int32 RebuildBudget =
         FMath::Clamp(MaxChunkMeshRebuildsPerTick, 1, 32);
 
+    int32 ProcessedEntries = 0;
     int32 RebuiltThisTick = 0;
 
     while (PendingChunkMeshRebuilds.Num() > 0 &&
-           RebuiltThisTick < RebuildBudget)
+           ProcessedEntries < RebuildBudget)
     {
+        ++ProcessedEntries;
+
         const FIntVector Coord =
             PendingChunkMeshRebuilds[0];
 
