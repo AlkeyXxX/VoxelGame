@@ -33,7 +33,8 @@ struct FVoxelMarchingCubesBuildInput
         Blocks.SetNumZeroed(
             Side * Side * Side);
 
-
+        // Only generated world snapshots provide this optional smooth field.
+        TerrainSurfaceHeights.Reset();
     }
 };
 
