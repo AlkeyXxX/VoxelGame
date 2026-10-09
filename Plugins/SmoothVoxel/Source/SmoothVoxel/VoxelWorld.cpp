@@ -708,6 +708,7 @@ void AVoxelWorld::UpdateChunkStreaming()
         }
 
         Chunks.Remove(Coord);
+        PendingChunkMeshRebuilds.Remove(Coord);
     }
 
     TArray<FIntVector> Candidates;
@@ -833,33 +834,18 @@ void AVoxelWorld::UpdateChunkStreaming()
     }
 
     /*
-     * После выгрузки соседний Full chunk мог потерять своего соседа.
+     * Chunks which lost a neighbour are queued rather than all being
+     * snapshotted in one frame. This is especially important at vehicle speed.
      */
     if (ChunksToUnload.Num() > 0)
     {
-        for (const FIntVector& UnloadedCoord :
-            ChunksToUnload)
+        for (const FIntVector& UnloadedCoord : ChunksToUnload)
         {
-            for (int32 Z = -1; Z <= 1; ++Z)
-            {
-                for (int32 Y = -1; Y <= 1; ++Y)
-                {
-                    for (int32 X = -1; X <= 1; ++X)
-                    {
-                        const FIntVector NeighborCoord =
-                            UnloadedCoord +
-                            FIntVector(X, Y, Z);
-
-                        if (AVoxelChunk* Neighbor =
-                                GetChunk(NeighborCoord))
-                        {
-                            Neighbor->RebuildMesh();
-                        }
-                    }
-                }
-            }
+            QueueChunkNeighborhoodRebuilds(UnloadedCoord);
         }
     }
+
+    ProcessPendingChunkMeshRebuilds();
 
     if (!bCenterChanged &&
         LoadedThisTick == 0)
@@ -1097,8 +1083,9 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
                         MoveTemp(Biomes),
                         MoveTemp(ModificationFlags));
 
-                    /* Neighbour snapshots are gathered only after data commits. */
-                    World->RebuildChunkAndNeighbors(ChunkCoord);
+                    /* Render the new chunk immediately; spread neighbour rebuilds across ticks. */
+                    ReadyChunk->RebuildMesh();
+                    World->QueueChunkNeighborhoodRebuilds(ChunkCoord);
                 });
         });
 }
@@ -1761,12 +1748,9 @@ void AVoxelWorld::SetBlockInternal(
         Block);
 
 
-    /*
-     * Перестраиваем изменённый chunk
-     * и его соседей.
-     */
-    RebuildChunkAndNeighbors(
-        ChunkCoord);
+    /* Rebuild the edited chunk immediately; neighbour seams are coalesced and queued. */
+    Chunk->RebuildMesh();
+    QueueChunkNeighborhoodRebuilds(ChunkCoord);
 }
 
 
@@ -1838,10 +1822,84 @@ void AVoxelWorld::RebuildChunkAndNeighbors(
                     GetChunk(
                         ChunkCoord + FIntVector(X, Y, Z)))
                 {
-                    Chunk->RebuildMesh();
+                    if (Chunk->HasGeneratedData())
+                    {
+                        Chunk->RebuildMesh();
+                    }
                 }
             }
         }
+    }
+}
+
+
+/*
+ * Coalesce streaming/edit neighbour updates. Face neighbours are inserted
+ * before edge/corner neighbours because they are the most visible seams.
+ */
+void AVoxelWorld::QueueChunkNeighborhoodRebuilds(
+    const FIntVector& ChunkCoord)
+{
+    for (int32 Distance = 1; Distance <= 3; ++Distance)
+    {
+        for (int32 Z = -1; Z <= 1; ++Z)
+        {
+            for (int32 Y = -1; Y <= 1; ++Y)
+            {
+                for (int32 X = -1; X <= 1; ++X)
+                {
+                    if (FMath::Abs(X) +
+                        FMath::Abs(Y) +
+                        FMath::Abs(Z) != Distance)
+                    {
+                        continue;
+                    }
+
+                    const FIntVector NeighborCoord =
+                        ChunkCoord + FIntVector(X, Y, Z);
+
+                    AVoxelChunk* Neighbor = GetChunk(NeighborCoord);
+
+                    if (!Neighbor || !Neighbor->HasGeneratedData())
+                    {
+                        continue;
+                    }
+
+                    if (!PendingChunkMeshRebuilds.Contains(NeighborCoord))
+                    {
+                        PendingChunkMeshRebuilds.Add(NeighborCoord);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+void AVoxelWorld::ProcessPendingChunkMeshRebuilds()
+{
+    const int32 RebuildBudget =
+        FMath::Clamp(MaxChunkMeshRebuildsPerTick, 1, 32);
+
+    int32 RebuiltThisTick = 0;
+
+    while (PendingChunkMeshRebuilds.Num() > 0 &&
+           RebuiltThisTick < RebuildBudget)
+    {
+        const FIntVector Coord =
+            PendingChunkMeshRebuilds[0];
+
+        PendingChunkMeshRebuilds.RemoveAt(0, 1, false);
+
+        AVoxelChunk* Chunk = GetChunk(Coord);
+
+        if (!Chunk || !Chunk->HasGeneratedData())
+        {
+            continue;
+        }
+
+        Chunk->RebuildMesh();
+        ++RebuiltThisTick;
     }
 }
 
