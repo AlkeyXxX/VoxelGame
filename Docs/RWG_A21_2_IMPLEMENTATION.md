@@ -33,6 +33,19 @@ These are procedural approximations inspired by 7 Days to Die Alpha 21.2, not a 
 - Map-wide export/visual comparison against a reference A21.2 map.
 - Automated Unreal Engine 4.27 compile and runtime validation.
 
+## RWG planner implemented in the recovery branch
+
+The first map-wide planning pass is now available from `AVoxelWorld`:
+
+- Press **F2** in PIE to build a deterministic layout report for the current seed.
+- The planner samples the existing terrain/water generator on a configurable coarse grid, prefers buildable dry settlement sites, and increases route cost on steep ground.
+- It places settlement hubs (city/town/village/rural/industrial categories), biome-tagged POI markers, a settlement road backbone, a limited number of connector loops, and local roads from each POI to its hub.
+- Road paths use A* over the sampled cost grid. Deep water is avoided; narrow higher-elevation carved channels are expensive rather than strictly forbidden.
+- The export is written to `Saved/RWG/WorldLayout.csv`; the planner summary appears in the Output Log and the debug overlay is drawn temporarily in the current world.
+- Default test scale: 12 settlement hubs, 72 POIs, 32-block route-grid spacing. These are tuning defaults, not asserted A21.2 source values.
+
+The planner is deliberately data-only at this stage. It does **not** yet change voxel blocks, create road meshes, spawn prefabs, reproduce A21 district zoning, or parse the original game's `rwgmixer.xml`. Treat the output as a deterministic layout prototype to inspect and calibrate, not a finished A21 clone. The layout build is triggered explicitly with F2 and is not run automatically when a world starts.
+
 ## Validation checklist
 
 1. Open `MyVoxelGame.uproject` with Unreal Engine 4.27 and allow C++ modules to rebuild if prompted.
