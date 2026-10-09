@@ -291,14 +291,10 @@ void FVoxelTerrainLODMesher::Build(
             Input.SampleStep) + 1;
 
     TArray<float> Heights;
-    TArray<uint8> InlandWaterMask;
     TArray<float> SurfaceHeights;
     TArray<FLinearColor> Colors;
 
     Heights.SetNumZeroed(
-        CountX * CountY);
-
-    InlandWaterMask.SetNumZeroed(
         CountX * CountY);
 
     SurfaceHeights.SetNumZeroed(
@@ -377,11 +373,12 @@ void FVoxelTerrainLODMesher::Build(
             Heights[Index] =
                 EffectiveHeight;
 
-            InlandWaterMask[Index] =
-                WaterColumn.bCarved ? 1 : 0;
+            const bool bSubmergedBed =
+                WaterColumn.WaterSurfaceBlockZ != INDEX_NONE &&
+                EffectiveHeight <
+                    static_cast<float>(WaterColumn.WaterSurfaceBlockZ);
 
-            if (WaterColumn.bCarved ||
-                WaterColumn.bShoreAdjusted)
+            if (bSubmergedBed)
             {
                 Colors[Index] =
                     FLinearColor(
@@ -652,114 +649,228 @@ void FVoxelTerrainLODMesher::Build(
             Output.Normals[I11] += N0 + N1;
             Output.Normals[I01] += N1;
 
+
+        }
+    }
+
+    /*
+     * Water is meshed on its own finer grid instead of borrowing terrain
+     * LOD vertices. A narrow river can pass between two widely-spaced
+     * terrain samples; using the land grid for water silently removed it
+     * from the horizon. Keep water detail capped at four blocks even in
+     * the farthest terrain ring.
+     */
+    const int32 WaterSampleStep =
+        FMath::Clamp(Input.SampleStep, 2, 4);
+
+    const int32 WaterCountX =
+        FMath::DivideAndRoundUp(
+            WidthBlocks,
+            WaterSampleStep) + 1;
+
+    const int32 WaterCountY =
+        FMath::DivideAndRoundUp(
+            HeightBlocks,
+            WaterSampleStep) + 1;
+
+    TArray<uint8> WaterMask;
+    WaterMask.SetNumZeroed(WaterCountX * WaterCountY);
+
+    for (int32 Y = 0; Y < WaterCountY; ++Y)
+    {
+        if (Input.CancellationToken.IsValid() &&
+            static_cast<bool>(*Input.CancellationToken))
+        {
+            return;
+        }
+
+        const int32 WorldY =
+            FMath::Clamp(
+                FMath::Min(
+                    StartBlockY + Y * WaterSampleStep,
+                    EndBlockY),
+                0,
+                WorldBlocksY - 1);
+
+        for (int32 X = 0; X < WaterCountX; ++X)
+        {
+            const int32 WorldX =
+                FMath::Clamp(
+                    FMath::Min(
+                        StartBlockX + X * WaterSampleStep,
+                        EndBlockX),
+                0,
+                WorldBlocksX - 1);
+
+            const float TerrainHeight =
+                Input.Generator.GetSurfaceHeightFloat(
+                    WorldX,
+                    WorldY);
+
+            const FVoxelWaterColumn WaterColumn =
+                Input.Generator.GetWaterColumn(
+                    WorldX,
+                    WorldY,
+                    TerrainHeight);
+
             /*
-             * Sea, lakes, and generated river channels share one water level.
-             * The terrain average preserves existing sea/coast detection, while
-             * carved inland-water markers extend the surface into riverbeds.
+             * bCarved also describes dry sloping banks. Only flag columns
+             * that genuinely have a water cap above their bed, otherwise
+             * far LOD painted broad false water sheets across dry banks.
              */
-            const float AverageHeight =
-                (
-                    static_cast<float>(Heights[I00]) +
-                    static_cast<float>(Heights[I10]) +
-                    static_cast<float>(Heights[I01]) +
-                    static_cast<float>(Heights[I11])
-                ) * 0.25f;
+            const bool bIsWet =
+                WaterColumn.WaterSurfaceBlockZ != INDEX_NONE &&
+                WaterColumn.EffectiveSurfaceHeight <
+                    static_cast<float>(WaterColumn.WaterSurfaceBlockZ) -
+                    KINDA_SMALL_NUMBER;
 
-            const bool bInlandWaterCell =
-                InlandWaterMask[I00] != 0 ||
-                InlandWaterMask[I10] != 0 ||
-                InlandWaterMask[I01] != 0 ||
-                InlandWaterMask[I11] != 0;
+            WaterMask[
+                GridIndex(X, Y, WaterCountX)] =
+                    bIsWet ? 1 : 0;
+        }
+    }
 
-            if (AverageHeight <
-                    static_cast<float>(Input.SeaLevel) ||
-                bInlandWaterCell)
+    const float WaterZ =
+        (static_cast<float>(Input.SeaLevel) + 0.95f) *
+        Input.VoxelSize;
+
+    for (int32 Y = 0; Y < WaterCountY - 1; ++Y)
+    {
+        if (Input.CancellationToken.IsValid() &&
+            static_cast<bool>(*Input.CancellationToken))
+        {
+            return;
+        }
+
+        for (int32 X = 0; X < WaterCountX - 1; ++X)
+        {
+            const int32 WorldX0 =
+                FMath::Min(
+                    StartBlockX + X * WaterSampleStep,
+                    EndBlockX);
+
+            const int32 WorldX1 =
+                FMath::Min(
+                    StartBlockX + (X + 1) * WaterSampleStep,
+                    EndBlockX);
+
+            const int32 WorldY0 =
+                FMath::Min(
+                    StartBlockY + Y * WaterSampleStep,
+                    EndBlockY);
+
+            const int32 WorldY1 =
+                FMath::Min(
+                    StartBlockY + (Y + 1) * WaterSampleStep,
+                    EndBlockY);
+
+            const int32 CellChunkX =
+                FMath::Clamp(
+                    WorldX0 / Input.ChunkSize,
+                    0,
+                    Input.WorldSizeX - 1);
+
+            const int32 CellChunkY =
+                FMath::Clamp(
+                    WorldY0 / Input.ChunkSize,
+                    0,
+                    Input.WorldSizeY - 1);
+
+            if (!IsCellInRing(
+                    CellChunkX,
+                    CellChunkY,
+                    Input.CenterChunk,
+                    Input.InnerRadiusChunks,
+                    Input.OuterRadiusChunks))
             {
-                const float WaterZ =
-                    (
-                        static_cast<float>(
-                            Input.SeaLevel) +
-                        0.95f) *
-                    Input.VoxelSize;
-
-                const int32 WaterStart =
-                    Output.WaterVertices.Num();
-
-                Output.WaterVertices.Add(
-                    Output.Vertices[I00] *
-                    FVector(1.0f, 1.0f, 0.0f) +
-                    FVector(
-                        0.0f,
-                        0.0f,
-                        WaterZ));
-
-                Output.WaterVertices.Add(
-                    Output.Vertices[I10] *
-                    FVector(1.0f, 1.0f, 0.0f) +
-                    FVector(
-                        0.0f,
-                        0.0f,
-                        WaterZ));
-
-                Output.WaterVertices.Add(
-                    Output.Vertices[I11] *
-                    FVector(1.0f, 1.0f, 0.0f) +
-                    FVector(
-                        0.0f,
-                        0.0f,
-                        WaterZ));
-
-                Output.WaterVertices.Add(
-                    Output.Vertices[I01] *
-                    FVector(1.0f, 1.0f, 0.0f) +
-                    FVector(
-                        0.0f,
-                        0.0f,
-                        WaterZ));
-
-                Output.WaterTriangles.Add(
-                    WaterStart + 0);
-                Output.WaterTriangles.Add(
-                    WaterStart + 2);
-                Output.WaterTriangles.Add(
-                    WaterStart + 1);
-
-                Output.WaterTriangles.Add(
-                    WaterStart + 0);
-                Output.WaterTriangles.Add(
-                    WaterStart + 3);
-                Output.WaterTriangles.Add(
-                    WaterStart + 2);
-
-                for (int32 I = 0; I < 4; ++I)
-                {
-                    Output.WaterNormals.Add(
-                        FVector::UpVector);
-                }
-
-                const FVector2D UV0 =
-                    Output.UV0[I00];
-
-                const FVector2D UV1 =
-                    Output.UV0[I10];
-
-                const FVector2D UV2 =
-                    Output.UV0[I11];
-
-                const FVector2D UV3 =
-                    Output.UV0[I01];
-
-                Output.WaterUV0.Add(UV0);
-                Output.WaterUV0.Add(UV1);
-                Output.WaterUV0.Add(UV2);
-                Output.WaterUV0.Add(UV3);
-
-                for (int32 I = 0; I < 4; ++I)
-                {
-                    Output.WaterVertexColors.Add(
-                        WaterColor);
-                }
+                continue;
             }
+
+            const int32 I00 =
+                GridIndex(X, Y, WaterCountX);
+
+            const int32 I10 =
+                GridIndex(X + 1, Y, WaterCountX);
+
+            const int32 I01 =
+                GridIndex(X, Y + 1, WaterCountX);
+
+            const int32 I11 =
+                GridIndex(X + 1, Y + 1, WaterCountX);
+
+            /*
+             * A wet corner keeps narrow winding channels represented.
+             * Grid spacing is at most four blocks, so shoreline expansion
+             * is bounded and much smaller than the old coarse quads.
+             */
+            if (WaterMask[I00] == 0 &&
+                WaterMask[I10] == 0 &&
+                WaterMask[I01] == 0 &&
+                WaterMask[I11] == 0)
+            {
+                continue;
+            }
+
+            const int32 WaterStart =
+                Output.WaterVertices.Num();
+
+            Output.WaterVertices.Add(
+                FVector(
+                    static_cast<float>(WorldX0) * Input.VoxelSize,
+                    static_cast<float>(WorldY0) * Input.VoxelSize,
+                    WaterZ));
+
+            Output.WaterVertices.Add(
+                FVector(
+                    static_cast<float>(WorldX1) * Input.VoxelSize,
+                    static_cast<float>(WorldY0) * Input.VoxelSize,
+                    WaterZ));
+
+            Output.WaterVertices.Add(
+                FVector(
+                    static_cast<float>(WorldX1) * Input.VoxelSize,
+                    static_cast<float>(WorldY1) * Input.VoxelSize,
+                    WaterZ));
+
+            Output.WaterVertices.Add(
+                FVector(
+                    static_cast<float>(WorldX0) * Input.VoxelSize,
+                    static_cast<float>(WorldY1) * Input.VoxelSize,
+                    WaterZ));
+
+            Output.WaterTriangles.Add(WaterStart + 0);
+            Output.WaterTriangles.Add(WaterStart + 2);
+            Output.WaterTriangles.Add(WaterStart + 1);
+
+            Output.WaterTriangles.Add(WaterStart + 0);
+            Output.WaterTriangles.Add(WaterStart + 3);
+            Output.WaterTriangles.Add(WaterStart + 2);
+
+            for (int32 I = 0; I < 4; ++I)
+            {
+                Output.WaterNormals.Add(FVector::UpVector);
+                Output.WaterVertexColors.Add(WaterColor);
+            }
+
+            Output.WaterUV0.Add(
+                FVector2D(
+                    static_cast<float>(WorldX0) * 0.05f,
+                    static_cast<float>(WorldY0) * 0.05f));
+
+            Output.WaterUV0.Add(
+                FVector2D(
+                    static_cast<float>(WorldX1) * 0.05f,
+                    static_cast<float>(WorldY0) * 0.05f));
+
+            Output.WaterUV0.Add(
+                FVector2D(
+                    static_cast<float>(WorldX1) * 0.05f,
+                    static_cast<float>(WorldY1) * 0.05f));
+
+            Output.WaterUV0.Add(
+                FVector2D(
+                    static_cast<float>(WorldX0) * 0.05f,
+                    static_cast<float>(WorldY1) * 0.05f));
         }
     }
 
