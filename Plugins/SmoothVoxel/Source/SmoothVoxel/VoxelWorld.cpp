@@ -2205,7 +2205,6 @@ bool AVoxelWorld::BreakBlockByRay()
 
         WorldBlock = CandidateWorldBlock;
         Chunk = CandidateChunk;
-        LocalBlock = CandidateLocalBlock;
         HitBlock = CandidateBlock;
         bFoundBreakableBlock = true;
         break;
@@ -2418,7 +2417,6 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
         VoxelSize * 1.1f;
 
     FIntVector WorldBlock = FIntVector::ZeroValue;
-    FIntVector LocalBlock = FIntVector::ZeroValue;
     AVoxelChunk* TargetChunk = nullptr;
     bool bFoundPlacementCell = false;
 
