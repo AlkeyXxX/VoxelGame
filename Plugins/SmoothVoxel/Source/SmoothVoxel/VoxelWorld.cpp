@@ -340,6 +340,7 @@ void FVoxelMarchingCubesDataSnapshot::Build(
 {
     OutData.Init(ChunkSize);
     OutData.VoxelSize = VoxelSize;
+    OutData.CancellationToken = CancellationToken;
 
     if (ChunkSize <= 0)
     {
@@ -358,6 +359,12 @@ void FVoxelMarchingCubesDataSnapshot::Build(
      */
     for (int32 Y = -1; Y <= ChunkSize; ++Y)
     {
+        if (CancellationToken.IsValid() &&
+            static_cast<bool>(*CancellationToken))
+        {
+            return;
+        }
+
         const int32 WorldY = ChunkCoord.Y * ChunkSize + Y;
 
         for (int32 X = -1; X <= ChunkSize; ++X)
