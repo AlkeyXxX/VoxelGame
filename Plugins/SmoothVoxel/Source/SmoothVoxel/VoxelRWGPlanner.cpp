@@ -386,72 +386,174 @@ bool FVoxelRWGPlanner::IsValidSite(
 
 void FVoxelRWGPlanner::PlaceSettlements(const FVoxelWorldGenerator& Generator)
 {
-    FRandomStream Random(Settings.Seed ^ 0x51A77E);
+    FRandomStream FallbackRandom(Settings.Seed ^ 0x51A77E);
     const float MinDimension = float(FMath::Min(Settings.WorldBlocksX, Settings.WorldBlocksY));
     const float MinDistance = FMath::Min(Settings.MinimumSettlementDistance, MinDimension * 0.24f);
+    const FVector2D Center(float(Settings.WorldBlocksX) * 0.5f, float(Settings.WorldBlocksY) * 0.5f);
     int32 NextId = 1000;
 
-    const FVector2D Center(float(Settings.WorldBlocksX) * 0.5f, float(Settings.WorldBlocksY) * 0.5f);
-    if (IsValidSite(Center, Generator, 0.16f))
+    const auto IsFarEnough = [this, MinDistance](const FVector2D& Candidate)
     {
-        FVoxelRWGSettlement Start;
-        Start.Id = NextId++;
-        Start.Type = EVoxelRWGSettlementType::Village;
-        Start.Position = GetBlockPosition(Center.X, Center.Y, Generator);
-        Start.Biome = Generator.GetBiome(FMath::RoundToInt(Center.X), FMath::RoundToInt(Center.Y),
-            FMath::RoundToInt(Start.Position.Z));
-        Start.Radius = 230.0f;
-        Settlements.Add(Start);
-    }
-
-    const int32 MaxAttempts = Settings.TargetSettlementCount * 700;
-    for (int32 Attempt = 0; Attempt < MaxAttempts && Settlements.Num() < Settings.TargetSettlementCount; ++Attempt)
-    {
-        const FVector2D Candidate(
-            Random.FRandRange(Settings.EdgeMargin, Settings.WorldBlocksX - Settings.EdgeMargin),
-            Random.FRandRange(Settings.EdgeMargin, Settings.WorldBlocksY - Settings.EdgeMargin));
-        if (!IsValidSite(Candidate, Generator, 0.18f)) { continue; }
-
-        bool bTooClose = false;
         for (const FVoxelRWGSettlement& Existing : Settlements)
         {
-            if (FVector2D(Existing.Position.X - Candidate.X, Existing.Position.Y - Candidate.Y).Size() < MinDistance)
-            { bTooClose = true; break; }
+            if (FVector2D(
+                Existing.Position.X - Candidate.X,
+                Existing.Position.Y - Candidate.Y).Size() < MinDistance)
+            {
+                return false;
+            }
         }
-        if (bTooClose) { continue; }
+        return true;
+    };
 
-        FVoxelRWGSettlement S;
-        S.Id = NextId++;
-        S.Position = GetBlockPosition(Candidate.X, Candidate.Y, Generator);
-        S.Biome = Generator.GetBiome(FMath::RoundToInt(Candidate.X), FMath::RoundToInt(Candidate.Y),
-            FMath::RoundToInt(S.Position.Z));
-        const float Roll = Random.FRand();
-        if (Roll < 0.10f) { S.Type = EVoxelRWGSettlementType::City; S.Radius = 420.0f; }
-        else if (Roll < 0.39f) { S.Type = EVoxelRWGSettlementType::Town; S.Radius = 330.0f; }
-        else if (Roll < 0.72f) { S.Type = EVoxelRWGSettlementType::Village; S.Radius = 245.0f; }
-        else if (S.Biome == EVoxelBiome::Desert && Roll < 0.88f) { S.Type = EVoxelRWGSettlementType::Industrial; S.Radius = 280.0f; }
-        else { S.Type = EVoxelRWGSettlementType::Rural; S.Radius = 185.0f; }
-        Settlements.Add(S);
+    const auto AddSettlement = [this, &Generator, &NextId](const FVector2D& Candidate,
+        EVoxelRWGSettlementType Type, float Radius)
+    {
+        FVoxelRWGSettlement Settlement;
+        Settlement.Id = NextId++;
+        Settlement.Type = Type;
+        Settlement.Position = GetBlockPosition(Candidate.X, Candidate.Y, Generator);
+        Settlement.Biome = Generator.GetBiome(
+            FMath::RoundToInt(Candidate.X),
+            FMath::RoundToInt(Candidate.Y),
+            FMath::RoundToInt(Settlement.Position.Z));
+        Settlement.Radius = Radius;
+        Settlements.Add(Settlement);
+        ClaimCellForSettlement(Settlement);
+    };
+
+    // Keep the stable starter area from the existing terrain generator.
+    if (IsValidSite(Center, Generator, 0.16f))
+    {
+        AddSettlement(Center, EVoxelRWGSettlementType::Village, 230.0f);
     }
 
-    if (Settlements.Num() == 0)
+    // Use cell zoning as the primary source of hub candidates. Highest urban
+    // potential is considered first; distance and terrain validation still win.
+    TArray<int32> CandidateCells;
+    for (int32 Index = 0; Index < Cells.Num(); ++Index)
     {
-        for (int32 Attempt = 0; Attempt < 500; ++Attempt)
+        const FVoxelRWGCell& Cell = Cells[Index];
+        if (Cell.bBuildable &&
+            Cell.Type != EVoxelRWGCellType::Wilderness &&
+            Cell.SettlementId == INDEX_NONE)
         {
-            const FVector2D Candidate(
-                Random.FRandRange(Settings.EdgeMargin, Settings.WorldBlocksX - Settings.EdgeMargin),
-                Random.FRandRange(Settings.EdgeMargin, Settings.WorldBlocksY - Settings.EdgeMargin));
-            if (!IsValidSite(Candidate, Generator, 0.30f)) { continue; }
-            FVoxelRWGSettlement Start;
-            Start.Id = NextId++;
-            Start.Type = EVoxelRWGSettlementType::Village;
-            Start.Position = GetBlockPosition(Candidate.X, Candidate.Y, Generator);
-            Start.Biome = Generator.GetBiome(FMath::RoundToInt(Candidate.X), FMath::RoundToInt(Candidate.Y),
-                FMath::RoundToInt(Start.Position.Z));
-            Start.Radius = 220.0f;
-            Settlements.Add(Start);
+            CandidateCells.Add(Index);
+        }
+    }
+    CandidateCells.Sort([this](int32 A, int32 B)
+    {
+        if (Cells[A].UrbanScore == Cells[B].UrbanScore)
+        {
+            return Cells[A].Id < Cells[B].Id;
+        }
+        return Cells[A].UrbanScore > Cells[B].UrbanScore;
+    });
+
+    for (int32 CellIndex : CandidateCells)
+    {
+        if (Settlements.Num() >= Settings.TargetSettlementCount)
+        {
             break;
         }
+
+        const FVoxelRWGCell& Cell = Cells[CellIndex];
+        const FVector2D Candidate(Cell.SuggestedHubPosition.X, Cell.SuggestedHubPosition.Y);
+        if (!IsValidSite(Candidate, Generator, 0.22f) || !IsFarEnough(Candidate))
+        {
+            continue;
+        }
+
+        EVoxelRWGSettlementType Type = EVoxelRWGSettlementType::Rural;
+        float Radius = 185.0f;
+        switch (Cell.Type)
+        {
+        case EVoxelRWGCellType::City:
+            Type = EVoxelRWGSettlementType::City;
+            Radius = 420.0f;
+            break;
+        case EVoxelRWGCellType::Town:
+            Type = EVoxelRWGSettlementType::Town;
+            Radius = 330.0f;
+            break;
+        case EVoxelRWGCellType::Industrial:
+            Type = EVoxelRWGSettlementType::Industrial;
+            Radius = 280.0f;
+            break;
+        case EVoxelRWGCellType::Rural:
+        default:
+            if (Cell.UrbanScore > 0.59f)
+            {
+                Type = EVoxelRWGSettlementType::Village;
+                Radius = 245.0f;
+            }
+            break;
+        }
+
+        AddSettlement(Candidate, Type, Radius);
+    }
+
+    // If too few zoned cells were usable (water, steep hills, or distance
+    // exclusions), fill the remaining slots with valid dry sites. Their type
+    // is still inferred from the cell zoning where possible.
+    const int32 MaxAttempts = Settings.TargetSettlementCount * 900;
+    for (int32 Attempt = 0;
+        Attempt < MaxAttempts && Settlements.Num() < Settings.TargetSettlementCount;
+        ++Attempt)
+    {
+        const FVector2D Candidate(
+            FallbackRandom.FRandRange(Settings.EdgeMargin, Settings.WorldBlocksX - Settings.EdgeMargin),
+            FallbackRandom.FRandRange(Settings.EdgeMargin, Settings.WorldBlocksY - Settings.EdgeMargin));
+        if (!IsValidSite(Candidate, Generator, 0.20f) || !IsFarEnough(Candidate))
+        {
+            continue;
+        }
+
+        const int32 CellX = FMath::Clamp(
+            FMath::FloorToInt(Candidate.X / float(Settings.CellSizeBlocks)),
+            0, CellColumns - 1);
+        const int32 CellY = FMath::Clamp(
+            FMath::FloorToInt(Candidate.Y / float(Settings.CellSizeBlocks)),
+            0, CellRows - 1);
+        const int32 CellIndex = CellY * CellColumns + CellX;
+        if (Cells.IsValidIndex(CellIndex) && Cells[CellIndex].SettlementId != INDEX_NONE)
+        {
+            continue;
+        }
+
+        EVoxelRWGSettlementType Type = EVoxelRWGSettlementType::Rural;
+        float Radius = 185.0f;
+        if (Cells.IsValidIndex(CellIndex))
+        {
+            const FVoxelRWGCell& Cell = Cells[CellIndex];
+            if (Cell.Type == EVoxelRWGCellType::City)
+            {
+                Type = EVoxelRWGSettlementType::City;
+                Radius = 420.0f;
+            }
+            else if (Cell.Type == EVoxelRWGCellType::Town)
+            {
+                Type = EVoxelRWGSettlementType::Town;
+                Radius = 330.0f;
+            }
+            else if (Cell.Type == EVoxelRWGCellType::Industrial)
+            {
+                Type = EVoxelRWGSettlementType::Industrial;
+                Radius = 280.0f;
+            }
+            else if (Cell.Type == EVoxelRWGCellType::Rural && Cell.UrbanScore > 0.59f)
+            {
+                Type = EVoxelRWGSettlementType::Village;
+                Radius = 245.0f;
+            }
+        }
+        else if (FallbackRandom.FRand() < 0.16f)
+        {
+            Type = EVoxelRWGSettlementType::Village;
+            Radius = 245.0f;
+        }
+
+        AddSettlement(Candidate, Type, Radius);
     }
 }
 
