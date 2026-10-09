@@ -807,9 +807,13 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                 const FVector& Prev = Centerline[FMath::Max(0, PointIndex - 1)];
                 const FVector& Next = Centerline[FMath::Min(Centerline.Num() - 1, PointIndex + 1)];
                 FVector2D Direction(Next.X - Prev.X, Next.Y - Prev.Y);
-                if (!Direction.Normalize())
+                if (Direction.SizeSquared() <= SMALL_NUMBER)
                 {
                     Direction = FVector2D(1.0f, 0.0f);
+                }
+                else
+                {
+                    Direction.Normalize();
                 }
 
                 const FVector2D Side(-Direction.Y, Direction.X);
