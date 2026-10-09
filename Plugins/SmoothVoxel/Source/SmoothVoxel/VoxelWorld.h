@@ -471,6 +471,9 @@ private:
     void GenerateChunkBlocks(
         AVoxelChunk* Chunk);
 
+    void GenerateChunkBlocksAsync(
+        AVoxelChunk* Chunk);
+
 
     /*
      * Изменение блока.
