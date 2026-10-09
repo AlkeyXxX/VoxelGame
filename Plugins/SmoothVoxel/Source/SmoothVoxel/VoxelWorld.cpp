@@ -3143,7 +3143,7 @@ void AVoxelWorld::UpdateFarLOD(
                         Output);
 
                     if (BuildInput.CancellationToken.IsValid() &&
-                        BuildInput.CancellationToken->AtomicRead())
+                        static_cast<bool>(*BuildInput.CancellationToken))
                     {
                         return;
                     }
@@ -3180,37 +3180,32 @@ void AVoxelWorld::UpdateFarLOD(
      * deterministic and prevents stale geometry from previous centers.
      */
     /*
-     * Sample the generated height field more densely at every LOD tier.
-     * The nearest far ring uses one-block spacing to match the full terrain
-     * silhouette closely; distant rings progressively decimate the surface.
-     * Every step divides ChunkSize, keeping ring boundaries grid-aligned.
+     * Keep far-ring grids bounded in size. Dense one-block samples over the
+     * 16/32/64-chunk rings create million-vertex meshes and overload the
+     * worker pool each time the player crosses a chunk boundary. Visual LOD
+     * quality will be revisited separately; streaming must stay responsive.
      */
     ScheduleLOD(
         FarLOD1Mesh,
-        1,
+        2,
         StreamingRadius + 1,
         LOD1Radius);
 
-    /*
-     * Keep both nearest rings at block-level sampling. Otherwise a small
-     * hill can disappear in LOD2 and then pop into existence when the player
-     * crosses into LOD1. Farther rings progressively simplify by 2x.
-     */
     ScheduleLOD(
         FarLOD2Mesh,
-        1,
+        4,
         LOD1Radius + 1,
         LOD2Radius);
 
     ScheduleLOD(
         FarLOD3Mesh,
-        2,
+        8,
         LOD2Radius + 1,
         LOD3Radius);
 
     ScheduleLOD(
         FarLOD4Mesh,
-        4,
+        16,
         LOD3Radius + 1,
         LOD4Radius);
 }
