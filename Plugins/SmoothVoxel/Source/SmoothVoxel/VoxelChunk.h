@@ -52,6 +52,11 @@ public:
         return DataGenerationVersion;
     }
 
+    uint32 GetMeshGenerationVersion() const
+    {
+        return MeshGenerationVersion;
+    }
+
 
     /*
      * Работа с блоками.
@@ -211,6 +216,8 @@ protected:
 
 
 private:
+
+    friend class AVoxelWorld;
 
     AVoxelWorld* World = nullptr;
 
