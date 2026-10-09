@@ -435,7 +435,7 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
     /*
      * Existing low basins are still filled to the common water level.
      * Their beds deepen gradually as terrain descends below the shoreline,
-     * instead of creating a sudden four-block drop at the water edge.
+     * instead of creating a sudden drop at the water edge.
      */
     if (SurfaceHeight < SeaLevel)
     {
@@ -457,58 +457,69 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
                 BasinDepthWeight);
     }
 
-    const EVoxelLandform Landform =
-        GetLandform(WorldX, WorldY);
-
-    // Keep rivers and lakes out of mountain massifs.
-    if (Landform == EVoxelLandform::Mountains)
-    {
-        Column.EffectiveTerrainHeight =
-            FMath::RoundToInt(Column.EffectiveSurfaceHeight);
-        Column.bCarved =
-            Column.EffectiveSurfaceHeight < SurfaceHeight - KINDA_SMALL_NUMBER;
-        return Column;
-    }
-
     /*
-     * The river/lake corridor is allowed to cut through rolling hills,
-     * but not through high uplands. The broad transition lets terrain
-     * descend gradually before reaching the water surface.
+     * Fade river and lake carving as the terrain rises into mountain
+     * country. The fade begins before the discrete biome boundary so
+     * channel banks do not suddenly end at a mountain-mask edge.
      */
-    if (SurfaceHeight > SeaLevel + 12.0f)
-    {
-        Column.EffectiveTerrainHeight =
-            FMath::RoundToInt(Column.EffectiveSurfaceHeight);
-        Column.bCarved =
-            Column.EffectiveSurfaceHeight < SurfaceHeight - KINDA_SMALL_NUMBER;
-        return Column;
-    }
+    const float LandformNoise =
+        GetLandformNoise(WorldX, WorldY);
+
+    const float NonMountainWeight =
+        1.0f - SmoothStep(0.08f, 0.22f, LandformNoise);
 
     const float RiverField = GetRiverField(WorldX, WorldY);
     const float LakeScore = GetLakeScore(WorldX, WorldY);
     const float RiverDistance = FMath::Abs(RiverField);
 
     /*
-     * Widths are field-space values, not block counts. The narrow core
-     * makes a channel several blocks wide; the wider bank interval feathers
-     * the profile into the surrounding terrain with a zero-slope edge.
+     * Widths are field-space values, not block counts. The channel floor
+     * stays fairly narrow, while the broad bank interval feathers it into
+     * surrounding ground with a zero-slope edge.
      */
     constexpr float RiverCoreWidth = 0.0085f;
-    constexpr float RiverBankWidth = 0.045f;
+    constexpr float RiverBankWidth = 0.055f;
     constexpr float LakeBankScore = 0.30f;
     constexpr float LakeCoreScore = 0.42f;
 
-    const float RiverInfluence =
+    const float RiverShapeInfluence =
         1.0f - SmoothStep(
             RiverCoreWidth,
             RiverBankWidth,
             RiverDistance);
 
-    const float LakeInfluence =
+    const float LakeShapeInfluence =
         SmoothStep(
             LakeBankScore,
             LakeCoreScore,
             LakeScore);
+
+    /*
+     * Water uses one shared level, so features on high ground must fade
+     * rather than abruptly disappear. Rivers are allowed to cut rolling
+     * hills; lake masks fade out sooner to keep lakes in lower basins.
+     */
+    const float RiverElevationWeight =
+        1.0f - SmoothStep(
+            SeaLevel + 10.0f,
+            SeaLevel + 22.0f,
+            SurfaceHeight);
+
+    const float LakeElevationWeight =
+        1.0f - SmoothStep(
+            SeaLevel + 3.0f,
+            SeaLevel + 12.0f,
+            SurfaceHeight);
+
+    const float RiverInfluence =
+        RiverShapeInfluence *
+        RiverElevationWeight *
+        NonMountainWeight;
+
+    const float LakeInfluence =
+        LakeShapeInfluence *
+        LakeElevationWeight *
+        NonMountainWeight;
 
     const float FeatureInfluence =
         FMath::Max(RiverInfluence, LakeInfluence);
@@ -519,8 +530,7 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
 
         if (RiverInfluence >= LakeInfluence)
         {
-            // The channel is deepest along its centerline and shallower
-            // toward the inner banks, giving the river a rounded cross-section.
+            // Deepest along the centerline, shallower toward the banks.
             const float CenterDepth =
                 1.0f - FMath::Clamp(
                     RiverDistance / RiverBankWidth,
@@ -531,8 +541,7 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
         }
         else
         {
-            // Vary lake depth gently across the basin rather than making
-            // every lake a perfectly flat, identical bowl.
+            // Modest deterministic depth variation across lake basins.
             const float BasinDepth =
                 SmoothStep(
                     LakeBankScore,
@@ -562,9 +571,8 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
     }
 
     /*
-     * A column becomes water when the smoothed ground profile reaches
-     * the water plane. This fills newly carved sections consistently in
-     * generated chunks and Marching Cubes halo samples.
+     * Fill any column where the smoothed ground profile lies below the
+     * water plane. This is deterministic for generated chunks and MC halos.
      */
     if (Column.EffectiveSurfaceHeight < SeaLevel)
     {
