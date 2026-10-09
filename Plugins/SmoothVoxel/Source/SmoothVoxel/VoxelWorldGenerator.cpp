@@ -99,16 +99,17 @@ EVoxelLandform FVoxelWorldGenerator::GetLandform(
     const float Noise = GetLandformNoise(WorldX, WorldY);
 
     /*
-     * Keep flatlands common for large city POIs, while widening the
-     * mountain mask and giving hills their own substantial share.
-     * These thresholds affect landforms only, never climate regions.
+     * Target the broad 7DTD-style mix of plains, hills and a smaller share
+     * of mountain cores (roughly 40 / 50 / 10 on a common RWG preset).
+     * These thresholds classify the landform only; GetSurfaceHeightFloat
+     * starts the mountain blend earlier so mountain foothills remain gradual.
      */
-    if (Noise > 0.10f)
+    if (Noise > 0.43f)
     {
         return EVoxelLandform::Mountains;
     }
 
-    if (Noise < -0.08f)
+    if (Noise < -0.055f)
     {
         return EVoxelLandform::Flatlands;
     }
@@ -297,7 +298,7 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
     const float MountainMask =
         FMath::Pow(
             FMath::Clamp(
-                (LandformNoise - 0.08f) / 0.48f,
+                (LandformNoise - 0.12f) / 0.40f,
                 0.0f,
                 1.0f),
             0.72f);
@@ -342,7 +343,7 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
             1.0f - SmoothStep(-0.14f, -0.02f, LandformNoise);
 
         const float MountainWeight =
-            SmoothStep(0.08f, 0.34f, LandformNoise);
+            SmoothStep(0.12f, 0.43f, LandformNoise);
 
         const float LowlandAndHills =
             FMath::Lerp(HillHeight, FlatHeight, FlatWeight);
@@ -395,13 +396,17 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
 
     const float CoastWarp =
         FMath::PerlinNoise2D(CoastWarpPosition) *
-        0.025f *
-        SmoothStep(0.0f, 0.06f, EdgeDistance);
+        0.055f;
 
+    /*
+     * Let the low-frequency coast field decide where the sea cuts into the
+     * world edge. Unlike a fixed border fade, this can leave some edge
+     * sections as land and turn other sections into broad bays.
+     */
     const float CoastalBlend =
         SmoothStep(
-            0.006f,
-            0.075f,
+            -0.010f,
+            0.035f,
             EdgeDistance + CoastWarp);
 
     const float CoastalShelfHeight =
