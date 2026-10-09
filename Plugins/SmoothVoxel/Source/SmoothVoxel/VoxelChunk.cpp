@@ -609,15 +609,33 @@ void AVoxelChunk::RebuildMesh()
                     LocalVersion
                 ]() mutable
                 {
-                    if (!WeakThis.IsValid())
+                    AVoxelChunk* Chunk = WeakThis.Get();
+
+                    if (!Chunk ||
+                        Chunk->GetMeshGenerationVersion() != LocalVersion)
                     {
                         return;
                     }
 
-                    WeakThis->ApplyMesh(
-                        MoveTemp(Output),
-                        LocalVersion,
-                        true);
+                    if (Chunk->World)
+                    {
+                        /*
+                         * Mesh section creation can itself be expensive on
+                         * the Game Thread. Queue completed geometry so only
+                         * a bounded number of chunks upload per frame.
+                         */
+                        Chunk->World->QueueChunkMeshResult(
+                            Chunk,
+                            MoveTemp(Output),
+                            LocalVersion);
+                    }
+                    else
+                    {
+                        Chunk->ApplyMesh(
+                            MoveTemp(Output),
+                            LocalVersion,
+                            true);
+                    }
                 });
         });
 }
