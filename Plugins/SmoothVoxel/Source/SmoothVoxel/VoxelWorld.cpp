@@ -244,6 +244,96 @@ namespace
         }
     }
 
+
+    /*
+     * Sample the same procedural terrain used by chunk generation.
+     * Marching Cubes needs a one-voxel halo around a chunk; a neighbour
+     * actor may not exist yet while streaming asynchronously, but treating
+     * that halo as Air creates temporary/fake faces at chunk boundaries.
+     */
+    uint8 GetGeneratedBlockAtWorld(
+        const FVoxelWorldGenerator& Generator,
+        int32 WorldX,
+        int32 WorldY,
+        int32 WorldZ,
+        int32 SeaLevel,
+        int32 BeachWidth)
+    {
+        const int32 Height =
+            Generator.GetSurfaceHeight(WorldX, WorldY);
+
+        const EVoxelBiome Biome =
+            Generator.GetBiome(WorldX, WorldY, Height);
+
+        const EVoxelLandform Landform =
+            Generator.GetLandform(WorldX, WorldY);
+
+        if (WorldZ > Height)
+        {
+            return WorldZ <= SeaLevel
+                ? uint8(EVoxelBlock::Water)
+                : uint8(EVoxelBlock::Air);
+        }
+
+        if (WorldZ == Height)
+        {
+            const bool bBeach =
+                Biome != EVoxelBiome::Snow &&
+                Height < SeaLevel &&
+                Height >= SeaLevel - BeachWidth;
+
+            if (bBeach)
+            {
+                return uint8(EVoxelBlock::Sand);
+            }
+
+            if (Biome == EVoxelBiome::Snow)
+            {
+                return uint8(EVoxelBlock::Snow);
+            }
+
+            if (Landform == EVoxelLandform::Mountains)
+            {
+                return Biome == EVoxelBiome::Desert
+                    ? uint8(EVoxelBlock::Sandstone)
+                    : uint8(EVoxelBlock::Stone);
+            }
+
+            if (Biome == EVoxelBiome::Desert)
+            {
+                return uint8(EVoxelBlock::Sand);
+            }
+
+            return uint8(EVoxelBlock::Grass);
+        }
+
+        if (Biome == EVoxelBiome::Desert &&
+            Landform == EVoxelLandform::Mountains &&
+            WorldZ >= Height - 5)
+        {
+            return uint8(EVoxelBlock::Sandstone);
+        }
+
+        if (Biome == EVoxelBiome::Desert &&
+            WorldZ >= Height - 3)
+        {
+            return uint8(EVoxelBlock::Sand);
+        }
+
+        if (Landform == EVoxelLandform::Mountains &&
+            WorldZ >= Height - 3)
+        {
+            return uint8(EVoxelBlock::Stone);
+        }
+
+        if (WorldZ >= Height - 3)
+        {
+            return uint8(EVoxelBlock::Dirt);
+        }
+
+        return uint8(EVoxelBlock::Stone);
+    }
+
 }
 
 
@@ -1526,18 +1616,73 @@ void AVoxelWorld::BuildMarchingCubesData(
 
                 uint8 Block = uint8(EVoxelBlock::Air);
 
+                const FIntVector SourceChunkCoord =
+                    ChunkCoord + FIntVector(
+                        SourceChunkX,
+                        SourceChunkY,
+                        SourceChunkZ);
+
                 const AVoxelChunk* SourceChunk =
                     NeighborChunks
                         [SourceChunkX + 1]
                         [SourceChunkY + 1]
                         [SourceChunkZ + 1];
 
-                if (SourceChunk)
+                if (SourceChunk && SourceChunk->HasGeneratedData())
                 {
                     Block = SourceChunk->GetTerrainBlock(
                         LocalX,
                         LocalY,
                         LocalZ);
+                }
+                else if (IsChunkInsideWorld(SourceChunkCoord))
+                {
+                    /*
+                     * Neighbour terrain may still be generating (or be
+                     * outside the full-chunk streaming radius). Sample its
+                     * procedural block directly so the MC halo remains
+                     * continuous instead of inventing an Air wall.
+                     * Apply saved/player edits with the same rule as
+                     * GetTerrainBlock: modified cells belong to the cubic
+                     * layer and are excluded from the smooth surface.
+                     */
+                    const FIntVector WorldBlock(
+                        ChunkCoord.X * ChunkSize + X,
+                        ChunkCoord.Y * ChunkSize + Y,
+                        ChunkCoord.Z * ChunkSize + Z);
+
+                    const int32 SourceLocalIndex =
+                        LocalX +
+                        LocalY * ChunkSize +
+                        LocalZ * ChunkSize * ChunkSize;
+
+                    bool bIsModified = false;
+                    if (const TMap<int32, uint8>* SourceModifications =
+                        ModifiedBlocks.Find(SourceChunkCoord))
+                    {
+                        bIsModified =
+                            SourceModifications->Contains(SourceLocalIndex);
+                    }
+
+                    if (bIsModified)
+                    {
+                        Block = uint8(EVoxelBlock::Air);
+                    }
+                    else if (WorldBlock.X >= 0 &&
+                             WorldBlock.X < WorldSizeX * ChunkSize &&
+                             WorldBlock.Y >= 0 &&
+                             WorldBlock.Y < WorldSizeY * ChunkSize &&
+                             WorldBlock.Z >= 0 &&
+                             WorldBlock.Z < WorldSizeZ * ChunkSize)
+                    {
+                        Block = GetGeneratedBlockAtWorld(
+                            WorldGenerator,
+                            WorldBlock.X,
+                            WorldBlock.Y,
+                            WorldBlock.Z,
+                            SeaLevel,
+                            BeachWidth);
+                    }
                 }
 
                 const int32 Index =
