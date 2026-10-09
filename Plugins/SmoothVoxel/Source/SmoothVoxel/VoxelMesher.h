@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/ThreadSafeBool.h"
 
 /*
  * Снимки граничных блоков соседних чанков.
@@ -73,6 +74,9 @@ struct FVoxelMeshBuildInput
 	TArray<uint8> StructureFlags;
 
 	FVoxelNeighborData Neighbors;
+
+    /* Cancels superseded mesh jobs without touching UObjects on workers. */
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancellationToken;
 };
 
 
