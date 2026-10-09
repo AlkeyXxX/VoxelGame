@@ -260,6 +260,10 @@ float FVoxelMarchingCubesMesher::GetDensity(
     int32 Y,
     int32 Z)
 {
+    const int32 Side = Input.Size + 2;
+    const bool bHasFractionalHeights =
+        Input.TerrainSurfaceHeights.Num() == Side * Side;
+
     float Sum = 0.0f;
 
     for (int32 DZ = 0; DZ <= 1; ++DZ)
@@ -268,23 +272,67 @@ float FVoxelMarchingCubesMesher::GetDensity(
         {
             for (int32 DX = 0; DX <= 1; ++DX)
             {
+                const int32 BlockX = X - 1 + DX;
+                const int32 BlockY = Y - 1 + DY;
+                const int32 BlockZ = Z - 1 + DZ;
+
                 const EVoxelBlock Block =
                     static_cast<EVoxelBlock>(
                         GetBlock(
                             Input,
-                            X - 1 + DX,
-                            Y - 1 + DY,
-                            Z - 1 + DZ));
+                            BlockX,
+                            BlockY,
+                            BlockZ));
 
-                if (IsVoxelSolid(Block))
+                if (!bHasFractionalHeights)
                 {
-                    Sum += 1.0f;
+                    if (IsVoxelSolid(Block))
+                    {
+                        Sum += 1.0f;
+                    }
+                    continue;
                 }
+
+                const float ColumnHeight =
+                    Input.TerrainSurfaceHeights[
+                        (BlockX + 1) +
+                        (BlockY + 1) * Side];
+
+                /*
+                 * Fractional occupancy of the top voxel cell. Integer
+                 * heights still produce exactly 0/1 occupancy; fractional
+                 * heights produce a continuous density ramp within that
+                 * cell, so neighboring columns no longer form block steps.
+                 */
+                const float FractionalSolid =
+                    FMath::Clamp(
+                        ColumnHeight -
+                            static_cast<float>(BlockZ) + 1.0f,
+                        0.0f,
+                        1.0f);
+
+                /*
+                 * Preserve block edits by applying the difference between
+                 * actual solid occupancy and the integer terrain baseline.
+                 * Unmodified columns contribute no correction; dug voxels
+                 * subtract density locally and remain editable.
+                 */
+                const bool bExpectedSolid =
+                    BlockZ <= FMath::RoundToInt(ColumnHeight);
+
+                const float ActualSolid =
+                    IsVoxelSolid(Block) ? 1.0f : 0.0f;
+
+                const float ExpectedSolid =
+                    bExpectedSolid ? 1.0f : 0.0f;
+
+                Sum += FractionalSolid +
+                    (ActualSolid - ExpectedSolid);
             }
         }
     }
 
-    return Sum / 8.0f;
+    return FMath::Clamp(Sum / 8.0f, 0.0f, 1.0f);
 }
 
 
