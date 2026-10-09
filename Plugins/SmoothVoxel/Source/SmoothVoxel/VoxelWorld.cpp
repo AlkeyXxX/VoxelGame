@@ -514,6 +514,12 @@ void AVoxelWorld::BeginPlay()
                 &AVoxelWorld::ToggleDebugFly);
 
             InputComponent->BindAction(
+                TEXT("GenerateRWGLayout"),
+                IE_Pressed,
+                this,
+                &AVoxelWorld::GenerateRWGLayoutFromInput);
+
+            InputComponent->BindAction(
                 TEXT("DebugFlyUp"),
                 IE_Pressed,
                 this,
@@ -675,6 +681,12 @@ FVector AVoxelWorld::GetCenterSpawnLocation()
             (static_cast<float>(CenterBlockX) + 0.5f) * VoxelSize,
             (static_cast<float>(CenterBlockY) + 0.5f) * VoxelSize,
             (static_cast<float>(SurfaceHeight) + 2.5f) * VoxelSize);
+}
+
+
+void AVoxelWorld::GenerateRWGLayoutFromInput()
+{
+    GenerateRWGLayoutAndExport();
 }
 
 
