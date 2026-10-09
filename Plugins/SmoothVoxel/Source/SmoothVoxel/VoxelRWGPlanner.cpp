@@ -863,8 +863,9 @@ void FVoxelRWGPlanner::BuildRoadNetwork()
                 const FVector2D Start(A.X, A.Y);
                 const FVector2D Delta(B.X - A.X, B.Y - A.Y);
                 const float LengthSquared = Delta.SizeSquared();
+                const FVector2D FromSegmentStart(POI.Position.X - A.X, POI.Position.Y - A.Y);
                 const float T = LengthSquared > SMALL_NUMBER
-                    ? FMath::Clamp(FVector2D(POI.Position.X - A.X, POI.Position.Y - A.Y).DotProduct(Delta) / LengthSquared, 0.0f, 1.0f)
+                    ? FMath::Clamp((FromSegmentStart.X * Delta.X + FromSegmentStart.Y * Delta.Y) / LengthSquared, 0.0f, 1.0f)
                     : 0.0f;
                 const FVector Candidate = FMath::Lerp(A, B, T);
                 const float DistanceSquared = FVector2D(
