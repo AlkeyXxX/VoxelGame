@@ -752,6 +752,64 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
             return WaterColumn.EffectiveSurfaceHeight + 1.25f;
         };
 
+        if (bDrawRWGCellOverlay)
+        {
+            const auto DrawCellEdge = [this, &ToWorldPosition, &SampleRoadSurface](float X0, float Y0,
+                float X1, float Y1, const FColor& Color, float Thickness)
+            {
+                const float Length = FVector2D(X1 - X0, Y1 - Y0).Size();
+                const int32 Steps = FMath::Clamp(FMath::CeilToInt(Length / 64.0f), 1, 64);
+                FVector Previous(X0, Y0, SampleRoadSurface(X0, Y0) + 2.0f);
+                for (int32 Step = 1; Step <= Steps; ++Step)
+                {
+                    const float T = float(Step) / float(Steps);
+                    const float X = FMath::Lerp(X0, X1, T);
+                    const float Y = FMath::Lerp(Y0, Y1, T);
+                    const FVector Current(X, Y, SampleRoadSurface(X, Y) + 2.0f);
+                    DrawDebugLine(GetWorld(), ToWorldPosition(Previous), ToWorldPosition(Current),
+                        Color, true, RWGDebugDrawDuration, 0, Thickness);
+                    Previous = Current;
+                }
+            };
+
+            for (const FVoxelRWGCell& Cell : Planner.GetCells())
+            {
+                FColor CellColor(55, 65, 75);
+                float Thickness = 0.75f;
+                switch (Cell.Type)
+                {
+                case EVoxelRWGCellType::Rural:
+                    CellColor = FColor(55, 120, 70);
+                    break;
+                case EVoxelRWGCellType::Town:
+                    CellColor = FColor(190, 150, 45);
+                    Thickness = 1.1f;
+                    break;
+                case EVoxelRWGCellType::City:
+                    CellColor = FColor(220, 65, 65);
+                    Thickness = 1.4f;
+                    break;
+                case EVoxelRWGCellType::Industrial:
+                    CellColor = FColor(160, 80, 200);
+                    Thickness = 1.1f;
+                    break;
+                case EVoxelRWGCellType::Wilderness:
+                default:
+                    break;
+                }
+
+                const float MinX = float(Cell.GridCoord.X * RWGCellSizeBlocks);
+                const float MinY = float(Cell.GridCoord.Y * RWGCellSizeBlocks);
+                const float MaxX = FMath::Min(float(SafeWorldBlocksX - 1), MinX + float(RWGCellSizeBlocks));
+                const float MaxY = FMath::Min(float(SafeWorldBlocksY - 1), MinY + float(RWGCellSizeBlocks));
+
+                DrawCellEdge(MinX, MinY, MaxX, MinY, CellColor, Thickness);
+                DrawCellEdge(MaxX, MinY, MaxX, MaxY, CellColor, Thickness);
+                DrawCellEdge(MaxX, MaxY, MinX, MaxY, CellColor, Thickness);
+                DrawCellEdge(MinX, MaxY, MinX, MinY, CellColor, Thickness);
+            }
+        }
+
         for (const FVoxelRWGRoad& Road : Planner.GetRoads())
         {
             FColor Color = FColor(70, 160, 255);
