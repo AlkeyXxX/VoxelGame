@@ -42,12 +42,8 @@ namespace
         case EVoxelBiome::Forest:
         case EVoxelBiome::Plains:
         default:
-            if (Landform == EVoxelLandform::Mountains)
-            {
-                return FLinearColor(
-                    0.50f, 0.52f, 0.56f, 1.0f);
-            }
-
+            // Green-biome mountains should share the grassy surface color
+            // used by full-resolution chunks, not look like bare boulders.
             return FLinearColor(
                 0.20f, 0.65f, 0.12f, 1.0f);
         }
@@ -101,6 +97,78 @@ namespace
         return
             Distance >= InnerRadius &&
             Distance <= OuterRadius;
+    }
+
+    /*
+     * Estimate the exact vertical crossing of the same averaged solid
+     * density used by FVoxelMarchingCubesMesher. Each of the four
+     * surrounding columns contributes the two voxel layers at NodeZ-1
+     * and NodeZ, matching GetDensity() in the full-resolution mesh.
+     *
+     * For SampleStep == 1 this reproduces the full mesh's vertical
+     * iso-surface crossing at every sampled XY node, instead of placing
+     * the LOD directly at the integer generator height.
+     */
+    float GetMCSurfaceHeightFromColumns(
+        const int32 ColumnHeights[4])
+    {
+        constexpr float IsoLevel = 0.49f;
+
+        int32 MinHeight = ColumnHeights[0];
+        int32 MaxHeight = ColumnHeights[0];
+
+        for (int32 I = 1; I < 4; ++I)
+        {
+            MinHeight = FMath::Min(MinHeight, ColumnHeights[I]);
+            MaxHeight = FMath::Max(MaxHeight, ColumnHeights[I]);
+        }
+
+        auto DensityAtNodeZ =
+            [ColumnHeights](int32 NodeZ)
+            {
+                int32 SolidSamples = 0;
+
+                for (int32 I = 0; I < 4; ++I)
+                {
+                    SolidSamples +=
+                        ColumnHeights[I] >= NodeZ - 1 ? 1 : 0;
+                    SolidSamples +=
+                        ColumnHeights[I] >= NodeZ ? 1 : 0;
+                }
+
+                return static_cast<float>(SolidSamples) / 8.0f;
+            };
+
+        int32 PreviousNodeZ = MinHeight - 1;
+        float PreviousDensity = DensityAtNodeZ(PreviousNodeZ);
+
+        for (int32 NodeZ = MinHeight; NodeZ <= MaxHeight + 2; ++NodeZ)
+        {
+            const float CurrentDensity = DensityAtNodeZ(NodeZ);
+
+            if (PreviousDensity >= IsoLevel &&
+                CurrentDensity < IsoLevel)
+            {
+                const float Denominator =
+                    CurrentDensity - PreviousDensity;
+
+                const float Alpha =
+                    FMath::IsNearlyZero(Denominator)
+                        ? 0.0f
+                        : (IsoLevel - PreviousDensity) / Denominator;
+
+                return
+                    static_cast<float>(PreviousNodeZ) +
+                    FMath::Clamp(Alpha, 0.0f, 1.0f);
+            }
+
+            PreviousNodeZ = NodeZ;
+            PreviousDensity = CurrentDensity;
+        }
+
+        // Flat, fully solid columns have their MC surface just above
+        // Height + 1; this is a defensive fallback for malformed input.
+        return static_cast<float>(MaxHeight) + 1.02f;
     }
 }
 
@@ -186,9 +254,13 @@ void FVoxelTerrainLODMesher::Build(
             Input.SampleStep) + 1;
 
     TArray<int32> Heights;
+    TArray<float> SurfaceHeights;
     TArray<FLinearColor> Colors;
 
     Heights.SetNumZeroed(
+        CountX * CountY);
+
+    SurfaceHeights.SetNumZeroed(
         CountX * CountY);
 
     Colors.SetNum(
@@ -257,6 +329,32 @@ void FVoxelTerrainLODMesher::Build(
         }
     }
 
+    /*
+     * Apply the same vertical density interpolation as the full MC mesh.
+     * At LOD1 (step 1), the surrounding entries are the exact four block
+     * columns used by GetDensity() at this node. Coarser tiers use their
+     * neighboring sampled columns and retain the same vertical convention.
+     */
+    for (int32 Y = 0; Y < CountY; ++Y)
+    {
+        for (int32 X = 0; X < CountX; ++X)
+        {
+            const int32 PreviousX = FMath::Max(0, X - 1);
+            const int32 PreviousY = FMath::Max(0, Y - 1);
+
+            const int32 ColumnHeights[4] =
+            {
+                Heights[GridIndex(PreviousX, PreviousY, CountX)],
+                Heights[GridIndex(X, PreviousY, CountX)],
+                Heights[GridIndex(PreviousX, Y, CountX)],
+                Heights[GridIndex(X, Y, CountX)]
+            };
+
+            SurfaceHeights[GridIndex(X, Y, CountX)] =
+                GetMCSurfaceHeightFromColumns(ColumnHeights);
+        }
+    }
+
     Output.Vertices.SetNumZeroed(
         CountX * CountY);
 
@@ -299,8 +397,7 @@ void FVoxelTerrainLODMesher::Build(
                     static_cast<float>(
                         WorldY) *
                         Input.VoxelSize,
-                    static_cast<float>(
-                        Heights[Index] + 1) *
+                    SurfaceHeights[Index] *
                         Input.VoxelSize);
 
             Output.UV0[Index] =
