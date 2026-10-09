@@ -1615,7 +1615,6 @@ void AVoxelWorld::BuildMarchingCubesData(
                     (X >= ChunkSize ? 0 : X);
 
                 uint8 Block = uint8(EVoxelBlock::Air);
-                uint8 DensityBlock = uint8(EVoxelBlock::Air);
 
                 const FIntVector SourceChunkCoord =
                     ChunkCoord + FIntVector(
@@ -1635,27 +1634,6 @@ void AVoxelWorld::BuildMarchingCubesData(
                         LocalX,
                         LocalY,
                         LocalZ);
-                    DensityBlock = Block;
-
-                    /*
-                     * Modified solid blocks are rendered by the cubic
-                     * mesher, so they remain Air in Blocks. Keep their
-                     * occupancy separately for density sampling only:
-                     * this makes adjacent smooth terrain reach the block.
-                     */
-                    if (!IsVoxelSolid(Block))
-                    {
-                        const uint8 CurrentBlock =
-                            SourceChunk->GetBlock(
-                                LocalX,
-                                LocalY,
-                                LocalZ);
-
-                        if (IsVoxelSolid(CurrentBlock))
-                        {
-                            DensityBlock = CurrentBlock;
-                        }
-                    }
                 }
                 else if (IsChunkInsideWorld(SourceChunkCoord))
                 {
@@ -1664,9 +1642,9 @@ void AVoxelWorld::BuildMarchingCubesData(
                      * outside the full-chunk streaming radius). Sample its
                      * procedural block directly so the MC halo remains
                      * continuous instead of inventing an Air wall.
-                     * Player edits stay excluded from rendered smooth cells,
-                     * but modified solid blocks contribute to density so the
-                     * transition closes at the cubic block boundary.
+                     * Apply saved/player edits with the same rule as
+                     * GetTerrainBlock: modified cells belong to the cubic
+                     * layer and are excluded from the smooth surface.
                      */
                     const FIntVector WorldBlock(
                         ChunkCoord.X * ChunkSize + X,
@@ -1678,21 +1656,17 @@ void AVoxelWorld::BuildMarchingCubesData(
                         LocalY * ChunkSize +
                         LocalZ * ChunkSize * ChunkSize;
 
-                    const TMap<int32, uint8>* SourceModifications =
-                        ModifiedBlocks.Find(SourceChunkCoord);
-                    const uint8* ModifiedBlock =
-                        SourceModifications
-                            ? SourceModifications->Find(SourceLocalIndex)
-                            : nullptr;
-
-                    if (ModifiedBlock)
+                    bool bIsModified = false;
+                    if (const TMap<int32, uint8>* SourceModifications =
+                        ModifiedBlocks.Find(SourceChunkCoord))
                     {
-                        // Rendered by the cubic layer; used as solid only
-                        // when this is a placed solid voxel (not mined Air).
-                        if (IsVoxelSolid(*ModifiedBlock))
-                        {
-                            DensityBlock = *ModifiedBlock;
-                        }
+                        bIsModified =
+                            SourceModifications->Contains(SourceLocalIndex);
+                    }
+
+                    if (bIsModified)
+                    {
+                        Block = uint8(EVoxelBlock::Air);
                     }
                     else if (WorldBlock.X >= 0 &&
                              WorldBlock.X < WorldSizeX * ChunkSize &&
@@ -1708,7 +1682,6 @@ void AVoxelWorld::BuildMarchingCubesData(
                             WorldBlock.Z,
                             SeaLevel,
                             BeachWidth);
-                        DensityBlock = Block;
                     }
                 }
 
@@ -1718,7 +1691,6 @@ void AVoxelWorld::BuildMarchingCubesData(
                     (Z + 1) * Side * Side;
 
                 OutData.Blocks[Index] = Block;
-                OutData.DensityBlocks[Index] = DensityBlock;
             }
         }
     }

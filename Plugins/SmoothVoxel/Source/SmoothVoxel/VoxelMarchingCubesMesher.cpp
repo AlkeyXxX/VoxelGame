@@ -254,32 +254,6 @@ uint8 FVoxelMarchingCubesMesher::GetBlock(
 }
 
 
-uint8 FVoxelMarchingCubesMesher::GetDensityBlock(
-    const FVoxelMarchingCubesBuildInput& Input,
-    int32 X,
-    int32 Y,
-    int32 Z)
-{
-    if (X < -1 || X > Input.Size ||
-        Y < -1 || Y > Input.Size ||
-        Z < -1 || Z > Input.Size)
-    {
-        return uint8(EVoxelBlock::Air);
-    }
-
-    const int32 Index =
-        MarchingCubesBlockIndex(
-            X,
-            Y,
-            Z,
-            Input.Size);
-
-    return Input.DensityBlocks.IsValidIndex(Index)
-        ? Input.DensityBlocks[Index]
-        : GetBlock(Input, X, Y, Z);
-}
-
-
 float FVoxelMarchingCubesMesher::GetDensity(
     const FVoxelMarchingCubesBuildInput& Input,
     int32 X,
@@ -294,119 +268,15 @@ float FVoxelMarchingCubesMesher::GetDensity(
         {
             for (int32 DX = 0; DX <= 1; ++DX)
             {
-                const int32 BlockX = X - 1 + DX;
-                const int32 BlockY = Y - 1 + DY;
-                const int32 BlockZ = Z - 1 + DZ;
-
-                const EVoxelBlock TerrainBlock =
+                const EVoxelBlock Block =
                     static_cast<EVoxelBlock>(
                         GetBlock(
                             Input,
-                            BlockX,
-                            BlockY,
-                            BlockZ));
+                            X - 1 + DX,
+                            Y - 1 + DY,
+                            Z - 1 + DZ));
 
-                if (IsVoxelSolid(TerrainBlock))
-                {
-                    Sum += 1.0f;
-                    continue;
-                }
-
-                /*
-                 * Player-placed cubes are not part of the base smooth field.
-                 * To close the tiny air gap between a placed cube and the
-                 * original terrain, count that cube only at density nodes
-                 * shared with a face-adjacent, unmodified solid terrain cell.
-                 *
-                 * This is directional: a cube touching terrain on its outer
-                 * side contributes there, but it does not pull terrain across
-                 * its opposite face into the interior of a tunnel/room.
-                 */
-                const EVoxelBlock CurrentBlock =
-                    static_cast<EVoxelBlock>(
-                        GetDensityBlock(
-                            Input,
-                            BlockX,
-                            BlockY,
-                            BlockZ));
-
-                if (!IsVoxelSolid(CurrentBlock))
-                {
-                    continue;
-                }
-
-                bool bTouchesTerrainAcrossNode = false;
-
-                if (DX == 0)
-                {
-                    bTouchesTerrainAcrossNode =
-                        IsVoxelSolid(
-                            GetBlock(
-                                Input,
-                                X,
-                                BlockY,
-                                BlockZ));
-                }
-                else
-                {
-                    bTouchesTerrainAcrossNode =
-                        IsVoxelSolid(
-                            GetBlock(
-                                Input,
-                                X - 1,
-                                BlockY,
-                                BlockZ));
-                }
-
-                if (!bTouchesTerrainAcrossNode)
-                {
-                    if (DY == 0)
-                    {
-                        bTouchesTerrainAcrossNode =
-                            IsVoxelSolid(
-                                GetBlock(
-                                    Input,
-                                    BlockX,
-                                    Y,
-                                    BlockZ));
-                    }
-                    else
-                    {
-                        bTouchesTerrainAcrossNode =
-                            IsVoxelSolid(
-                                GetBlock(
-                                    Input,
-                                    BlockX,
-                                    Y - 1,
-                                    BlockZ));
-                    }
-                }
-
-                if (!bTouchesTerrainAcrossNode)
-                {
-                    if (DZ == 0)
-                    {
-                        bTouchesTerrainAcrossNode =
-                            IsVoxelSolid(
-                                GetBlock(
-                                    Input,
-                                    BlockX,
-                                    BlockY,
-                                    Z));
-                    }
-                    else
-                    {
-                        bTouchesTerrainAcrossNode =
-                            IsVoxelSolid(
-                                GetBlock(
-                                    Input,
-                                    BlockX,
-                                    BlockY,
-                                    Z - 1));
-                    }
-                }
-
-                if (bTouchesTerrainAcrossNode)
+                if (IsVoxelSolid(Block))
                 {
                     Sum += 1.0f;
                 }
@@ -548,141 +418,6 @@ void FVoxelMarchingCubesMesher::Build(
         }
     }
 
-    bool bHasPlacedSolidForDensity = false;
-    const int32 DensityBlockCount =
-        FMath::Min(Input.Blocks.Num(), Input.DensityBlocks.Num());
-
-    for (int32 BlockIndex = 0;
-         BlockIndex < DensityBlockCount;
-         ++BlockIndex)
-    {
-        if (!IsVoxelSolid(Input.Blocks[BlockIndex]) &&
-            IsVoxelSolid(Input.DensityBlocks[BlockIndex]))
-        {
-            bHasPlacedSolidForDensity = true;
-            break;
-        }
-    }
-
-    if (bHasPlacedSolidForDensity)
-    {
-    /*
-     * Make a very shallow recess around exposed tops of placed blocks by
-     * adjusting scalar density samples, not mesh vertices. The target value
-     * places the usual IsoLevel crossing at 12/13 of the vertical edge,
-     * i.e. 1/13 voxel below the block's top. Marching Cubes still builds all
-     * triangles normally, so cave walls and ceilings are not deformed.
-     */
-    /*
-     * Keep the unmodified field as the source for every correction. If a
-     * lower placed block has already adjusted a density node, a higher block
-     * must not inherit that change and amplify the undercut vertically.
-     */
-    const TArray<float> OriginalDensities = Densities;
-
-    for (int32 Z = 1; Z <= Size; ++Z)
-    {
-        for (int32 Y = 0; Y <= Size; ++Y)
-        {
-            for (int32 X = 0; X <= Size; ++X)
-            {
-                const float DensityBelow =
-                    OriginalDensities[
-                        DensityIndex(
-                            X,
-                            Y,
-                            Z - 1,
-                            Size)];
-
-                if (DensityBelow <= IsoLevel)
-                {
-                    continue;
-                }
-
-                const int32 CandidateX[2] = { X - 1, X };
-                const int32 CandidateY[2] = { Y - 1, Y };
-                bool bExposedPlacedTop = false;
-
-                for (int32 CY = 0;
-                     CY < 2 && !bExposedPlacedTop;
-                     ++CY)
-                {
-                    for (int32 CX = 0; CX < 2; ++CX)
-                    {
-                        const int32 BlockX = CandidateX[CX];
-                        const int32 BlockY = CandidateY[CY];
-                        const int32 BlockZ = Z - 1;
-
-                        const bool bTerrainBlock =
-                            IsVoxelSolid(
-                                GetBlock(
-                                    Input,
-                                    BlockX,
-                                    BlockY,
-                                    BlockZ));
-
-                        const bool bDensityBlock =
-                            IsVoxelSolid(
-                                GetDensityBlock(
-                                    Input,
-                                    BlockX,
-                                    BlockY,
-                                    BlockZ));
-
-                        const bool bTerrainAbove =
-                            IsVoxelSolid(
-                                GetBlock(
-                                    Input,
-                                    BlockX,
-                                    BlockY,
-                                    Z));
-
-                        const bool bDensityAbove =
-                            IsVoxelSolid(
-                                GetDensityBlock(
-                                    Input,
-                                    BlockX,
-                                    BlockY,
-                                    Z));
-
-                        /*
-                         * A placed solid exists only in DensityBlocks, not
-                         * the terrain-only render array. Require open space
-                         * immediately above it so buried blocks stay buried.
-                         */
-                        if (!bTerrainBlock &&
-                            bDensityBlock &&
-                            !bTerrainAbove &&
-                            !bDensityAbove)
-                        {
-                            bExposedPlacedTop = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (!bExposedPlacedTop)
-                {
-                    continue;
-                }
-
-                const float TargetDensity =
-                    DensityBelow +
-                    (IsoLevel - DensityBelow) * (13.0f / 12.0f);
-
-                Densities[
-                    DensityIndex(
-                        X,
-                        Y,
-                        Z,
-                        Size)] =
-                    TargetDensity;
-            }
-        }
-    }
-
-    }
-
     const int32 XEdgeCount =
         Size * (Size + 1) * (Size + 1);
 
@@ -726,24 +461,6 @@ void FVoxelMarchingCubesMesher::Build(
         {
             for (int32 X = 0; X < Size; ++X)
             {
-                /*
-                 * A player-placed solid block is kept in DensityBlocks so
-                 * surrounding terrain can meet its cubic side, but the cell
-                 * itself is rendered only by the cubic mesher. This avoids
-                 * duplicate surfaces/collision inside the placed block.
-                 */
-                if (!IsVoxelSolid(GetBlock(Input, X, Y, Z)) &&
-                    IsVoxelSolid(GetDensityBlock(Input, X, Y, Z)))
-                {
-                    continue;
-                }
-
-                /*
-                 * Do not skip whole cells above placed blocks here. A wall
-                 * or cave-floor surface may pass through the same cell;
-                 * suppressing the entire cell opens large holes.
-                 */
-
                 float CornerDensity[8];
 
                 int32 CubeIndex = 0;
