@@ -697,10 +697,6 @@ void AVoxelWorld::GetTerrainDebugInfo(
 
     switch (Biome)
     {
-    case EVoxelBiome::Forest:
-        OutBiomeName = TEXT("Forest");
-        break;
-
     case EVoxelBiome::Desert:
         OutBiomeName = TEXT("Desert");
         break;
