@@ -1475,33 +1475,64 @@ void AVoxelWorld::BuildMarchingCubesData(
 
     const int32 Side = ChunkSize + 2;
 
+    /*
+     * Cache this chunk and its 26 neighbours once. The previous version
+     * searched the Chunks TMap and recomputed world/local coordinates for
+     * every one of the (ChunkSize + 2)^3 samples, repeated for each rebuild.
+     */
+    const AVoxelChunk* NeighborChunks[3][3][3] = {};
+
+    for (int32 NZ = -1; NZ <= 1; ++NZ)
+    {
+        for (int32 NY = -1; NY <= 1; ++NY)
+        {
+            for (int32 NX = -1; NX <= 1; ++NX)
+            {
+                NeighborChunks[NX + 1][NY + 1][NZ + 1] =
+                    Chunks.FindRef(
+                        ChunkCoord + FIntVector(NX, NY, NZ));
+            }
+        }
+    }
+
     for (int32 Z = -1; Z <= ChunkSize; ++Z)
     {
+        const int32 SourceChunkZ =
+            Z < 0 ? -1 : (Z >= ChunkSize ? 1 : 0);
+        const int32 LocalZ =
+            Z < 0 ? ChunkSize - 1 :
+            (Z >= ChunkSize ? 0 : Z);
+
         for (int32 Y = -1; Y <= ChunkSize; ++Y)
         {
+            const int32 SourceChunkY =
+                Y < 0 ? -1 : (Y >= ChunkSize ? 1 : 0);
+            const int32 LocalY =
+                Y < 0 ? ChunkSize - 1 :
+                (Y >= ChunkSize ? 0 : Y);
+
             for (int32 X = -1; X <= ChunkSize; ++X)
             {
-                const FIntVector WorldBlock(
-                    ChunkCoord.X * ChunkSize + X,
-                    ChunkCoord.Y * ChunkSize + Y,
-                    ChunkCoord.Z * ChunkSize + Z);
+                const int32 SourceChunkX =
+                    X < 0 ? -1 : (X >= ChunkSize ? 1 : 0);
+                const int32 LocalX =
+                    X < 0 ? ChunkSize - 1 :
+                    (X >= ChunkSize ? 0 : X);
 
-                const FIntVector NeighborChunkCoord =
-                    WorldBlockToChunk(WorldBlock);
+                uint8 Block = uint8(EVoxelBlock::Air);
 
-                const FIntVector LocalBlock =
-                    WorldBlockToLocal(WorldBlock);
+                const AVoxelChunk* SourceChunk =
+                    NeighborChunks
+                        [SourceChunkX + 1]
+                        [SourceChunkY + 1]
+                        [SourceChunkZ + 1];
 
-                uint8 Block =
-                    uint8(EVoxelBlock::Air);
-
-                if (const AVoxelChunk* Chunk =
-                    Chunks.FindRef(NeighborChunkCoord))
+                if (SourceChunk)
                 {
-                    Block = Chunk->GetTerrainBlock(
-                        LocalBlock.X,
-                        LocalBlock.Y,
-                        LocalBlock.Z);
+                    Block = SourceChunk->GetTerrainBlock(
+                        LocalX,
+                        LocalY,
+                        LocalZ);
                 }
 
                 const int32 Index =
@@ -1514,7 +1545,6 @@ void AVoxelWorld::BuildMarchingCubesData(
         }
     }
 }
-
 
 bool AVoxelWorld::IsPositionInsideWater(
     const FVector& WorldPosition) const
