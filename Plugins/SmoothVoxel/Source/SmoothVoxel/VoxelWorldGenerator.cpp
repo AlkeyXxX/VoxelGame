@@ -668,43 +668,55 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
 
     const float Temperature = GetTemperature(WorldX, WorldY);
 
-    const FVector2D MacroBorderSamplePosition(
-        NormalizedX * 3.2f + Settings.Seed * 0.037f,
-        NormalizedY * 3.2f - Settings.Seed * 0.021f);
-
-    const FVector2D FineBorderSamplePosition(
-        NormalizedX * 8.5f - Settings.Seed * 0.017f,
-        NormalizedY * 8.5f + Settings.Seed * 0.029f);
-
-    const float MacroBorderNoise =
-        FMath::PerlinNoise2D(MacroBorderSamplePosition) * 0.030f;
-
-    const float FineBorderNoise =
-        FMath::PerlinNoise2D(FineBorderSamplePosition) * 0.006f;
-
     /*
-     * Warmer columns very slightly push the classification away from Snow
-     * and toward Desert. The offset is deliberately small: macro geography
-     * remains recognizable, while border shape responds to the climate map.
+     * Generate broad, irregular climate regions rather than fixed diagonal
+     * stripes. Low-frequency domain warping bends biome borders over long
+     * distances, while a small secondary signal keeps borders from looking
+     * perfectly smooth or geometric. The field is normalized to world size,
+     * so the region scale stays consistent for different map dimensions.
      */
-    const float TemperatureBorderOffset =
-        (Temperature - 0.5f) * 0.012f;
+    const FVector2D ClimateWarpXPosition(
+        NormalizedX * 2.8f + Settings.Seed * 0.023f,
+        NormalizedY * 2.8f - Settings.Seed * 0.017f);
 
-    const float DiagonalPosition =
-        NormalizedX - NormalizedY +
-        MacroBorderNoise +
-        FineBorderNoise +
+    const FVector2D ClimateWarpYPosition(
+        NormalizedX * 2.8f - Settings.Seed * 0.031f,
+        NormalizedY * 2.8f + Settings.Seed * 0.019f);
+
+    const float ClimateWarpX =
+        FMath::PerlinNoise2D(ClimateWarpXPosition) * 0.12f;
+
+    const float ClimateWarpY =
+        FMath::PerlinNoise2D(ClimateWarpYPosition) * 0.12f;
+
+    const FVector2D MacroClimatePosition(
+        (NormalizedX + ClimateWarpX) * 4.2f + Settings.Seed * 0.037f,
+        (NormalizedY + ClimateWarpY) * 4.2f - Settings.Seed * 0.021f);
+
+    const FVector2D FineClimatePosition(
+        NormalizedX * 9.0f - Settings.Seed * 0.017f,
+        NormalizedY * 9.0f + Settings.Seed * 0.029f);
+
+    const float MacroClimateNoise =
+        FMath::PerlinNoise2D(MacroClimatePosition);
+
+    const float FineClimateNoise =
+        FMath::PerlinNoise2D(FineClimatePosition) * 0.12f;
+
+    const float TemperatureBorderOffset =
+        (Temperature - 0.5f) * 0.10f;
+
+    const float ClimateScore =
+        MacroClimateNoise * 0.88f +
+        FineClimateNoise +
         TemperatureBorderOffset;
 
-    const float BandBoundary =
-        1.0f - FMath::Sqrt(2.0f / 3.0f);
-
-    if (DiagonalPosition < -BandBoundary)
+    if (ClimateScore < -0.24f)
     {
         return EVoxelBiome::Snow;
     }
 
-    if (DiagonalPosition > BandBoundary)
+    if (ClimateScore > 0.24f)
     {
         return EVoxelBiome::Desert;
     }
@@ -729,8 +741,8 @@ EVoxelBiome FVoxelWorldGenerator::GetBiome(
         GetMoisture(WorldX, WorldY);
 
     const float ForestScore =
-        Moisture * 0.65f +
-        GreenPatchScore * 0.35f;
+        Moisture * 0.35f +
+        GreenPatchScore * 0.65f;
 
     /*
      * Warmer green locations can support forest at a slightly lower score;
