@@ -56,6 +56,9 @@ namespace
         case EVoxelBlock::Water:
             return TEXT("Water");
 
+        case EVoxelBlock::Snow:
+            return TEXT("Snow");
+
         case EVoxelBlock::Air:
         default:
             return TEXT("Air");
@@ -126,6 +129,18 @@ FVoxelBlockDefinition UVoxelBlockLibrary::GetBlockDefinition(
             true,
             false,
             EVoxelBlock::Wood,
+            TEXT("Default"));
+
+    case EVoxelBlock::Snow:
+        return MakeBlock(
+            EVoxelBlock::Snow,
+            TEXT("Снег"),
+            0.8f,
+            true,
+            true,
+            true,
+            false,
+            EVoxelBlock::Snow,
             TEXT("Default"));
 
     case EVoxelBlock::Water:
