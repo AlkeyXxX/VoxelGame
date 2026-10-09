@@ -176,6 +176,12 @@ void FVoxelTerrainLODMesher::Build(
     const FVoxelTerrainLODBuildInput& Input,
     FVoxelTerrainLODMeshOutput& Output)
 {
+    if (Input.CancellationToken.IsValid() &&
+        Input.CancellationToken->AtomicRead())
+    {
+        return;
+    }
+
     if (Input.WorldSizeX <= 0 ||
         Input.WorldSizeY <= 0 ||
         Input.ChunkSize <= 0 ||
@@ -268,6 +274,11 @@ void FVoxelTerrainLODMesher::Build(
 
     for (int32 Y = 0; Y < CountY; ++Y)
     {
+        if (Input.CancellationToken.IsValid() &&
+            Input.CancellationToken->AtomicRead())
+        {
+            return;
+        }
         for (int32 X = 0; X < CountX; ++X)
         {
             const int32 WorldX =
@@ -339,6 +350,11 @@ void FVoxelTerrainLODMesher::Build(
      */
     for (int32 Y = 0; Y < CountY; ++Y)
     {
+        if (Input.CancellationToken.IsValid() &&
+            Input.CancellationToken->AtomicRead())
+        {
+            return;
+        }
         for (int32 X = 0; X < CountX; ++X)
         {
             const int32 Index =
@@ -418,6 +434,11 @@ void FVoxelTerrainLODMesher::Build(
 
     for (int32 Y = 0; Y < CountY; ++Y)
     {
+        if (Input.CancellationToken.IsValid() &&
+            Input.CancellationToken->AtomicRead())
+        {
+            return;
+        }
         for (int32 X = 0; X < CountX; ++X)
         {
             const int32 Index =
@@ -458,6 +479,11 @@ void FVoxelTerrainLODMesher::Build(
 
     for (int32 Y = 0; Y < CountY - 1; ++Y)
     {
+        if (Input.CancellationToken.IsValid() &&
+            Input.CancellationToken->AtomicRead())
+        {
+            return;
+        }
         for (int32 X = 0; X < CountX - 1; ++X)
         {
             const int32 I00 =
