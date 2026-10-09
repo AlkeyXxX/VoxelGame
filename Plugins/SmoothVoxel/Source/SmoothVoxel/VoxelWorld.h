@@ -382,6 +382,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads")
     bool bBuildRWGRoadSurface = true;
 
+    // Collision lets the player walk/drive over road ribbons and bridge decks.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads")
+    bool bEnableRWGRoadCollision = true;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads")
     UMaterialInterface* RWGRoadMaterial = nullptr;
 
