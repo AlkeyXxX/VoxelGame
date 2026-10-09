@@ -545,6 +545,12 @@ void FVoxelMesher::Build(
 
     for (int32 Z = 0; Z < Size; ++Z)
     {
+        if (Input.CancellationToken.IsValid() &&
+            static_cast<bool>(*Input.CancellationToken))
+        {
+            return;
+        }
+
         for (int32 Y = 0; Y < Size; ++Y)
         {
             for (int32 X = 0; X < Size; ++X)
