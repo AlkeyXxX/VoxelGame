@@ -245,6 +245,14 @@ public:
         meta=(ClampMin="1", ClampMax="8"))
     int32 MaxChunksPerTick = 1;
 
+    /* Limit synchronous mesh-input preparation to smooth out streaming hitches. */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Streaming",
+        meta=(ClampMin="1", ClampMax="32"))
+    int32 MaxChunkMeshRebuildsPerTick = 8;
+
 
     /*
      * Размер чанка.
@@ -454,6 +462,9 @@ private:
      */
     TMap<FIntVector, TMap<int32, uint8>> ModifiedBlocks;
 
+    /* Unique chunk coordinates waiting for their mesh input to be snapshotted. */
+    TArray<FIntVector> PendingChunkMeshRebuilds;
+
     TMap<int64, uint8> PersistentObjectStates;
     float TimeSinceLastAutoSave = 0.0f;
 
@@ -511,6 +522,11 @@ private:
      */
     void RebuildChunkAndNeighbors(
         const FIntVector& ChunkCoord);
+
+    void QueueChunkNeighborhoodRebuilds(
+        const FIntVector& ChunkCoord);
+
+    void ProcessPendingChunkMeshRebuilds();
 
 
     /*
