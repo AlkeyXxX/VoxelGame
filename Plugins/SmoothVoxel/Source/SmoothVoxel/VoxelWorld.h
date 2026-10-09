@@ -13,6 +13,7 @@
 
 
 class AVoxelChunk;
+class FVoxelRWGPlanner;
 class UMaterialInterface;
 class UVoxelWorldSaveGame;
 class UDataTable;
@@ -378,6 +379,21 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="1.0"))
     float RWGDebugDrawDuration = 60.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads")
+    bool bBuildRWGRoadSurface = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads")
+    UMaterialInterface* RWGRoadMaterial = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="20.0"))
+    float RWGRoadWidthMainBlocks = 8.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="16.0"))
+    float RWGRoadWidthConnectorBlocks = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="12.0"))
+    float RWGRoadWidthLocalBlocks = 3.5f;
+
 
     /*
      * Базовая высота поверхности.
@@ -654,6 +670,12 @@ private:
         FIntVector::ZeroValue;
 
     bool bUnderwaterEffectActive = false;
+
+    UPROPERTY(Transient)
+    UProceduralMeshComponent* RWGRoadMesh = nullptr;
+
+    void BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner);
+    void ClearRWGRoadSurface();
 
     UPROPERTY()
     UProceduralMeshComponent* FarLOD1Mesh = nullptr;
