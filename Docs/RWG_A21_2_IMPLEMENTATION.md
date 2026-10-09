@@ -40,20 +40,20 @@ The first map-wide planning pass is now available from `AVoxelWorld`:
 - Press **F2** in PIE to build a deterministic layout report for the current seed.
 - The planner samples the existing terrain/water generator on a configurable coarse grid, prefers buildable dry settlement sites, and increases route cost on steep ground.
 - It places settlement hubs (city/town/village/rural/industrial categories), biome-tagged POI markers, a settlement road backbone, a limited number of connector loops, and local roads from each POI to its hub.
-- Road paths use A* over the sampled cost grid. Deep water is avoided; narrow higher-elevation carved channels are expensive rather than strictly forbidden.
+- Road paths use A* over the sampled cost grid. Deep water is blocked; shallow water is assigned a high cost so the planner prefers dry detours, and route endpoints prefer nearby dry grid samples when possible.
 - The export is written to `Saved/RWG/WorldLayout.csv`; the planner summary appears in the Output Log and the debug overlay is drawn temporarily in the current world.
 - Default test scale: 12 settlement hubs, 72 POIs, 32-block route-grid spacing, and 512-block macro cells on a 4096×4096-block map. These are tuning defaults, not asserted A21.2 source values.
 
-The planner is deliberately data-only at this stage. It now builds a deterministic macro-cell grid (default 512 voxel blocks per cell), classifies cells as wilderness/rural/town/city/industrial using seeded cell values plus broad noise, samples biome/landform/buildability, and prefers zoned cells when placing hubs. The CSV includes a `CELL` record for every grid cell; when the debug preview is enabled, colored cell outlines show the zoning. This is a tunable prototype rather than a claim that 512 blocks matches an A21.2 internal constant. It does **not** yet change voxel blocks, create road meshes, spawn prefabs, reproduce A21 district/township rules, or parse the original game's `rwgmixer.xml`. The layout build is triggered explicitly with F2 and is not run automatically when a world starts.
+The planner is deliberately data-only at this stage. It now builds a deterministic macro-cell grid (default 512 voxel blocks per cell), classifies cells as wilderness/rural/town/city/industrial using seeded cell values plus broad noise, samples biome/landform/buildability, and prefers zoned cells when placing hubs. The CSV includes a `CELL` record for every grid cell; when the debug preview is enabled, colored cell outlines show the zoning. This is a tunable prototype rather than a claim that 512 blocks matches an A21.2 internal constant. It does **not** yet change voxel blocks, spawn POI prefabs, reproduce A21 district/township rules, or parse the original game's `rwgmixer.xml`. The layout build is triggered explicitly with F2 and is not run automatically when a world starts.
 
 ## Procedural road surface preview
 
 F2 now also builds a non-colliding `UProceduralMeshComponent` road surface from the planned routes:
 
 - Main, connector and local roads are separate mesh sections with independent width controls in voxel blocks.
-- Centerlines are resampled at short intervals and the surface height is queried from the same terrain/water generator to avoid long straight strips cutting through hills.
-- The road surface is visual geometry only: it does not modify voxel blocks, create collision, or yet generate A21-style road tiles/intersections/driveway transitions.
-- In the `VoxelWorld` Details panel, assign `RWGRoadMaterial` to a road material (the current voxel material/default surface material is the fallback). Tune `RWGRoadWidthMainBlocks`, `RWGRoadWidthConnectorBlocks`, and `RWGRoadWidthLocalBlocks` as needed. Turn off `bBuildRWGRoadSurface` to suppress the mesh while keeping the CSV/debug plan.
+- Centerlines are resampled at short intervals; both road shoulders are sampled against the voxel terrain to reduce buried edges. Where a path crosses a detected water span, the preview interpolates a bridge deck between dry banks instead of dipping to the waterline. POIs near an existing backbone road can connect to that road, and access ribbons stop near the POI footprint rather than at its center.
+- The road surface and bridge deck are visual geometry only: they do not modify voxel blocks, create collision, or yet generate A21-style road tiles, terrain cut/fill, bridge supports, intersections, or driveway transitions.
+- In the `VoxelWorld` Details panel, optionally assign `RWGRoadMaterial`; otherwise the mesh uses Unreal's default surface material. Tune `RWGRoadWidthMainBlocks`, `RWGRoadWidthConnectorBlocks`, and `RWGRoadWidthLocalBlocks` as needed. Turn off `bBuildRWGRoadSurface` to suppress the mesh while keeping the CSV/debug plan.
 
 ## Validation checklist
 
