@@ -26,6 +26,7 @@ public:
     AVoxelChunk();
 
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 
     /*
@@ -238,6 +239,7 @@ private:
      * его результат будет проигнорирован.
      */
     uint32 MeshGenerationVersion = 0;
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> MeshBuildCancellationToken;
     uint32 DataGenerationVersion = 0;
     bool bGeneratedDataReady = false;
 
