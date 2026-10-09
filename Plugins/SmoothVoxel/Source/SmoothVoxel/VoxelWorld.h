@@ -366,7 +366,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="8", ClampMax="128"))
     int32 RWGGridSpacing = 32;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG")
     bool bDrawRWGDebugPreview = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="1.0"))
