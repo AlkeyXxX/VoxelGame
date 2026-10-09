@@ -46,6 +46,15 @@ The first map-wide planning pass is now available from `AVoxelWorld`:
 
 The planner is deliberately data-only at this stage. It now builds a deterministic macro-cell grid (default 512 voxel blocks per cell), classifies cells as wilderness/rural/town/city/industrial using seeded cell values plus broad noise, samples biome/landform/buildability, and prefers zoned cells when placing hubs. The CSV includes a `CELL` record for every grid cell; when the debug preview is enabled, colored cell outlines show the zoning. This is a tunable prototype rather than a claim that 512 blocks matches an A21.2 internal constant. It does **not** yet change voxel blocks, create road meshes, spawn prefabs, reproduce A21 district/township rules, or parse the original game's `rwgmixer.xml`. The layout build is triggered explicitly with F2 and is not run automatically when a world starts.
 
+## Procedural road surface preview
+
+F2 now also builds a non-colliding `UProceduralMeshComponent` road surface from the planned routes:
+
+- Main, connector and local roads are separate mesh sections with independent width controls in voxel blocks.
+- Centerlines are resampled at short intervals and the surface height is queried from the same terrain/water generator to avoid long straight strips cutting through hills.
+- The road surface is visual geometry only: it does not modify voxel blocks, create collision, or yet generate A21-style road tiles/intersections/driveway transitions.
+- In the `VoxelWorld` Details panel, assign `RWGRoadMaterial` to a road material (the current voxel material/default surface material is the fallback). Tune `RWGRoadWidthMainBlocks`, `RWGRoadWidthConnectorBlocks`, and `RWGRoadWidthLocalBlocks` as needed. Turn off `bBuildRWGRoadSurface` to suppress the mesh while keeping the CSV/debug plan.
+
 ## Validation checklist
 
 1. Open `MyVoxelGame.uproject` with Unreal Engine 4.27 and allow C++ modules to rebuild if prompted.
@@ -53,6 +62,8 @@ The planner is deliberately data-only at this stage. It now builds a determinist
 3. Run PIE: test `F` for debug flight and `F1` for the debug menu.
 4. Test chunk boundaries, terrain edits, hotbar, water/coast transitions and save/load.
 5. Press F2 in PIE and inspect `Saved/RWG/WorldLayout.csv`; confirm the debug roads and markers align with the generated terrain.
-6. Check the Output Log for compile/runtime errors before using this branch as the new baseline.
+6. Check the procedural road mesh; assign `RWGRoadMaterial` if the fallback material does not look like pavement.
+7. Check the Output Log for compile/runtime errors before using this branch as the new baseline.
+
 
 The branch has been assembled on GitHub, but it has not been compiled or launched in the user's local Unreal installation from this environment.
