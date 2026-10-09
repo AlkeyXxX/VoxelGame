@@ -892,9 +892,9 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                 // the terrain beneath either shoulder. Across water, preserve
                 // the interpolated bridge deck height instead of dipping to water.
                 const float LeftZ = IsWaterAt(LeftX, LeftY)
-                    ? Center.Z : SampleSurfaceHeight(LeftX, LeftY);
+                    ? Center.Z : FMath::Max(Center.Z, SampleSurfaceHeight(LeftX, LeftY));
                 const float RightZ = IsWaterAt(RightX, RightY)
-                    ? Center.Z : SampleSurfaceHeight(RightX, RightY);
+                    ? Center.Z : FMath::Max(Center.Z, SampleSurfaceHeight(RightX, RightY));
 
                 const FVector Left(LeftX * VoxelSize, LeftY * VoxelSize, LeftZ * VoxelSize);
                 const FVector Right(RightX * VoxelSize, RightY * VoxelSize, RightZ * VoxelSize);
@@ -1090,43 +1090,48 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
             }
         }
 
-        for (const FVoxelRWGRoad& Road : Planner.GetRoads())
+        // When a road mesh is enabled, skip the second line-only overlay:
+        // those guide lines follow the waterline and can appear below a bridge deck.
+        if (!bBuildRWGRoadSurface)
         {
-            FColor Color = FColor(70, 160, 255);
-            float Thickness = 2.0f;
-            if (Road.Type == EVoxelRWGRoadType::Main)
+            for (const FVoxelRWGRoad& Road : Planner.GetRoads())
             {
-                Color = FColor(255, 150, 35);
-                Thickness = 6.0f;
-            }
-            else if (Road.Type == EVoxelRWGRoadType::Local)
-            {
-                Color = FColor(90, 220, 170);
-                Thickness = 1.5f;
-            }
-
-            for (int32 I = 1; I < Road.Points.Num(); ++I)
-            {
-                const FVector& A = Road.Points[I - 1];
-                const FVector& B = Road.Points[I];
-                const float SegmentLength = FVector2D(B.X - A.X, B.Y - A.Y).Size();
-                const int32 Steps = FMath::Clamp(
-                    FMath::CeilToInt(SegmentLength / 8.0f), 1, 512);
-
-                FVector Previous(
-                    A.X, A.Y, SampleRoadSurface(A.X, A.Y));
-
-                for (int32 Step = 1; Step <= Steps; ++Step)
+                FColor Color = FColor(70, 160, 255);
+                float Thickness = 2.0f;
+                if (Road.Type == EVoxelRWGRoadType::Main)
                 {
-                    const float T = static_cast<float>(Step) / static_cast<float>(Steps);
-                    const float X = FMath::Lerp(A.X, B.X, T);
-                    const float Y = FMath::Lerp(A.Y, B.Y, T);
-                    const FVector Current(X, Y, SampleRoadSurface(X, Y));
+                    Color = FColor(255, 150, 35);
+                    Thickness = 6.0f;
+                }
+                else if (Road.Type == EVoxelRWGRoadType::Local)
+                {
+                    Color = FColor(90, 220, 170);
+                    Thickness = 1.5f;
+                }
 
-                    DrawDebugLine(GetWorld(), ToWorldPosition(Previous),
-                        ToWorldPosition(Current), Color, true,
-                        RWGDebugDrawDuration, 0, Thickness);
-                    Previous = Current;
+                for (int32 I = 1; I < Road.Points.Num(); ++I)
+                {
+                    const FVector& A = Road.Points[I - 1];
+                    const FVector& B = Road.Points[I];
+                    const float SegmentLength = FVector2D(B.X - A.X, B.Y - A.Y).Size();
+                    const int32 Steps = FMath::Clamp(
+                        FMath::CeilToInt(SegmentLength / 8.0f), 1, 512);
+
+                    FVector Previous(
+                        A.X, A.Y, SampleRoadSurface(A.X, A.Y));
+
+                    for (int32 Step = 1; Step <= Steps; ++Step)
+                    {
+                        const float T = static_cast<float>(Step) / static_cast<float>(Steps);
+                        const float X = FMath::Lerp(A.X, B.X, T);
+                        const float Y = FMath::Lerp(A.Y, B.Y, T);
+                        const FVector Current(X, Y, SampleRoadSurface(X, Y));
+
+                        DrawDebugLine(GetWorld(), ToWorldPosition(Previous),
+                            ToWorldPosition(Current), Color, true,
+                            RWGDebugDrawDuration, 0, Thickness);
+                        Previous = Current;
+                    }
                 }
             }
         }
