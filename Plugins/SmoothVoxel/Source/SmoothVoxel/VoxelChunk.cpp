@@ -67,6 +67,31 @@ void AVoxelChunk::InitializeChunk(
 }
 
 
+void AVoxelChunk::SetGeneratedData(
+    TArray<uint8>&& InBlocks,
+    TArray<uint8>&& InBaseBlocks,
+    TArray<uint8>&& InBiomes,
+    TArray<uint8>&& InModificationFlags)
+{
+    const int32 ExpectedCount =
+        ChunkSize * ChunkSize * ChunkSize;
+
+    if (InBlocks.Num() != ExpectedCount ||
+        InBaseBlocks.Num() != ExpectedCount ||
+        InBiomes.Num() != ExpectedCount ||
+        InModificationFlags.Num() != ExpectedCount)
+    {
+        ensureMsgf(false, TEXT("Invalid generated voxel data size."));
+        return;
+    }
+
+    Blocks = MoveTemp(InBlocks);
+    BaseBlocks = MoveTemp(InBaseBlocks);
+    Biomes = MoveTemp(InBiomes);
+    ModificationFlags = MoveTemp(InModificationFlags);
+}
+
+
 void AVoxelChunk::SetVoxelMaterial(
     UMaterialInterface* InMaterial)
 {
