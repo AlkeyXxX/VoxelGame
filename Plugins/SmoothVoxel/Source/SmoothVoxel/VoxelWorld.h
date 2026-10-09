@@ -21,6 +21,20 @@ class UProceduralMeshComponent;
 
 
 /*
+ * Deterministic terrain cut/fill stamp for one XY road/shoulder column.
+ * SurfaceZ is a world-block height; dry road columns are flattened to this
+ * height while adjacent shoulder columns blend back to the native terrain.
+ */
+struct FVoxelRWGRoadStamp
+{
+    int32 SurfaceZ = INDEX_NONE;
+    uint8 SurfaceBlock = uint8(EVoxelBlock::Dirt);
+    uint8 FillBlock = uint8(EVoxelBlock::Dirt);
+    uint8 Priority = 0;
+    bool bRoadSurface = true;
+};
+
+/*
  * Immutable inputs needed to build the Marching Cubes halo.
  * Captured on the Game Thread, evaluated on a worker thread without
  * reading Actors, Components, or AVoxelWorld containers.
@@ -38,6 +52,7 @@ struct FVoxelMarchingCubesDataSnapshot
     float VoxelSize = 100.0f;
 
     TMap<FIntVector, TMap<int32, uint8>> ChunkModifications;
+    TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> RoadStamps;
     TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancellationToken;
 
     void Build(FVoxelMarchingCubesBuildInput& OutData) const;
@@ -678,6 +693,9 @@ private:
     UPROPERTY(Transient)
     UProceduralMeshComponent* RWGRoadMesh = nullptr;
 
+    TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> RWGRoadSurfaceStamps;
+
+    void BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner);
     void BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner);
     void ClearRWGRoadSurface();
 
