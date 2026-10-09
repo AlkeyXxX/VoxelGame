@@ -694,6 +694,7 @@ private:
     UProceduralMeshComponent* RWGRoadMesh = nullptr;
 
     TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> RWGRoadSurfaceStamps;
+    TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe> RWGRoadLODHeights;
 
     void BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner);
     void BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner);
