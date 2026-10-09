@@ -2,6 +2,11 @@
 #include "VoxelWorld.h"
 #include "VoxelChunk.h"
 #include "VoxelWorldGenerator.h"
+#include "VoxelRWGPlanner.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "HAL/PlatformFilemanager.h"
+#include "DrawDebugHelpers.h"
 #include "VoxelWorldSaveGame.h"
 #include "VoxelBlockLibrary.h"
 #include "VoxelInventoryComponent.h"
@@ -670,6 +675,99 @@ FVector AVoxelWorld::GetCenterSpawnLocation()
             (static_cast<float>(CenterBlockX) + 0.5f) * VoxelSize,
             (static_cast<float>(CenterBlockY) + 0.5f) * VoxelSize,
             (static_cast<float>(SurfaceHeight) + 2.5f) * VoxelSize);
+}
+
+
+bool AVoxelWorld::GenerateRWGLayoutAndExport()
+{
+    ConfigureWorldGenerator();
+
+    FVoxelRWGPlanSettings PlanSettings;
+    PlanSettings.Seed = Seed;
+    PlanSettings.WorldBlocksX = FMath::Max(1, WorldSizeX * ChunkSize);
+    PlanSettings.WorldBlocksY = FMath::Max(1, WorldSizeY * ChunkSize);
+    PlanSettings.SeaLevel = SeaLevel;
+    PlanSettings.GridSpacing = RWGGridSpacing;
+    PlanSettings.TargetSettlementCount = RWGTargetSettlementCount;
+    PlanSettings.TargetPOICount = RWGTargetPOICount;
+
+    FVoxelRWGPlanner Planner;
+    if (!Planner.Generate(PlanSettings, WorldGenerator))
+    {
+        UE_LOG(LogTemp, Error, TEXT("RWG layout generation failed: no valid settlement site for seed %d."), Seed);
+        return false;
+    }
+
+    const FString OutputDirectory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("RWG"));
+    if (!FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*OutputDirectory))
+    {
+        UE_LOG(LogTemp, Error, TEXT("RWG could not create output directory: %s"), *OutputDirectory);
+        return false;
+    }
+
+    const FString OutputPath = FPaths::Combine(OutputDirectory, TEXT("WorldLayout.csv"));
+    if (!FFileHelper::SaveStringToFile(Planner.ToCSV(), *OutputPath))
+    {
+        UE_LOG(LogTemp, Error, TEXT("RWG could not write layout file: %s"), *OutputPath);
+        return false;
+    }
+
+    if (bDrawRWGDebugPreview && GetWorld())
+    {
+        const auto ToWorldPosition = [this](const FVector& P)
+        {
+            return GetActorLocation() + FVector(P.X * VoxelSize, P.Y * VoxelSize, P.Z * VoxelSize);
+        };
+
+        for (const FVoxelRWGRoad& Road : Planner.GetRoads())
+        {
+            FColor Color = FColor(70, 160, 255);
+            float Thickness = 2.0f;
+            if (Road.Type == EVoxelRWGRoadType::Main)
+            {
+                Color = FColor(255, 150, 35);
+                Thickness = 6.0f;
+            }
+            else if (Road.Type == EVoxelRWGRoadType::Local)
+            {
+                Color = FColor(90, 220, 170);
+                Thickness = 1.5f;
+            }
+
+            for (int32 I = 1; I < Road.Points.Num(); ++I)
+            {
+                DrawDebugLine(GetWorld(), ToWorldPosition(Road.Points[I - 1]),
+                    ToWorldPosition(Road.Points[I]), Color, false,
+                    RWGDebugDrawDuration, 0, Thickness);
+            }
+        }
+
+        for (const FVoxelRWGSettlement& Hub : Planner.GetSettlements())
+        {
+            const FColor Color = Hub.Type == EVoxelRWGSettlementType::City
+                ? FColor::Red : FColor::Yellow;
+            DrawDebugSphere(GetWorld(), ToWorldPosition(Hub.Position),
+                FMath::Max(250.0f, Hub.Radius * VoxelSize), 16, Color,
+                false, RWGDebugDrawDuration, 0, 2.0f);
+        }
+
+        for (const FVoxelRWGPOI& POI : Planner.GetPOIs())
+        {
+            DrawDebugSphere(GetWorld(), ToWorldPosition(POI.Position),
+                FMath::Max(80.0f, POI.Radius * VoxelSize), 8, FColor::Green,
+                false, RWGDebugDrawDuration, 0, 1.5f);
+        }
+    }
+
+    const FString Summary = Planner.GetSummary();
+    UE_LOG(LogTemp, Display, TEXT("%s"), *Summary);
+    UE_LOG(LogTemp, Display, TEXT("RWG layout exported to: %s"), *OutputPath);
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Green,
+            Summary + TEXT("\nCSV: ") + OutputPath);
+    }
+    return true;
 }
 
 
