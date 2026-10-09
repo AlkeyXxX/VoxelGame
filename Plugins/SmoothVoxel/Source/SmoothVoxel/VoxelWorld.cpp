@@ -219,6 +219,7 @@ namespace
         int32 SeaLevel,
         int32 BeachWidth,
         const TMap<int32, uint8>& ChunkModifications,
+        const TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe>& RoadStamps,
         const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe>& CancellationToken,
         TArray<uint8>& OutBlocks,
         TArray<uint8>& OutBaseBlocks,
@@ -273,12 +274,18 @@ namespace
                 const EVoxelLandform Landform =
                     Generator.GetLandform(WorldX, WorldY);
 
+                const FVoxelRWGRoadStamp* RoadStamp = nullptr;
+                if (WaterSurfaceBlockZ == INDEX_NONE && RoadStamps.IsValid())
+                {
+                    RoadStamp = RoadStamps->Find(FIntPoint(WorldX, WorldY));
+                }
+
                 for (int32 Z = 0; Z < ChunkSize; ++Z)
                 {
                     const int32 WorldZ =
                         ChunkCoord.Z * ChunkSize + Z;
 
-                    const uint8 Block =
+                    uint8 Block =
                         GetGeneratedBlockFromColumn(
                             Height,
                             EffectiveHeight,
@@ -288,6 +295,22 @@ namespace
                             WorldZ,
                             SeaLevel,
                             BeachWidth);
+
+                    if (RoadStamp && RoadStamp->SurfaceZ != INDEX_NONE)
+                    {
+                        if (WorldZ > RoadStamp->SurfaceZ && WorldZ <= EffectiveHeight)
+                        {
+                            Block = uint8(EVoxelBlock::Air); // cut high ground
+                        }
+                        else if (WorldZ == RoadStamp->SurfaceZ)
+                        {
+                            Block = RoadStamp->SurfaceBlock;
+                        }
+                        else if (WorldZ > EffectiveHeight && WorldZ < RoadStamp->SurfaceZ)
+                        {
+                            Block = RoadStamp->FillBlock; // fill a low road bed
+                        }
+                    }
 
                     const int32 LocalIndex =
                         X + Y * ChunkSize + Z * ChunkSize * ChunkSize;
