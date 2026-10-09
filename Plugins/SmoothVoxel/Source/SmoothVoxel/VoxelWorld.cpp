@@ -1889,7 +1889,6 @@ void AVoxelWorld::ProcessPendingChunkMeshRebuilds()
         FMath::Clamp(MaxChunkMeshRebuildsPerTick, 1, 32);
 
     int32 ProcessedEntries = 0;
-    int32 RebuiltThisTick = 0;
 
     while (PendingChunkMeshRebuilds.Num() > 0 &&
            ProcessedEntries < RebuildBudget)
@@ -1909,7 +1908,6 @@ void AVoxelWorld::ProcessPendingChunkMeshRebuilds()
         }
 
         Chunk->RebuildMesh();
-        ++RebuiltThisTick;
     }
 }
 
