@@ -1692,6 +1692,7 @@ void AVoxelWorld::CaptureMarchingCubesDataSnapshot(
     OutSnapshot.SeaLevel = SeaLevel;
     OutSnapshot.BeachWidth = BeachWidth;
     OutSnapshot.VoxelSize = VoxelSize;
+    OutSnapshot.CancellationToken.Reset();
     OutSnapshot.ChunkModifications.Reset();
 
     /*
