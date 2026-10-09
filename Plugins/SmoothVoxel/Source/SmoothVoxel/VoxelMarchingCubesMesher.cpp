@@ -294,9 +294,14 @@ float FVoxelMarchingCubesMesher::GetDensity(
         {
             for (int32 DX = 0; DX <= 1; ++DX)
             {
+                /*
+                 * Only original terrain contributes to the smooth 3D field.
+                 * Placed cubes are handled by their own cubic mesh and must
+                 * not pull nearby cave terrain sideways through walls.
+                 */
                 const EVoxelBlock Block =
                     static_cast<EVoxelBlock>(
-                        GetDensityBlock(
+                        GetBlock(
                             Input,
                             X - 1 + DX,
                             Y - 1 + DY,
@@ -469,6 +474,13 @@ void FVoxelMarchingCubesMesher::Build(
      * i.e. 1/13 voxel below the block's top. Marching Cubes still builds all
      * triangles normally, so cave walls and ceilings are not deformed.
      */
+    /*
+     * Keep the unmodified field as the source for every correction. If a
+     * lower placed block has already adjusted a density node, a higher block
+     * must not inherit that change and amplify the undercut vertically.
+     */
+    const TArray<float> OriginalDensities = Densities;
+
     for (int32 Z = 1; Z <= Size; ++Z)
     {
         for (int32 Y = 0; Y <= Size; ++Y)
@@ -476,7 +488,7 @@ void FVoxelMarchingCubesMesher::Build(
             for (int32 X = 0; X <= Size; ++X)
             {
                 const float DensityBelow =
-                    Densities[
+                    OriginalDensities[
                         DensityIndex(
                             X,
                             Y,
