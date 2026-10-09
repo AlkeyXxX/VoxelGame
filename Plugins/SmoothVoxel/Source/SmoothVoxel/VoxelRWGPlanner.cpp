@@ -869,18 +869,45 @@ FString FVoxelRWGPlanner::BiomeName(EVoxelBiome Biome)
     }
 }
 
+FString FVoxelRWGPlanner::CellTypeName(EVoxelRWGCellType Type)
+{
+    switch (Type)
+    {
+    case EVoxelRWGCellType::Wilderness: return TEXT("Wilderness");
+    case EVoxelRWGCellType::Rural: return TEXT("Rural");
+    case EVoxelRWGCellType::Town: return TEXT("Town");
+    case EVoxelRWGCellType::City: return TEXT("City");
+    case EVoxelRWGCellType::Industrial: return TEXT("Industrial");
+    default: return TEXT("Wilderness");
+    }
+}
+
 FString FVoxelRWGPlanner::GetSummary() const
 {
     int32 Main = 0, Connector = 0, Local = 0;
+    int32 CityCells = 0, TownCells = 0, RuralCells = 0, IndustrialCells = 0, WildernessCells = 0;
     for (const FVoxelRWGRoad& Road : Roads)
     {
         if (Road.Type == EVoxelRWGRoadType::Main) ++Main;
         else if (Road.Type == EVoxelRWGRoadType::Connector) ++Connector;
         else ++Local;
     }
+    for (const FVoxelRWGCell& Cell : Cells)
+    {
+        switch (Cell.Type)
+        {
+        case EVoxelRWGCellType::City: ++CityCells; break;
+        case EVoxelRWGCellType::Town: ++TownCells; break;
+        case EVoxelRWGCellType::Rural: ++RuralCells; break;
+        case EVoxelRWGCellType::Industrial: ++IndustrialCells; break;
+        case EVoxelRWGCellType::Wilderness: default: ++WildernessCells; break;
+        }
+    }
     return FString::Printf(
-        TEXT("RWG plan seed=%d; settlements=%d/%d; connected hubs=%d/%d; failed hub links=%d; POIs=%d/%d; roads=%d (main=%d, connector=%d, local=%d); grid=%dx%d @ %d blocks"),
-        Settings.Seed, Settlements.Num(), Settings.TargetSettlementCount,
+        TEXT("RWG plan seed=%d; cells=%d (%dx%d @ %d blocks; city=%d, town=%d, rural=%d, industrial=%d, wilderness=%d); settlements=%d/%d; connected hubs=%d/%d; failed hub links=%d; POIs=%d/%d; roads=%d (main=%d, connector=%d, local=%d); route grid=%dx%d @ %d blocks"),
+        Settings.Seed, Cells.Num(), CellColumns, CellRows, Settings.CellSizeBlocks,
+        CityCells, TownCells, RuralCells, IndustrialCells, WildernessCells,
+        Settlements.Num(), Settings.TargetSettlementCount,
         ConnectedSettlementCount, Settlements.Num(), FailedSettlementRoadCount,
         POIs.Num(), Settings.TargetPOICount, Roads.Num(), Main, Connector, Local,
         GridWidth, GridHeight, Settings.GridSpacing);
@@ -892,6 +919,24 @@ FString FVoxelRWGPlanner::ToCSV() const
     CSV += FString::Printf(TEXT("META,0,Seed,,,,,,,,,,%d\n"), Settings.Seed);
     CSV += FString::Printf(TEXT("META,0,WorldSize,,,,%d,%d,,,,,%d\n"),
         Settings.WorldBlocksX, Settings.WorldBlocksY, Settings.GridSpacing);
+    CSV += FString::Printf(TEXT("META,0,CellSize,,,,,,,,,,%d\n"), Settings.CellSizeBlocks);
+
+    for (const FVoxelRWGCell& Cell : Cells)
+    {
+        CSV += FString::Printf(TEXT("CELL,%d,%s,%d,%d,%d,%s,%s,%s,%s,%d,%s,%s\n"),
+            Cell.Id,
+            *CellTypeName(Cell.Type),
+            Cell.GridCoord.X,
+            Cell.GridCoord.Y,
+            Cell.bBuildable ? 1 : 0,
+            *CsvNumber(Cell.Center.X),
+            *CsvNumber(Cell.Center.Y),
+            *CsvNumber(Cell.Center.Z),
+            *BiomeName(Cell.Biome),
+            Cell.SettlementId,
+            *CsvNumber(float(Settings.CellSizeBlocks)),
+            *CsvNumber(Cell.UrbanScore));
+    }
 
     for (const FVoxelRWGSettlement& S : Settlements)
     {
