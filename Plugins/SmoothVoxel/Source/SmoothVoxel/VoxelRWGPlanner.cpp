@@ -874,20 +874,37 @@ void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
         }
     }
 
-    // Give each POI access from the nearest backbone road, not always from
-    // the settlement hub. This avoids dozens of short radial stubs where a POI
-    // already sits beside a street. Roads stop at the approximate POI footprint.
+    // Local POI access must remain on dry land. A nearest street across a
+    // narrow lake/river is not a valid entrance: try it, but if it fails the
+    // exact water check, fall back to the parent settlement's side of the POI.
+    const auto IsDrySegment = [&Generator, this](const FVector& A, const FVector& B)
+    {
+        const float Length = Distance2D(A, B);
+        const int32 Steps = FMath::Clamp(FMath::CeilToInt(Length / 8.0f), 1, 4096);
+        for (int32 Step = 0; Step <= Steps; ++Step)
+        {
+            const float T = static_cast<float>(Step) / static_cast<float>(Steps);
+            const int32 WX = FMath::Clamp(FMath::RoundToInt(FMath::Lerp(A.X, B.X, T)), 0, Settings.WorldBlocksX - 1);
+            const int32 WY = FMath::Clamp(FMath::RoundToInt(FMath::Lerp(A.Y, B.Y, T)), 0, Settings.WorldBlocksY - 1);
+            const float Height = Generator.GetSurfaceHeightFloat(WX, WY);
+            if (Generator.GetWaterColumn(WX, WY, Height).WaterSurfaceBlockZ != INDEX_NONE)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
     for (const FVoxelRWGPOI& POI : POIs)
     {
         const FVoxelRWGSettlement* Hub = Settlements.FindByPredicate(
             [&POI](const FVoxelRWGSettlement& S) { return S.Id == POI.SettlementId; });
         if (!Hub) { continue; }
 
-        FVector AccessAnchor = Hub->Position;
-        int32 AccessAnchorId = Hub->Id;
-        float BestDistanceSquared = TNumericLimits<float>::Max();
+        const float EntranceInset = POI.Radius + 4.0f;
         FVector NearestBackbonePoint = FVector::ZeroVector;
         int32 NearestBackboneId = INDEX_NONE;
+        float BestDistanceSquared = TNumericLimits<float>::Max();
 
         for (const FVoxelRWGRoad& ExistingRoad : Roads)
         {
@@ -900,7 +917,6 @@ void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
             {
                 const FVector& A = ExistingRoad.Points[Segment - 1];
                 const FVector& B = ExistingRoad.Points[Segment];
-                const FVector2D Start(A.X, A.Y);
                 const FVector2D Delta(B.X - A.X, B.Y - A.Y);
                 const float LengthSquared = Delta.SizeSquared();
                 const FVector2D FromSegmentStart(POI.Position.X - A.X, POI.Position.Y - A.Y);
@@ -919,33 +935,60 @@ void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
             }
         }
 
-        // Only divert to a backbone that is reasonably close; remote POIs use
-        // their parent hub as a fallback instead of making cross-settlement spurs.
-        if (NearestBackboneId != INDEX_NONE && BestDistanceSquared <= FMath::Square(192.0f))
+        bool bConnectedToRoad = false;
+        if (NearestBackboneId != INDEX_NONE &&
+            BestDistanceSquared <= FMath::Square(192.0f))
         {
-            AccessAnchor = NearestBackbonePoint;
-            AccessAnchorId = NearestBackboneId;
+            const FVector2D TowardStreet(
+                NearestBackbonePoint.X - POI.Position.X,
+                NearestBackbonePoint.Y - POI.Position.Y);
+            const float DistanceToStreet = TowardStreet.Size();
+            const FVector2D Direction = TowardStreet / FMath::Max(DistanceToStreet, 1.0f);
+            const FVector Entrance(
+                POI.Position.X + Direction.X * EntranceInset,
+                POI.Position.Y + Direction.Y * EntranceInset,
+                POI.Position.Z);
+
+            if (DistanceToStreet <= EntranceInset + 6.0f &&
+                IsDrySegment(NearestBackbonePoint, POI.Position))
+            {
+                // The existing street already reaches the dry side of the POI.
+                bConnectedToRoad = true;
+            }
+            else
+            {
+                bConnectedToRoad = BuildRoad(
+                    NearestBackboneId, NearestBackbonePoint,
+                    POI.Id, Entrance, EVoxelRWGRoadType::Local, Generator);
+            }
         }
 
-        const FVector2D TowardAnchor(
-            AccessAnchor.X - POI.Position.X,
-            AccessAnchor.Y - POI.Position.Y);
-        const float DistanceToAnchor = TowardAnchor.Size();
-
-        // If the POI footprint is already touching a road, a separate access
-        // ribbon is unnecessary. Otherwise end at the edge, not at its center.
-        const float EntranceInset = POI.Radius + 4.0f;
-        if (DistanceToAnchor <= EntranceInset + 6.0f)
+        if (bConnectedToRoad)
         {
             continue;
         }
 
-        const FVector2D Direction = TowardAnchor / FMath::Max(DistanceToAnchor, 1.0f);
-        const FVector Entrance(
-            POI.Position.X + Direction.X * EntranceInset,
-            POI.Position.Y + Direction.Y * EntranceInset,
+        // Safe fallback: connect from the assigned settlement only if a fully
+        // dry local path exists. If water separates the POI, leave it unconnected
+        // rather than drawing an implausible driveway across the water.
+        const FVector2D TowardHub(
+            Hub->Position.X - POI.Position.X,
+            Hub->Position.Y - POI.Position.Y);
+        const float DistanceToHub = TowardHub.Size();
+        const FVector2D HubDirection = TowardHub / FMath::Max(DistanceToHub, 1.0f);
+        const FVector HubEntrance(
+            POI.Position.X + HubDirection.X * EntranceInset,
+            POI.Position.Y + HubDirection.Y * EntranceInset,
             POI.Position.Z);
-        BuildRoad(AccessAnchorId, AccessAnchor, POI.Id, Entrance, EVoxelRWGRoadType::Local);
+
+        if (DistanceToHub <= EntranceInset + 6.0f &&
+            IsDrySegment(Hub->Position, POI.Position))
+        {
+            continue;
+        }
+
+        BuildRoad(Hub->Id, Hub->Position, POI.Id, HubEntrance,
+            EVoxelRWGRoadType::Local, Generator);
     }
 }
 
