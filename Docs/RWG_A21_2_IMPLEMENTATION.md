@@ -27,8 +27,8 @@ These are procedural approximations inspired by 7 Days to Die Alpha 21.2, not a 
 
 ## Still not implemented as a complete A21 RWG pipeline
 
-- A full road graph and road-tile merge pass.
-- Settlement/hub/district generation equivalent to `rwgmixer.xml`.
+- A21-style street-tile topology, gateway/highway merge, road smoothing and road rasterization into terrain; the current planner has an abstract A* road network only.
+- District/township generation and density rules equivalent to the original `rwgmixer.xml`.
 - Data-driven POI/prefab registry, placement scoring, rotation and overlap validation.
 - Map-wide export/visual comparison against a reference A21.2 map.
 - Automated Unreal Engine 4.27 compile and runtime validation.
@@ -42,9 +42,9 @@ The first map-wide planning pass is now available from `AVoxelWorld`:
 - It places settlement hubs (city/town/village/rural/industrial categories), biome-tagged POI markers, a settlement road backbone, a limited number of connector loops, and local roads from each POI to its hub.
 - Road paths use A* over the sampled cost grid. Deep water is avoided; narrow higher-elevation carved channels are expensive rather than strictly forbidden.
 - The export is written to `Saved/RWG/WorldLayout.csv`; the planner summary appears in the Output Log and the debug overlay is drawn temporarily in the current world.
-- Default test scale: 12 settlement hubs, 72 POIs, 32-block route-grid spacing. These are tuning defaults, not asserted A21.2 source values.
+- Default test scale: 12 settlement hubs, 72 POIs, 32-block route-grid spacing, and 512-block macro cells on a 4096×4096-block map. These are tuning defaults, not asserted A21.2 source values.
 
-The planner is deliberately data-only at this stage. It does **not** yet change voxel blocks, create road meshes, spawn prefabs, reproduce A21 district zoning, or parse the original game's `rwgmixer.xml`. Treat the output as a deterministic layout prototype to inspect and calibrate, not a finished A21 clone. The layout build is triggered explicitly with F2 and is not run automatically when a world starts.
+The planner is deliberately data-only at this stage. It now builds a deterministic macro-cell grid (default 512 voxel blocks per cell), classifies cells as wilderness/rural/town/city/industrial using seeded cell values plus broad noise, samples biome/landform/buildability, and prefers zoned cells when placing hubs. The CSV includes a `CELL` record for every grid cell; when the debug preview is enabled, colored cell outlines show the zoning. This is a tunable prototype rather than a claim that 512 blocks matches an A21.2 internal constant. It does **not** yet change voxel blocks, create road meshes, spawn prefabs, reproduce A21 district/township rules, or parse the original game's `rwgmixer.xml`. The layout build is triggered explicitly with F2 and is not run automatically when a world starts.
 
 ## Validation checklist
 
