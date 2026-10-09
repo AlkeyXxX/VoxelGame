@@ -37,6 +37,7 @@ struct FVoxelMarchingCubesDataSnapshot
     float VoxelSize = 100.0f;
 
     TMap<FIntVector, TMap<int32, uint8>> ChunkModifications;
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancellationToken;
 
     void Build(FVoxelMarchingCubesBuildInput& OutData) const;
 };
