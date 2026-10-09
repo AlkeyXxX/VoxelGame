@@ -62,6 +62,7 @@ bool FVoxelRWGPlanner::Generate(
     Settings.WorldBlocksX = FMath::Max(2, Settings.WorldBlocksX);
     Settings.WorldBlocksY = FMath::Max(2, Settings.WorldBlocksY);
     Settings.GridSpacing = FMath::Clamp(Settings.GridSpacing, 8, 128);
+    Settings.CellSizeBlocks = FMath::Clamp(Settings.CellSizeBlocks, 128, 2048);
     Settings.TargetSettlementCount = FMath::Clamp(Settings.TargetSettlementCount, 1, 64);
     Settings.TargetPOICount = FMath::Clamp(Settings.TargetPOICount, 0, 512);
     Settings.MinimumSettlementDistance = FMath::Max(64.0f, Settings.MinimumSettlementDistance);
@@ -69,6 +70,7 @@ bool FVoxelRWGPlanner::Generate(
     Settings.EdgeMargin = FMath::Clamp(Settings.EdgeMargin, 16.0f,
         0.2f * FMath::Min(Settings.WorldBlocksX, Settings.WorldBlocksY));
 
+    Cells.Reset();
     Settlements.Reset();
     POIs.Reset();
     Roads.Reset();
@@ -81,6 +83,7 @@ bool FVoxelRWGPlanner::Generate(
     GridHeight = FMath::Max(2, (Settings.WorldBlocksY - 1 + Settings.GridSpacing - 1) / Settings.GridSpacing + 1);
 
     BuildTerrainCostField(Generator);
+    BuildCellGrid(Generator);
     PlaceSettlements(Generator);
     if (Settlements.Num() == 0)
     {
@@ -139,6 +142,206 @@ void FVoxelRWGPlanner::BuildTerrainCostField(const FVoxelWorldGenerator& Generat
                 FMath::Min(WY, float(Settings.WorldBlocksY - 1) - WY));
             if (Edge < Settings.EdgeMargin) { GridCosts[Index] += 5.0f; }
         }
+    }
+}
+
+void FVoxelRWGPlanner::BuildCellGrid(const FVoxelWorldGenerator& Generator)
+{
+    CellColumns = FMath::Max(1, FMath::DivideAndRoundUp(Settings.WorldBlocksX, Settings.CellSizeBlocks));
+    CellRows = FMath::Max(1, FMath::DivideAndRoundUp(Settings.WorldBlocksY, Settings.CellSizeBlocks));
+    Cells.Reserve(CellColumns * CellRows);
+
+    for (int32 CellY = 0; CellY < CellRows; ++CellY)
+    {
+        for (int32 CellX = 0; CellX < CellColumns; ++CellX)
+        {
+            const int32 MinX = CellX * Settings.CellSizeBlocks;
+            const int32 MinY = CellY * Settings.CellSizeBlocks;
+            const int32 MaxX = FMath::Min(Settings.WorldBlocksX - 1, MinX + Settings.CellSizeBlocks - 1);
+            const int32 MaxY = FMath::Min(Settings.WorldBlocksY - 1, MinY + Settings.CellSizeBlocks - 1);
+            const float CenterX = (float(MinX) + float(MaxX)) * 0.5f;
+            const float CenterY = (float(MinY) + float(MaxY)) * 0.5f;
+            const int32 SampleX = FMath::Clamp(FMath::RoundToInt(CenterX), 0, Settings.WorldBlocksX - 1);
+            const int32 SampleY = FMath::Clamp(FMath::RoundToInt(CenterY), 0, Settings.WorldBlocksY - 1);
+            const float Height = Generator.GetSurfaceHeightFloat(SampleX, SampleY);
+            const EVoxelBiome Biome = Generator.GetBiome(SampleX, SampleY, FMath::RoundToInt(Height));
+            const EVoxelLandform Landform = Generator.GetLandform(SampleX, SampleY);
+
+            // A per-cell random component gives every cell a stable identity;
+            // broad low-frequency noise groups cities and towns into regions.
+            const uint32 CellSeedBits =
+                static_cast<uint32>(Settings.Seed) ^
+                (static_cast<uint32>(CellX + 1) * 73856093u) ^
+                (static_cast<uint32>(CellY + 1) * 19349663u);
+            FRandomStream CellRandom(static_cast<int32>(CellSeedBits));
+            const FVector2D MacroPosition(
+                (float(CellX) + float(Settings.Seed) * 0.0011f) * 0.55f,
+                (float(CellY) - float(Settings.Seed) * 0.0017f) * 0.55f);
+            const float MacroScore = FMath::PerlinNoise2D(MacroPosition) * 0.5f + 0.5f;
+            const float UrbanScore = CellRandom.FRand() * 0.62f + MacroScore * 0.38f;
+
+            FVoxelRWGCell Cell;
+            Cell.Id = CellY * CellColumns + CellX;
+            Cell.GridCoord = FIntPoint(CellX, CellY);
+            Cell.Center = FVector(CenterX, CenterY, Height);
+            Cell.Biome = Biome;
+            Cell.Landform = Landform;
+            Cell.UrbanScore = UrbanScore;
+            Cell.Type = EVoxelRWGCellType::Wilderness;
+
+            if (UrbanScore >= 0.84f)
+            {
+                Cell.Type = EVoxelRWGCellType::City;
+            }
+            else if (UrbanScore >= 0.68f)
+            {
+                Cell.Type = EVoxelRWGCellType::Town;
+            }
+            else if (UrbanScore >= 0.49f)
+            {
+                Cell.Type = EVoxelRWGCellType::Rural;
+            }
+
+            // Dense urban layouts are less suitable for steep mountain cells.
+            if (Landform == EVoxelLandform::Mountains)
+            {
+                if (Cell.Type == EVoxelRWGCellType::City)
+                {
+                    Cell.Type = EVoxelRWGCellType::Town;
+                }
+                else if (Cell.Type == EVoxelRWGCellType::Town)
+                {
+                    Cell.Type = EVoxelRWGCellType::Rural;
+                }
+            }
+
+            // The snowy macro-biome can contain towns, but city centers are
+            // downweighted; desert townships occasionally use an industrial role.
+            if (Biome == EVoxelBiome::Snow && Cell.Type == EVoxelRWGCellType::City)
+            {
+                Cell.Type = EVoxelRWGCellType::Town;
+            }
+            else if (Biome == EVoxelBiome::Desert &&
+                (Cell.Type == EVoxelRWGCellType::Town || Cell.Type == EVoxelRWGCellType::Rural) &&
+                CellRandom.FRand() < 0.16f)
+            {
+                Cell.Type = EVoxelRWGCellType::Industrial;
+            }
+
+            const float InnerMargin = FMath::Min(48.0f, float(Settings.CellSizeBlocks) * 0.12f);
+            const float CandidateMinX = FMath::Min(float(MaxX), float(MinX) + InnerMargin);
+            const float CandidateMaxX = FMath::Max(CandidateMinX, float(MaxX) - InnerMargin);
+            const float CandidateMinY = FMath::Min(float(MaxY), float(MinY) + InnerMargin);
+            const float CandidateMaxY = FMath::Max(CandidateMinY, float(MaxY) - InnerMargin);
+
+            // Each cell tries several deterministic candidate sites. If the
+            // cell is submerged, too steep, or too close to the map edge, it
+            // remains wilderness instead of receiving an invalid hub.
+            for (int32 Attempt = 0; Attempt < 12; ++Attempt)
+            {
+                FVector2D Candidate(CenterX, CenterY);
+                if (Attempt > 0)
+                {
+                    Candidate.X = CellRandom.FRandRange(CandidateMinX, CandidateMaxX);
+                    Candidate.Y = CellRandom.FRandRange(CandidateMinY, CandidateMaxY);
+                }
+                if (!IsValidSite(Candidate, Generator, 0.20f))
+                {
+                    continue;
+                }
+                Cell.bBuildable = true;
+                Cell.SuggestedHubPosition = GetBlockPosition(Candidate.X, Candidate.Y, Generator);
+                break;
+            }
+
+            if (!Cell.bBuildable)
+            {
+                Cell.Type = EVoxelRWGCellType::Wilderness;
+            }
+            Cells.Add(Cell);
+        }
+    }
+
+    // Smooth the map classification without blurring terrain or biome data.
+    // An isolated city seed becomes a town; cells with no nearby hub potential
+    // remain wilderness/rural, reducing salt-and-pepper zoning.
+    TArray<EVoxelRWGCellType> SmoothedTypes;
+    SmoothedTypes.SetNum(Cells.Num());
+    for (int32 Index = 0; Index < Cells.Num(); ++Index)
+    {
+        const FVoxelRWGCell& Cell = Cells[Index];
+        EVoxelRWGCellType Type = Cell.Type;
+        int32 NeighborUrbanCount = 0;
+        const int32 DX[4] = { -1, 1, 0, 0 };
+        const int32 DY[4] = { 0, 0, -1, 1 };
+        for (int32 Direction = 0; Direction < 4; ++Direction)
+        {
+            const int32 NX = Cell.GridCoord.X + DX[Direction];
+            const int32 NY = Cell.GridCoord.Y + DY[Direction];
+            if (NX < 0 || NX >= CellColumns || NY < 0 || NY >= CellRows)
+            {
+                continue;
+            }
+            const FVoxelRWGCell& Neighbor = Cells[NY * CellColumns + NX];
+            if (Neighbor.Type == EVoxelRWGCellType::City ||
+                Neighbor.Type == EVoxelRWGCellType::Town)
+            {
+                ++NeighborUrbanCount;
+            }
+        }
+        if (Type == EVoxelRWGCellType::City && NeighborUrbanCount == 0)
+        {
+            Type = EVoxelRWGCellType::Town;
+        }
+        else if (Type == EVoxelRWGCellType::Wilderness && Cell.bBuildable &&
+            NeighborUrbanCount >= 2 && Cell.UrbanScore >= 0.38f)
+        {
+            Type = EVoxelRWGCellType::Rural;
+        }
+        SmoothedTypes[Index] = Type;
+    }
+    for (int32 Index = 0; Index < Cells.Num(); ++Index)
+    {
+        Cells[Index].Type = SmoothedTypes[Index];
+    }
+}
+
+void FVoxelRWGPlanner::ClaimCellForSettlement(const FVoxelRWGSettlement& Settlement)
+{
+    if (CellColumns <= 0 || CellRows <= 0)
+    {
+        return;
+    }
+    const int32 CellX = FMath::Clamp(
+        FMath::FloorToInt(Settlement.Position.X / float(Settings.CellSizeBlocks)),
+        0, CellColumns - 1);
+    const int32 CellY = FMath::Clamp(
+        FMath::FloorToInt(Settlement.Position.Y / float(Settings.CellSizeBlocks)),
+        0, CellRows - 1);
+    const int32 Index = CellY * CellColumns + CellX;
+    if (!Cells.IsValidIndex(Index))
+    {
+        return;
+    }
+    FVoxelRWGCell& Cell = Cells[Index];
+    Cell.SettlementId = Settlement.Id;
+    Cell.bBuildable = true;
+    switch (Settlement.Type)
+    {
+    case EVoxelRWGSettlementType::City:
+        Cell.Type = EVoxelRWGCellType::City;
+        break;
+    case EVoxelRWGSettlementType::Town:
+    case EVoxelRWGSettlementType::Village:
+        Cell.Type = EVoxelRWGCellType::Town;
+        break;
+    case EVoxelRWGSettlementType::Industrial:
+        Cell.Type = EVoxelRWGCellType::Industrial;
+        break;
+    case EVoxelRWGSettlementType::Rural:
+    default:
+        Cell.Type = EVoxelRWGCellType::Rural;
+        break;
     }
 }
 
