@@ -500,25 +500,10 @@ void FVoxelMarchingCubesMesher::Build(
                 }
 
                 /*
-                 * Do not let the smooth surface drape over the top of an
-                 * exposed placed block. In that case the cell above is Air
-                 * in the terrain-only data, but neighbouring solid samples
-                 * can still create MC triangles over the cube. The cubic
-                 * mesher already owns that top face.
-                 *
-                 * If actual terrain occupies the cell above, keep the MC
-                 * surface so blocks placed underground remain buried.
+                 * Keep this cell's surface geometry: deleting the whole cell
+                 * leaves a visible ring around a placed block. A tiny offset
+                 * is applied to vertices above placed blocks further below.
                  */
-                const bool bPlacedSolidBelow =
-                    !IsVoxelSolid(GetBlock(Input, X, Y, Z - 1)) &&
-                    IsVoxelSolid(GetDensityBlock(Input, X, Y, Z - 1));
-
-                if (bPlacedSolidBelow &&
-                    !IsVoxelSolid(GetBlock(Input, X, Y, Z)))
-                {
-                    continue;
-                }
-
                 float CornerDensity[8];
 
                 int32 CubeIndex = 0;
@@ -701,13 +686,109 @@ void FVoxelMarchingCubesMesher::Build(
 
                     if (CacheIndex < 0)
                     {
-                        const FVector Position =
+                        const FVector SurfacePosition =
                             EdgePosition(
                                 Edge,
                                 X,
                                 Y,
                                 Z,
                                 CornerDensity);
+
+                        /*
+                         * A placed block must stay visible, but the smooth
+                         * terrain should still connect to its sides. Instead
+                         * of removing the MC cell above it (which leaves a
+                         * hole), lower vertices over its footprint by 1/13
+                         * of a voxel. This is about 7.7% of block height and
+                         * creates a subtle, continuous undercut.
+                         *
+                         * Check both sides of an integer X/Y boundary so
+                         * shared edge vertices receive the same offset no
+                         * matter which MC cell creates them first.
+                         */
+                        FVector MeshPosition = SurfacePosition;
+                        const int32 SurfaceCellZ =
+                            FMath::FloorToInt(SurfacePosition.Z);
+                        const int32 CandidateBlockZ =
+                            SurfaceCellZ - 1;
+
+                        if (CandidateBlockZ >= -1 &&
+                            CandidateBlockZ <= Size)
+                        {
+                            const int32 FloorX =
+                                FMath::FloorToInt(SurfacePosition.X);
+                            const int32 FloorY =
+                                FMath::FloorToInt(SurfacePosition.Y);
+                            const int32 RoundedX =
+                                FMath::RoundToInt(SurfacePosition.X);
+                            const int32 RoundedY =
+                                FMath::RoundToInt(SurfacePosition.Y);
+                            const bool bOnXBoundary =
+                                FMath::Abs(
+                                    SurfacePosition.X -
+                                    static_cast<float>(RoundedX)) < 0.0001f;
+                            const bool bOnYBoundary =
+                                FMath::Abs(
+                                    SurfacePosition.Y -
+                                    static_cast<float>(RoundedY)) < 0.0001f;
+
+                            const int32 CandidateX[2] =
+                            {
+                                FloorX,
+                                bOnXBoundary ? RoundedX - 1 : FloorX
+                            };
+                            const int32 CandidateY[2] =
+                            {
+                                FloorY,
+                                bOnYBoundary ? RoundedY - 1 : FloorY
+                            };
+                            const int32 CandidateXCount =
+                                bOnXBoundary ? 2 : 1;
+                            const int32 CandidateYCount =
+                                bOnYBoundary ? 2 : 1;
+
+                            bool bAbovePlacedBlock = false;
+
+                            for (int32 CY = 0;
+                                 CY < CandidateYCount && !bAbovePlacedBlock;
+                                 ++CY)
+                            {
+                                for (int32 CX = 0;
+                                     CX < CandidateXCount;
+                                     ++CX)
+                                {
+                                    const int32 BlockX = CandidateX[CX];
+                                    const int32 BlockY = CandidateY[CY];
+
+                                    const bool bTerrainHasBlock =
+                                        IsVoxelSolid(
+                                            GetBlock(
+                                                Input,
+                                                BlockX,
+                                                BlockY,
+                                                CandidateBlockZ));
+
+                                    const bool bDensityHasBlock =
+                                        IsVoxelSolid(
+                                            GetDensityBlock(
+                                                Input,
+                                                BlockX,
+                                                BlockY,
+                                                CandidateBlockZ));
+
+                                    if (!bTerrainHasBlock && bDensityHasBlock)
+                                    {
+                                        bAbovePlacedBlock = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (bAbovePlacedBlock)
+                            {
+                                MeshPosition.Z -= 1.0f / 13.0f;
+                            }
+                        }
 
                         const int32 VertexIndex =
                             Output.Vertices.Num();
@@ -716,10 +797,10 @@ void FVoxelMarchingCubesMesher::Build(
                             ComputeGradient(
                                 Densities,
                                 Size,
-                                Position);
+                                SurfacePosition);
 
                         Output.Vertices.Add(
-                            Position *
+                            MeshPosition *
                             Input.VoxelSize);
 
                         FVector VertexNormal = -Gradient;
