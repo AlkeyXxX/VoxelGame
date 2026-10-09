@@ -1257,6 +1257,14 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
 
     BuildRWGRoadSurface(Planner);
 
+    // Refresh existing far-LOD rings immediately; otherwise distant terrain
+    // would keep the pre-road silhouette until the player changes chunks.
+    FIntVector LODCenterChunk;
+    if (GetStreamingCenterChunk(LODCenterChunk))
+    {
+        UpdateFarLOD(LODCenterChunk);
+    }
+
     if (bDrawRWGDebugPreview && GetWorld())
     {
         // F2 may be pressed more than once in PIE. Clear the previous RWG
