@@ -47,6 +47,11 @@ public:
         return bGeneratedDataReady;
     }
 
+    uint32 GetDataGenerationVersion() const
+    {
+        return DataGenerationVersion;
+    }
+
 
     /*
      * Работа с блоками.
@@ -226,6 +231,7 @@ private:
      * его результат будет проигнорирован.
      */
     uint32 MeshGenerationVersion = 0;
+    uint32 DataGenerationVersion = 0;
     bool bGeneratedDataReady = false;
 
 
