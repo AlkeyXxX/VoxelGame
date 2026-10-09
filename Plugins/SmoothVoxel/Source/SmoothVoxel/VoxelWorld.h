@@ -306,7 +306,7 @@ public:
         EditAnywhere,
         BlueprintReadWrite,
         Category="Voxel|Streaming",
-        meta=(ClampMin="1", ClampMax="32"))
+        meta=(ClampMin="1", ClampMax="2"))
     int32 MaxChunkMeshRebuildsPerTick = 2;
 
     /* Limit expensive chunk/LOD ProceduralMesh uploads on the Game Thread. */
