@@ -865,9 +865,7 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                         }
                         else
                         {
-                            SurfaceBlock = Landform == EVoxelLandform::Mountains
-                                ? uint8(EVoxelBlock::Grass)
-                                : uint8(EVoxelBlock::Grass);
+                            SurfaceBlock = uint8(EVoxelBlock::Grass);
                         }
                         Priority = 0;
                     }
