@@ -316,6 +316,132 @@ float FVoxelWorldGenerator::GetMoisture(
     return FMath::Clamp(Noise * 0.5f + 0.5f, 0.0f, 1.0f);
 }
 
+bool FVoxelWorldGenerator::IsRiverMask(
+    int32 WorldX,
+    int32 WorldY) const
+{
+    const int32 SafeSizeX = FMath::Max(1, Settings.WorldBlocksX);
+    const int32 SafeSizeY = FMath::Max(1, Settings.WorldBlocksY);
+
+    const float NormalizedX =
+        (static_cast<float>(FMath::Clamp(WorldX, 0, SafeSizeX - 1)) + 0.5f) /
+        static_cast<float>(SafeSizeX);
+
+    const float NormalizedY =
+        (static_cast<float>(FMath::Clamp(WorldY, 0, SafeSizeY - 1)) + 0.5f) /
+        static_cast<float>(SafeSizeY);
+
+    /*
+     * Low-frequency domain warping bends the river centerlines. The final
+     * near-zero Perlin contour creates long, narrow paths from global
+     * coordinates, so every chunk computes exactly the same river mask.
+     */
+    const FVector2D WarpXPosition(
+        NormalizedX * 2.7f + Settings.Seed * 0.021f,
+        NormalizedY * 2.7f - Settings.Seed * 0.017f);
+
+    const FVector2D WarpYPosition(
+        NormalizedX * 2.7f - Settings.Seed * 0.031f,
+        NormalizedY * 2.7f + Settings.Seed * 0.013f);
+
+    const float WarpX =
+        FMath::PerlinNoise2D(WarpXPosition) * 0.04f;
+
+    const float WarpY =
+        FMath::PerlinNoise2D(WarpYPosition) * 0.04f;
+
+    const FVector2D RiverSamplePosition(
+        (NormalizedX + WarpX) * 5.5f + Settings.Seed * 0.071f,
+        (NormalizedY + WarpY) * 5.5f - Settings.Seed * 0.043f);
+
+    const float RiverNoise =
+        FMath::PerlinNoise2D(RiverSamplePosition);
+
+    return FMath::Abs(RiverNoise) <= 0.0045f;
+}
+
+
+bool FVoxelWorldGenerator::IsLakeMask(
+    int32 WorldX,
+    int32 WorldY) const
+{
+    const int32 SafeSizeX = FMath::Max(1, Settings.WorldBlocksX);
+    const int32 SafeSizeY = FMath::Max(1, Settings.WorldBlocksY);
+
+    const float NormalizedX =
+        (static_cast<float>(FMath::Clamp(WorldX, 0, SafeSizeX - 1)) + 0.5f) /
+        static_cast<float>(SafeSizeX);
+
+    const float NormalizedY =
+        (static_cast<float>(FMath::Clamp(WorldY, 0, SafeSizeY - 1)) + 0.5f) /
+        static_cast<float>(SafeSizeY);
+
+    /*
+     * Broad noise selects a small number of lake regions. Fine noise only
+     * roughens their shorelines; height and landform checks are applied by
+     * GetWaterSurfaceBlockZ so this mask does not flood mountains.
+     */
+    const FVector2D LakeShapePosition(
+        NormalizedX * 5.0f + Settings.Seed * 0.031f,
+        NormalizedY * 5.0f - Settings.Seed * 0.023f);
+
+    const FVector2D LakeDetailPosition(
+        NormalizedX * 13.0f + Settings.Seed * 0.019f,
+        NormalizedY * 13.0f - Settings.Seed * 0.037f);
+
+    const float LakeShape =
+        FMath::PerlinNoise2D(LakeShapePosition);
+
+    const float LakeDetail =
+        FMath::PerlinNoise2D(LakeDetailPosition);
+
+    const float LakeScore =
+        LakeShape * 0.82f + LakeDetail * 0.18f;
+
+    return LakeScore >= 0.42f;
+}
+
+
+int32 FVoxelWorldGenerator::GetWaterSurfaceBlockZ(
+    int32 WorldX,
+    int32 WorldY,
+    int32 SurfaceHeight) const
+{
+    /*
+     * Preserve the existing sea/low-basin behavior. Water below sea level
+     * still rises to the configured SeaLevel; explicit rivers and lakes
+     * raise their water surface by one block to make inland water visible.
+     */
+    if (SurfaceHeight < Settings.SeaLevel)
+    {
+        return Settings.SeaLevel;
+    }
+
+    if (SurfaceHeight > Settings.SeaLevel + 3)
+    {
+        return INDEX_NONE;
+    }
+
+    if (GetLandform(WorldX, WorldY) == EVoxelLandform::Mountains)
+    {
+        return INDEX_NONE;
+    }
+
+    if (SurfaceHeight <= Settings.SeaLevel + 2 &&
+        IsLakeMask(WorldX, WorldY))
+    {
+        return Settings.SeaLevel + 1;
+    }
+
+    if (IsRiverMask(WorldX, WorldY))
+    {
+        return Settings.SeaLevel + 1;
+    }
+
+    return INDEX_NONE;
+}
+
+
 EVoxelBiome FVoxelWorldGenerator::GetBiome(
     int32 WorldX,
     int32 WorldY,
