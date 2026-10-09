@@ -577,6 +577,7 @@ void AVoxelWorld::Tick(
         UpdateChunkStreaming();
     }
 
+    ProcessPendingChunkMeshResults();
     ProcessPendingChunkMeshRebuilds();
     UpdateUnderwaterEffect();
 
@@ -677,6 +678,7 @@ void AVoxelWorld::GenerateWorld()
 
     Chunks.Empty();
     PendingChunkMeshRebuilds.Empty();
+    PendingChunkMeshResults.Empty();
 
     /*
      * GenerateWorld() означает полную генерацию мира заново,
@@ -1054,7 +1056,7 @@ void AVoxelWorld::UpdateChunkStreaming()
     {
         for (const FIntVector& UnloadedCoord : ChunksToUnload)
         {
-            QueueChunkNeighborhoodRebuilds(UnloadedCoord);
+            QueueChunkFaceNeighborRebuilds(UnloadedCoord);
         }
     }
 
@@ -1302,7 +1304,7 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
 
                     /* Render the new chunk immediately; spread neighbour rebuilds across ticks. */
                     ReadyChunk->RebuildMesh();
-                    World->QueueChunkNeighborhoodRebuilds(ChunkCoord);
+                    World->QueueChunkFaceNeighborRebuilds(ChunkCoord);
                 });
         });
 }
@@ -2063,10 +2065,117 @@ void AVoxelWorld::QueueChunkNeighborhoodRebuilds(
 }
 
 
+void AVoxelWorld::QueueChunkFaceNeighborRebuilds(
+    const FIntVector& ChunkCoord)
+{
+    /*
+     * Streaming only changes the six direct face neighbours relevant to
+     * cubic block/water visibility. The 26-neighbour queue is reserved for
+     * voxel edits, where diagonal cells can affect MC density nodes.
+     */
+    const FIntVector FaceOffsets[] =
+    {
+        FIntVector(-1, 0, 0),
+        FIntVector(1, 0, 0),
+        FIntVector(0, -1, 0),
+        FIntVector(0, 1, 0),
+        FIntVector(0, 0, -1),
+        FIntVector(0, 0, 1)
+    };
+
+    for (const FIntVector& Offset : FaceOffsets)
+    {
+        const FIntVector NeighborCoord = ChunkCoord + Offset;
+        AVoxelChunk* Neighbor = GetChunk(NeighborCoord);
+
+        if (!Neighbor || !Neighbor->HasGeneratedData())
+        {
+            continue;
+        }
+
+        if (!PendingChunkMeshRebuilds.Contains(NeighborCoord))
+        {
+            PendingChunkMeshRebuilds.Add(NeighborCoord);
+        }
+    }
+}
+
+
+void AVoxelWorld::QueueChunkMeshResult(
+    AVoxelChunk* Chunk,
+    FVoxelMeshBuildOutput&& Output,
+    uint32 Version)
+{
+    if (!Chunk ||
+        Chunk->GetMeshGenerationVersion() != Version ||
+        GetChunk(Chunk->GetChunkCoord()) != Chunk)
+    {
+        return;
+    }
+
+    /*
+     * Keep at most one pending output per chunk. If a newer build finishes
+     * before an older result is uploaded, replace the old geometry instead
+     * of queuing stale, memory-heavy vertex arrays.
+     */
+    for (FPendingVoxelChunkMeshResult& Pending : PendingChunkMeshResults)
+    {
+        if (Pending.Chunk.Get() == Chunk)
+        {
+            Pending.Version = Version;
+            Pending.Output = MoveTemp(Output);
+            return;
+        }
+    }
+
+    FPendingVoxelChunkMeshResult& Pending =
+        PendingChunkMeshResults.AddDefaulted_GetRef();
+
+    Pending.Chunk = Chunk;
+    Pending.Version = Version;
+    Pending.Output = MoveTemp(Output);
+}
+
+
+void AVoxelWorld::ProcessPendingChunkMeshResults()
+{
+    const int32 ApplyBudget =
+        FMath::Clamp(MaxChunkMeshAppliesPerFrame, 1, 4);
+
+    int32 AppliedThisFrame = 0;
+
+    while (PendingChunkMeshResults.Num() > 0 &&
+           AppliedThisFrame < ApplyBudget)
+    {
+        FPendingVoxelChunkMeshResult Pending =
+            MoveTemp(PendingChunkMeshResults[0]);
+
+        PendingChunkMeshResults.RemoveAt(0, 1, false);
+
+        AVoxelChunk* Chunk = Pending.Chunk.Get();
+
+        if (!Chunk ||
+            Chunk->GetMeshGenerationVersion() != Pending.Version ||
+            GetChunk(Chunk->GetChunkCoord()) != Chunk)
+        {
+            continue;
+        }
+
+        Chunk->ApplyMesh(
+            MoveTemp(Pending.Output),
+            Pending.Version,
+            true);
+
+        ++AppliedThisFrame;
+    }
+}
+
+
 void AVoxelWorld::ProcessPendingChunkMeshRebuilds()
 {
+    /* Avoid flooding the worker pool when the player streams quickly. */
     const int32 RebuildBudget =
-        FMath::Clamp(MaxChunkMeshRebuildsPerTick, 1, 32);
+        FMath::Clamp(MaxChunkMeshRebuildsPerTick, 1, 2);
 
     int32 ProcessedEntries = 0;
 
