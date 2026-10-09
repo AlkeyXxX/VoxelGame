@@ -82,6 +82,14 @@ public:
         Category="Voxel")
     void GenerateWorld();
 
+    /*
+     * Build a deterministic map-wide settlement/POI/road plan and export it
+     * to Saved/RWG/WorldLayout.csv. This is an explicit debug/tool action;
+     * it is not run automatically during BeginPlay.
+     */
+    UFUNCTION(BlueprintCallable, Category="Voxel|RWG")
+    bool GenerateRWGLayoutAndExport();
+
     UFUNCTION(BlueprintCallable, Category="Voxel|Save")
     void SaveWorld();
 
@@ -348,6 +356,21 @@ public:
         BlueprintReadWrite,
         Category="Voxel|World")
     int32 Seed = 1337;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="1", ClampMax="64"))
+    int32 RWGTargetSettlementCount = 12;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="0", ClampMax="512"))
+    int32 RWGTargetPOICount = 72;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="8", ClampMax="128"))
+    int32 RWGGridSpacing = 32;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG"))
+    bool bDrawRWGDebugPreview = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="1.0"))
+    float RWGDebugDrawDuration = 60.0f;
 
 
     /*
