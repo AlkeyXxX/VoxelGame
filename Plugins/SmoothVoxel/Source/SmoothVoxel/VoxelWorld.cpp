@@ -109,6 +109,100 @@ namespace
     }
 
     /*
+     * Generate one voxel from a precomputed global column profile. Chunk
+     * generation and Marching Cubes halo sampling share this helper so
+     * shorelines and procedural riverbeds agree exactly at chunk borders.
+     */
+    uint8 GetGeneratedBlockFromColumn(
+        int32 TerrainHeight,
+        int32 EffectiveHeight,
+        int32 WaterSurfaceBlockZ,
+        EVoxelBiome Biome,
+        EVoxelLandform Landform,
+        int32 WorldZ,
+        int32 SeaLevel,
+        int32 BeachWidth)
+    {
+        if (WorldZ > EffectiveHeight)
+        {
+            return WaterSurfaceBlockZ != INDEX_NONE &&
+                   WorldZ <= WaterSurfaceBlockZ
+                ? uint8(EVoxelBlock::Water)
+                : uint8(EVoxelBlock::Air);
+        }
+
+        if (WorldZ == EffectiveHeight)
+        {
+            const bool bCarvedWaterBed =
+                EffectiveHeight < TerrainHeight &&
+                WaterSurfaceBlockZ > SeaLevel;
+
+            if (bCarvedWaterBed)
+            {
+                return uint8(EVoxelBlock::Sand);
+            }
+
+            const bool bBeach =
+                Biome != EVoxelBiome::Snow &&
+                TerrainHeight < SeaLevel &&
+                TerrainHeight >= SeaLevel - BeachWidth;
+
+            if (bBeach)
+            {
+                return uint8(EVoxelBlock::Sand);
+            }
+
+            if (Biome == EVoxelBiome::Snow)
+            {
+                return uint8(EVoxelBlock::Snow);
+            }
+
+            if (Landform == EVoxelLandform::Mountains)
+            {
+                return Biome == EVoxelBiome::Desert
+                    ? uint8(EVoxelBlock::Sandstone)
+                    : uint8(EVoxelBlock::Grass);
+            }
+
+            if (Biome == EVoxelBiome::Desert)
+            {
+                return uint8(EVoxelBlock::Sand);
+            }
+
+            return uint8(EVoxelBlock::Grass);
+        }
+
+        if (Biome == EVoxelBiome::Desert &&
+            Landform == EVoxelLandform::Mountains &&
+            WorldZ >= EffectiveHeight - 5)
+        {
+            return uint8(EVoxelBlock::Sandstone);
+        }
+
+        if (Biome == EVoxelBiome::Desert &&
+            WorldZ >= EffectiveHeight - 3)
+        {
+            return uint8(EVoxelBlock::Sand);
+        }
+
+        if (Landform == EVoxelLandform::Mountains &&
+            WorldZ >= EffectiveHeight - 3)
+        {
+            return Biome == EVoxelBiome::Snow
+                ? uint8(EVoxelBlock::Stone)
+                : uint8(EVoxelBlock::Grass);
+        }
+
+        if (WorldZ >= EffectiveHeight - 3)
+        {
+            return uint8(EVoxelBlock::Dirt);
+        }
+
+        return uint8(EVoxelBlock::Stone);
+    }
+
+
+    /*
      * Pure voxel-data generation. This function deliberately uses no
      * UObject or AVoxelWorld members, so it is safe on a worker thread.
      */
@@ -152,6 +246,17 @@ namespace
                 const int32 Height =
                     Generator.GetSurfaceHeight(WorldX, WorldY);
 
+                const int32 WaterSurfaceBlockZ =
+                    Generator.GetWaterSurfaceBlockZ(
+                        WorldX,
+                        WorldY,
+                        Height);
+
+                const int32 EffectiveHeight =
+                    WaterSurfaceBlockZ > SeaLevel
+                        ? FMath::Min(Height, WaterSurfaceBlockZ - 2)
+                        : Height;
+
                 const EVoxelBiome Biome =
                     Generator.GetBiome(WorldX, WorldY, Height);
 
@@ -163,74 +268,16 @@ namespace
                     const int32 WorldZ =
                         ChunkCoord.Z * ChunkSize + Z;
 
-                    uint8 Block = uint8(EVoxelBlock::Air);
-
-                    if (WorldZ > Height)
-                    {
-                        Block = WorldZ <= SeaLevel
-                            ? uint8(EVoxelBlock::Water)
-                            : uint8(EVoxelBlock::Air);
-                    }
-                    else if (WorldZ == Height)
-                    {
-                        const bool bBeach =
-                            Biome != EVoxelBiome::Snow &&
-                            Height < SeaLevel &&
-                            Height >= SeaLevel - BeachWidth;
-
-                        if (bBeach)
-                        {
-                            Block = uint8(EVoxelBlock::Sand);
-                        }
-                        else if (Biome == EVoxelBiome::Snow)
-                        {
-                            Block = uint8(EVoxelBlock::Snow);
-                        }
-                        else if (Landform == EVoxelLandform::Mountains)
-                        {
-                            // Green-biome mountain tops use a grassy surface;
-                            // Snow and desert already have dedicated branches.
-                            Block = Biome == EVoxelBiome::Desert
-                                ? uint8(EVoxelBlock::Sandstone)
-                                : uint8(EVoxelBlock::Grass);
-                        }
-                        else if (Biome == EVoxelBiome::Desert)
-                        {
-                            Block = uint8(EVoxelBlock::Sand);
-                        }
-                        else
-                        {
-                            Block = uint8(EVoxelBlock::Grass);
-                        }
-                    }
-                    else if (Biome == EVoxelBiome::Desert &&
-                             Landform == EVoxelLandform::Mountains &&
-                             WorldZ >= Height - 5)
-                    {
-                        Block = uint8(EVoxelBlock::Sandstone);
-                    }
-                    else if (Biome == EVoxelBiome::Desert &&
-                             WorldZ >= Height - 3)
-                    {
-                        Block = uint8(EVoxelBlock::Sand);
-                    }
-                    else if (Landform == EVoxelLandform::Mountains &&
-                             WorldZ >= Height - 3)
-                    {
-                        // Keep the outer few blocks grassy on green
-                        // mountain faces. Snow mountains remain rocky.
-                        Block = Biome == EVoxelBiome::Snow
-                            ? uint8(EVoxelBlock::Stone)
-                            : uint8(EVoxelBlock::Grass);
-                    }
-                    else if (WorldZ >= Height - 3)
-                    {
-                        Block = uint8(EVoxelBlock::Dirt);
-                    }
-                    else
-                    {
-                        Block = uint8(EVoxelBlock::Stone);
-                    }
+                    const uint8 Block =
+                        GetGeneratedBlockFromColumn(
+                            Height,
+                            EffectiveHeight,
+                            WaterSurfaceBlockZ,
+                            Biome,
+                            Landform,
+                            WorldZ,
+                            SeaLevel,
+                            BeachWidth);
 
                     const int32 LocalIndex =
                         X + Y * ChunkSize + Z * ChunkSize * ChunkSize;
@@ -264,81 +311,7 @@ namespace
      * actor may not exist yet while streaming asynchronously, but treating
      * that halo as Air creates temporary/fake faces at chunk boundaries.
      */
-    uint8 GetGeneratedBlockFromColumn(
-        int32 Height,
-        EVoxelBiome Biome,
-        EVoxelLandform Landform,
-        int32 WorldZ,
-        int32 SeaLevel,
-        int32 BeachWidth)
-    {
-        if (WorldZ > Height)
-        {
-            return WorldZ <= SeaLevel
-                ? uint8(EVoxelBlock::Water)
-                : uint8(EVoxelBlock::Air);
-        }
 
-        if (WorldZ == Height)
-        {
-            const bool bBeach =
-                Biome != EVoxelBiome::Snow &&
-                Height < SeaLevel &&
-                Height >= SeaLevel - BeachWidth;
-
-            if (bBeach)
-            {
-                return uint8(EVoxelBlock::Sand);
-            }
-
-            if (Biome == EVoxelBiome::Snow)
-            {
-                return uint8(EVoxelBlock::Snow);
-            }
-
-            if (Landform == EVoxelLandform::Mountains)
-            {
-                return Biome == EVoxelBiome::Desert
-                    ? uint8(EVoxelBlock::Sandstone)
-                    : uint8(EVoxelBlock::Grass);
-            }
-
-            if (Biome == EVoxelBiome::Desert)
-            {
-                return uint8(EVoxelBlock::Sand);
-            }
-
-            return uint8(EVoxelBlock::Grass);
-        }
-
-        if (Biome == EVoxelBiome::Desert &&
-            Landform == EVoxelLandform::Mountains &&
-            WorldZ >= Height - 5)
-        {
-            return uint8(EVoxelBlock::Sandstone);
-        }
-
-        if (Biome == EVoxelBiome::Desert &&
-            WorldZ >= Height - 3)
-        {
-            return uint8(EVoxelBlock::Sand);
-        }
-
-        if (Landform == EVoxelLandform::Mountains &&
-            WorldZ >= Height - 3)
-        {
-            return Biome == EVoxelBiome::Snow
-                ? uint8(EVoxelBlock::Stone)
-                : uint8(EVoxelBlock::Grass);
-        }
-
-        if (WorldZ >= Height - 3)
-        {
-            return uint8(EVoxelBlock::Dirt);
-        }
-
-        return uint8(EVoxelBlock::Stone);
-    }
 
 }
 
@@ -382,12 +355,25 @@ void FVoxelMarchingCubesDataSnapshot::Build(
                 WorldY >= 0 && WorldY < WorldBlocksY;
 
             int32 Height = 0;
+            int32 EffectiveHeight = 0;
+            int32 WaterSurfaceBlockZ = INDEX_NONE;
             EVoxelBiome Biome = EVoxelBiome::Plains;
             EVoxelLandform Landform = EVoxelLandform::Flatlands;
 
             if (bValidColumn)
             {
                 Height = Generator.GetSurfaceHeight(WorldX, WorldY);
+                WaterSurfaceBlockZ =
+                    Generator.GetWaterSurfaceBlockZ(
+                        WorldX,
+                        WorldY,
+                        Height);
+
+                EffectiveHeight =
+                    WaterSurfaceBlockZ > SeaLevel
+                        ? FMath::Min(Height, WaterSurfaceBlockZ - 2)
+                        : Height;
+
                 Biome = Generator.GetBiome(WorldX, WorldY, Height);
                 Landform = Generator.GetLandform(WorldX, WorldY);
             }
@@ -439,6 +425,8 @@ void FVoxelMarchingCubesDataSnapshot::Build(
                     {
                         Block = GetGeneratedBlockFromColumn(
                             Height,
+                            EffectiveHeight,
+                            WaterSurfaceBlockZ,
                             Biome,
                             Landform,
                             WorldZ,
