@@ -2461,7 +2461,6 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
         }
 
         WorldBlock = CandidateWorldBlock;
-        LocalBlock = CandidateLocalBlock;
         TargetChunk = CandidateChunk;
         bFoundPlacementCell = true;
         break;
