@@ -78,6 +78,7 @@ bool FVoxelRWGPlanner::Generate(
     FailedSettlementRoadCount = 0;
     GridHeights.Reset();
     GridCosts.Reset();
+    GridWaterFlags.Reset();
 
     GridWidth = FMath::Max(2, (Settings.WorldBlocksX - 1 + Settings.GridSpacing - 1) / Settings.GridSpacing + 1);
     GridHeight = FMath::Max(2, (Settings.WorldBlocksY - 1 + Settings.GridSpacing - 1) / Settings.GridSpacing + 1);
@@ -99,6 +100,7 @@ void FVoxelRWGPlanner::BuildTerrainCostField(const FVoxelWorldGenerator& Generat
     const int32 CellCount = GridWidth * GridHeight;
     GridHeights.SetNumZeroed(CellCount);
     GridCosts.SetNumZeroed(CellCount);
+    GridWaterFlags.SetNumZeroed(CellCount);
 
     for (int32 Y = 0; Y < GridHeight; ++Y)
     {
@@ -113,9 +115,10 @@ void FVoxelRWGPlanner::BuildTerrainCostField(const FVoxelWorldGenerator& Generat
 
             const bool bWater = Water.WaterSurfaceBlockZ != INDEX_NONE;
             const bool bDeepWater = bWater && Height < float(Settings.SeaLevel) - 0.75f;
-            // Coastal seas/lake basins are blocked; higher river cuts are traversable
-            // at a high cost until a bridge/ford pass is added.
-            GridCosts[Index] = bDeepWater ? RWGBlockedCost : (bWater ? 14.0f : 1.0f);
+            GridWaterFlags[Index] = bWater ? 1 : 0;
+            // Deep basins remain blocked; shallow river cells are traversable but
+            // expensive so A* prefers a dry detour and only crosses where useful.
+            GridCosts[Index] = bDeepWater ? RWGBlockedCost : (bWater ? 28.0f : 1.0f);
         }
     }
 
@@ -607,10 +610,13 @@ int32 FVoxelRWGPlanner::FindNearestWalkable(int32 X, int32 Y) const
 {
     X = FMath::Clamp(X, 0, GridWidth - 1);
     Y = FMath::Clamp(Y, 0, GridHeight - 1);
+
+    int32 BestWater = INDEX_NONE;
+    float BestWaterCost = RWGBlockedCost;
     for (int32 Radius = 0; Radius <= 8; ++Radius)
     {
-        int32 Best = INDEX_NONE;
-        float BestCost = RWGBlockedCost;
+        int32 BestDry = INDEX_NONE;
+        float BestDryCost = RWGBlockedCost;
         for (int32 DY = -Radius; DY <= Radius; ++DY)
         {
             for (int32 DX = -Radius; DX <= Radius; ++DX)
@@ -619,12 +625,33 @@ int32 FVoxelRWGPlanner::FindNearestWalkable(int32 X, int32 Y) const
                 const int32 NX = X + DX, NY = Y + DY;
                 if (NX < 0 || NX >= GridWidth || NY < 0 || NY >= GridHeight) { continue; }
                 const int32 Index = GridIndex(NX, NY);
-                if (GridCosts[Index] < BestCost) { BestCost = GridCosts[Index]; Best = Index; }
+                const float Cost = GridCosts[Index];
+                if (Cost >= RWGBlockedCost) { continue; }
+
+                const bool bWater = GridWaterFlags.IsValidIndex(Index) && GridWaterFlags[Index] != 0;
+                if (bWater)
+                {
+                    if (Cost < BestWaterCost)
+                    {
+                        BestWaterCost = Cost;
+                        BestWater = Index;
+                    }
+                }
+                else if (Cost < BestDryCost)
+                {
+                    BestDryCost = Cost;
+                    BestDry = Index;
+                }
             }
         }
-        if (Best != INDEX_NONE && BestCost < RWGBlockedCost) { return Best; }
+
+        // Endpoints occasionally round to a route-grid sample just offshore.
+        // Prefer a dry neighbour within one grid step before permitting a
+        // water endpoint; otherwise the route immediately dives into water.
+        if (BestDry != INDEX_NONE) { return BestDry; }
+        if (Radius >= 2 && BestWater != INDEX_NONE) { return BestWater; }
     }
-    return INDEX_NONE;
+    return BestWater;
 }
 
 bool FVoxelRWGPlanner::FindPath(
@@ -807,15 +834,77 @@ void FVoxelRWGPlanner::BuildRoadNetwork()
         }
     }
 
-    // Local access road from each placed POI to its parent settlement.
+    // Give each POI access from the nearest backbone road, not always from
+    // the settlement hub. This avoids dozens of short radial stubs where a POI
+    // already sits beside a street. Roads stop at the approximate POI footprint.
     for (const FVoxelRWGPOI& POI : POIs)
     {
         const FVoxelRWGSettlement* Hub = Settlements.FindByPredicate(
             [&POI](const FVoxelRWGSettlement& S) { return S.Id == POI.SettlementId; });
-        if (Hub)
+        if (!Hub) { continue; }
+
+        FVector AccessAnchor = Hub->Position;
+        int32 AccessAnchorId = Hub->Id;
+        float BestDistanceSquared = TNumericLimits<float>::Max();
+        FVector NearestBackbonePoint = FVector::ZeroVector;
+        int32 NearestBackboneId = INDEX_NONE;
+
+        for (const FVoxelRWGRoad& ExistingRoad : Roads)
         {
-            BuildRoad(Hub->Id, Hub->Position, POI.Id, POI.Position, EVoxelRWGRoadType::Local);
+            if (ExistingRoad.Type == EVoxelRWGRoadType::Local || ExistingRoad.Points.Num() < 2)
+            {
+                continue;
+            }
+
+            for (int32 Segment = 1; Segment < ExistingRoad.Points.Num(); ++Segment)
+            {
+                const FVector& A = ExistingRoad.Points[Segment - 1];
+                const FVector& B = ExistingRoad.Points[Segment];
+                const FVector2D Start(A.X, A.Y);
+                const FVector2D Delta(B.X - A.X, B.Y - A.Y);
+                const float LengthSquared = Delta.SizeSquared();
+                const float T = LengthSquared > SMALL_NUMBER
+                    ? FMath::Clamp(FVector2D(POI.Position.X - A.X, POI.Position.Y - A.Y).DotProduct(Delta) / LengthSquared, 0.0f, 1.0f)
+                    : 0.0f;
+                const FVector Candidate = FMath::Lerp(A, B, T);
+                const float DistanceSquared = FVector2D(
+                    Candidate.X - POI.Position.X, Candidate.Y - POI.Position.Y).SizeSquared();
+                if (DistanceSquared < BestDistanceSquared)
+                {
+                    BestDistanceSquared = DistanceSquared;
+                    NearestBackbonePoint = Candidate;
+                    NearestBackboneId = ExistingRoad.FromId;
+                }
+            }
         }
+
+        // Only divert to a backbone that is reasonably close; remote POIs use
+        // their parent hub as a fallback instead of making cross-settlement spurs.
+        if (NearestBackboneId != INDEX_NONE && BestDistanceSquared <= FMath::Square(192.0f))
+        {
+            AccessAnchor = NearestBackbonePoint;
+            AccessAnchorId = NearestBackboneId;
+        }
+
+        const FVector2D TowardAnchor(
+            AccessAnchor.X - POI.Position.X,
+            AccessAnchor.Y - POI.Position.Y);
+        const float DistanceToAnchor = TowardAnchor.Size();
+
+        // If the POI footprint is already touching a road, a separate access
+        // ribbon is unnecessary. Otherwise end at the edge, not at its center.
+        const float EntranceInset = POI.Radius + 4.0f;
+        if (DistanceToAnchor <= EntranceInset + 6.0f)
+        {
+            continue;
+        }
+
+        const FVector2D Direction = TowardAnchor / FMath::Max(DistanceToAnchor, 1.0f);
+        const FVector Entrance(
+            POI.Position.X + Direction.X * EntranceInset,
+            POI.Position.Y + Direction.Y * EntranceInset,
+            POI.Position.Z);
+        BuildRoad(AccessAnchorId, AccessAnchor, POI.Id, Entrance, EVoxelRWGRoadType::Local);
     }
 }
 
