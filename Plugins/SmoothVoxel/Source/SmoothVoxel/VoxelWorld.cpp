@@ -1312,6 +1312,7 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
                     WeakChunk,
                     ExpectedDataGenerationVersion,
                     ChunkCoord,
+                    GenerationCancellationToken,
                     Blocks = MoveTemp(Blocks),
                     BaseBlocks = MoveTemp(BaseBlocks),
                     Biomes = MoveTemp(Biomes),
@@ -1322,6 +1323,7 @@ void AVoxelWorld::GenerateChunkBlocksAsync(
                     AVoxelChunk* ReadyChunk = WeakChunk.Get();
 
                     if (!World || !ReadyChunk ||
+                        static_cast<bool>(*GenerationCancellationToken) ||
                         World->GetChunk(ChunkCoord) != ReadyChunk ||
                         ReadyChunk->GetDataGenerationVersion() !=
                             ExpectedDataGenerationVersion)
