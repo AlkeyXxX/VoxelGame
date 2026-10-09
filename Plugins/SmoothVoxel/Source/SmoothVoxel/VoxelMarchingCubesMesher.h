@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/ThreadSafeBool.h"
 #include "VoxelMesher.h"
 
 struct FVoxelMarchingCubesBuildInput
@@ -13,6 +14,8 @@ struct FVoxelMarchingCubesBuildInput
      * Array side = Size + 2.
      */
     TArray<uint8> Blocks;
+
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancellationToken;
 
     void Init(int32 InSize)
     {
