@@ -860,13 +860,15 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                 const int32 R0 = L0 + 1;
                 const int32 L1 = L0 + 2;
                 const int32 R1 = L0 + 3;
-                // Consistent upward-facing winding for this ribbon segment.
+                // UE procedural meshes use the opposite front-face winding
+                // from this ribbon's original order. Reverse each triangle so
+                // the visible front faces point upward from the road surface.
                 Triangles.Add(L0);
-                Triangles.Add(R0);
                 Triangles.Add(L1);
                 Triangles.Add(R0);
+                Triangles.Add(R0);
+                Triangles.Add(L1);
                 Triangles.Add(R1);
-                Triangles.Add(L1);
             }
         }
 
