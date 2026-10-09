@@ -76,6 +76,7 @@ struct FVoxelWaterColumn
     int32 WaterSurfaceBlockZ = INDEX_NONE;
     int32 EffectiveTerrainHeight = 0;
     bool bCarved = false;
+    bool bShoreAdjusted = false;
 };
 
 
@@ -114,6 +115,9 @@ private:
     float GetLandformNoise(
         int32 WorldX,
         int32 WorldY) const;
+
+    float GetRiverField(int32 WorldX, int32 WorldY) const;
+    float GetLakeScore(int32 WorldX, int32 WorldY) const;
 
     bool IsRiverMask(int32 WorldX, int32 WorldY) const;
     bool IsLakeMask(int32 WorldX, int32 WorldY) const;
