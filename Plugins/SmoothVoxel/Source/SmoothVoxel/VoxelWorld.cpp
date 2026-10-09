@@ -134,8 +134,7 @@ namespace
         if (WorldZ == EffectiveHeight)
         {
             const bool bCarvedWaterBed =
-                EffectiveHeight < TerrainHeight &&
-                WaterSurfaceBlockZ > SeaLevel;
+                EffectiveHeight < TerrainHeight;
 
             if (bCarvedWaterBed)
             {
@@ -246,16 +245,17 @@ namespace
                 const int32 Height =
                     Generator.GetSurfaceHeight(WorldX, WorldY);
 
-                const int32 WaterSurfaceBlockZ =
-                    Generator.GetWaterSurfaceBlockZ(
+                const FVoxelWaterColumn WaterColumn =
+                    Generator.GetWaterColumn(
                         WorldX,
                         WorldY,
                         Height);
 
+                const int32 WaterSurfaceBlockZ =
+                    WaterColumn.WaterSurfaceBlockZ;
+
                 const int32 EffectiveHeight =
-                    WaterSurfaceBlockZ > SeaLevel
-                        ? FMath::Min(Height, WaterSurfaceBlockZ - 2)
-                        : Height;
+                    WaterColumn.EffectiveTerrainHeight;
 
                 const EVoxelBiome Biome =
                     Generator.GetBiome(WorldX, WorldY, Height);
@@ -355,16 +355,17 @@ void FVoxelMarchingCubesDataSnapshot::Build(
             if (bValidColumn)
             {
                 Height = Generator.GetSurfaceHeight(WorldX, WorldY);
-                WaterSurfaceBlockZ =
-                    Generator.GetWaterSurfaceBlockZ(
+                const FVoxelWaterColumn WaterColumn =
+                    Generator.GetWaterColumn(
                         WorldX,
                         WorldY,
                         Height);
 
+                WaterSurfaceBlockZ =
+                    WaterColumn.WaterSurfaceBlockZ;
+
                 EffectiveHeight =
-                    WaterSurfaceBlockZ > SeaLevel
-                        ? FMath::Min(Height, WaterSurfaceBlockZ - 2)
-                        : Height;
+                    WaterColumn.EffectiveTerrainHeight;
 
                 Biome = Generator.GetBiome(WorldX, WorldY, Height);
                 Landform = Generator.GetLandform(WorldX, WorldY);
