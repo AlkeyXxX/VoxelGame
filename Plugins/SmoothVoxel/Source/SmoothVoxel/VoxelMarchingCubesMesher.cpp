@@ -444,6 +444,114 @@ void FVoxelMarchingCubesMesher::Build(
         }
     }
 
+    /*
+     * Make a very shallow recess around exposed tops of placed blocks by
+     * adjusting scalar density samples, not mesh vertices. The target value
+     * places the usual IsoLevel crossing at 12/13 of the vertical edge,
+     * i.e. 1/13 voxel below the block's top. Marching Cubes still builds all
+     * triangles normally, so cave walls and ceilings are not deformed.
+     */
+    for (int32 Z = 1; Z <= Size; ++Z)
+    {
+        for (int32 Y = 0; Y <= Size; ++Y)
+        {
+            for (int32 X = 0; X <= Size; ++X)
+            {
+                const float DensityBelow =
+                    Densities[
+                        DensityIndex(
+                            X,
+                            Y,
+                            Z - 1,
+                            Size)];
+
+                if (DensityBelow <= IsoLevel)
+                {
+                    continue;
+                }
+
+                const int32 CandidateX[2] = { X - 1, X };
+                const int32 CandidateY[2] = { Y - 1, Y };
+                bool bExposedPlacedTop = false;
+
+                for (int32 CY = 0;
+                     CY < 2 && !bExposedPlacedTop;
+                     ++CY)
+                {
+                    for (int32 CX = 0; CX < 2; ++CX)
+                    {
+                        const int32 BlockX = CandidateX[CX];
+                        const int32 BlockY = CandidateY[CY];
+                        const int32 BlockZ = Z - 1;
+
+                        const bool bTerrainBlock =
+                            IsVoxelSolid(
+                                GetBlock(
+                                    Input,
+                                    BlockX,
+                                    BlockY,
+                                    BlockZ));
+
+                        const bool bDensityBlock =
+                            IsVoxelSolid(
+                                GetDensityBlock(
+                                    Input,
+                                    BlockX,
+                                    BlockY,
+                                    BlockZ));
+
+                        const bool bTerrainAbove =
+                            IsVoxelSolid(
+                                GetBlock(
+                                    Input,
+                                    BlockX,
+                                    BlockY,
+                                    Z));
+
+                        const bool bDensityAbove =
+                            IsVoxelSolid(
+                                GetDensityBlock(
+                                    Input,
+                                    BlockX,
+                                    BlockY,
+                                    Z));
+
+                        /*
+                         * A placed solid exists only in DensityBlocks, not
+                         * the terrain-only render array. Require open space
+                         * immediately above it so buried blocks stay buried.
+                         */
+                        if (!bTerrainBlock &&
+                            bDensityBlock &&
+                            !bTerrainAbove &&
+                            !bDensityAbove)
+                        {
+                            bExposedPlacedTop = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!bExposedPlacedTop)
+                {
+                    continue;
+                }
+
+                const float TargetDensity =
+                    DensityBelow +
+                    (IsoLevel - DensityBelow) * (13.0f / 12.0f);
+
+                Densities[
+                    DensityIndex(
+                        X,
+                        Y,
+                        Z,
+                        Size)] =
+                    TargetDensity;
+            }
+        }
+    }
+
     const int32 XEdgeCount =
         Size * (Size + 1) * (Size + 1);
 
@@ -500,24 +608,10 @@ void FVoxelMarchingCubesMesher::Build(
                 }
 
                 /*
-                 * Do not let the smooth surface drape over the top of an
-                 * exposed placed block. In that case the cell above is Air
-                 * in the terrain-only data, but neighbouring solid samples
-                 * can still create MC triangles over the cube. The cubic
-                 * mesher already owns that top face.
-                 *
-                 * If actual terrain occupies the cell above, keep the MC
-                 * surface so blocks placed underground remain buried.
+                 * Do not skip whole cells above placed blocks here. A wall
+                 * or cave-floor surface may pass through the same cell;
+                 * suppressing the entire cell opens large holes.
                  */
-                const bool bPlacedSolidBelow =
-                    !IsVoxelSolid(GetBlock(Input, X, Y, Z - 1)) &&
-                    IsVoxelSolid(GetDensityBlock(Input, X, Y, Z - 1));
-
-                if (bPlacedSolidBelow &&
-                    !IsVoxelSolid(GetBlock(Input, X, Y, Z)))
-                {
-                    continue;
-                }
 
                 float CornerDensity[8];
 
