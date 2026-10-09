@@ -2,12 +2,16 @@
 
 #include "CoreMinimal.h"
 
+/*
+ * Alpha 21.2-inspired biome set.
+ * These are world-generation biomes, not voxel block types.
+ */
 enum class EVoxelBiome : uint8
 {
-    Plains = 0,
-    Forest,
+    Forest = 0,
     Desert,
-    Mountain
+    SnowyForest,
+    Wasteland
 };
 
 struct FVoxelWorldGenerationSettings
@@ -20,6 +24,13 @@ struct FVoxelWorldGenerationSettings
     float MoistureScale = 0.008f;
 };
 
+/*
+ * Deterministic, coordinate-based generator.
+ *
+ * A21 target: broad terrain forms, independent climate fields, and
+ * four biome regions. This is the first foundation layer; roads,
+ * settlements, POI rules, and map-preview calibration are separate stages.
+ */
 class FVoxelWorldGenerator
 {
 public:
@@ -38,5 +49,11 @@ public:
         int32 SurfaceHeight) const;
 
 private:
+    float SampleSeededNoise(
+        int32 WorldX,
+        int32 WorldY,
+        float Scale,
+        uint32 Salt) const;
+
     FVoxelWorldGenerationSettings Settings;
 };
