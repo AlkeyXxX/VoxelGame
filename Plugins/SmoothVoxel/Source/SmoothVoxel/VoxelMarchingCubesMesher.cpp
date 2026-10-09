@@ -444,6 +444,24 @@ void FVoxelMarchingCubesMesher::Build(
         }
     }
 
+    bool bHasPlacedSolidForDensity = false;
+    const int32 DensityBlockCount =
+        FMath::Min(Input.Blocks.Num(), Input.DensityBlocks.Num());
+
+    for (int32 BlockIndex = 0;
+         BlockIndex < DensityBlockCount;
+         ++BlockIndex)
+    {
+        if (!IsVoxelSolid(Input.Blocks[BlockIndex]) &&
+            IsVoxelSolid(Input.DensityBlocks[BlockIndex]))
+        {
+            bHasPlacedSolidForDensity = true;
+            break;
+        }
+    }
+
+    if (bHasPlacedSolidForDensity)
+    {
     /*
      * Make a very shallow recess around exposed tops of placed blocks by
      * adjusting scalar density samples, not mesh vertices. The target value
@@ -550,6 +568,8 @@ void FVoxelMarchingCubesMesher::Build(
                     TargetDensity;
             }
         }
+    }
+
     }
 
     const int32 XEdgeCount =
