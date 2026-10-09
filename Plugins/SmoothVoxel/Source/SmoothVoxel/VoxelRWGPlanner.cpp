@@ -257,9 +257,10 @@ void FVoxelRWGPlanner::PlacePOIs(const FVoxelWorldGenerator& Generator)
     int32 Attempts = 0;
     const int32 MaxAttempts = Settings.TargetPOICount * 250;
 
-    while (POIs.Num() < Settings.TargetPOICount && Attempts++ < MaxAttempts)
+    while (POIs.Num() < Settings.TargetPOICount && Attempts < MaxAttempts)
     {
-        const FVoxelRWGSettlement& Hub = Settlements[POIs.Num() % Settlements.Num()];
+        const int32 AttemptIndex = Attempts++;
+        const FVoxelRWGSettlement& Hub = Settlements[AttemptIndex % Settlements.Num()];
         const float Angle = Random.FRandRange(0.0f, 6.28318530718f);
         const float Distance = FMath::Sqrt(Random.FRand()) * Hub.Radius * 0.88f;
         const FVector2D Candidate(
@@ -421,6 +422,7 @@ bool FVoxelRWGPlanner::BuildRoad(
 void FVoxelRWGPlanner::BuildRoadNetwork()
 {
     TSet<uint64> ConnectedPairs;
+    TSet<uint64> FailedPairs;
     const auto PairKey = [](int32 A, int32 B) -> uint64
     {
         const uint32 Low = uint32(FMath::Min(A, B));
@@ -437,11 +439,12 @@ void FVoxelRWGPlanner::BuildRoadNetwork()
         {
             float BestDistance = TNumericLimits<float>::Max();
             int32 BestFrom = INDEX_NONE, BestTo = INDEX_NONE;
-            for (int32 FromIndex : Connected)
+            for (int32 FromIndex = 0; FromIndex < Settlements.Num(); ++FromIndex)
             {
+                if (!Connected.Contains(FromIndex)) { continue; }
                 for (int32 ToIndex = 0; ToIndex < Settlements.Num(); ++ToIndex)
                 {
-                    if (Connected.Contains(ToIndex)) { continue; }
+                    if (Connected.Contains(ToIndex) || FailedPairs.Contains(PairKey(FromIndex, ToIndex))) { continue; }
                     const float D = Distance2D(Settlements[FromIndex].Position, Settlements[ToIndex].Position);
                     if (D < BestDistance) { BestDistance = D; BestFrom = FromIndex; BestTo = ToIndex; }
                 }
@@ -456,8 +459,14 @@ void FVoxelRWGPlanner::BuildRoadNetwork()
             if (BuildRoad(A.Id, A.Position, B.Id, B.Position, Type))
             {
                 ConnectedPairs.Add(PairKey(BestFrom, BestTo));
+                Connected.Add(BestTo);
             }
-            Connected.Add(BestTo);
+            else
+            {
+                // Don't retry a route that cannot cross the current landmass;
+                // the next iteration tries the next-best reachable connection.
+                FailedPairs.Add(PairKey(BestFrom, BestTo));
+            }
         }
 
         // Some nearby towns get loop roads so the result is not only a tree.
