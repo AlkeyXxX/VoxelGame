@@ -91,7 +91,7 @@ bool FVoxelRWGPlanner::Generate(
         return false;
     }
     PlacePOIs(Generator);
-    BuildRoadNetwork();
+    BuildRoadNetwork(Generator);
     return true;
 }
 
@@ -606,17 +606,17 @@ void FVoxelRWGPlanner::PlacePOIs(const FVoxelWorldGenerator& Generator)
     }
 }
 
-int32 FVoxelRWGPlanner::FindNearestWalkable(int32 X, int32 Y) const
+int32 FVoxelRWGPlanner::FindNearestWalkable(
+    int32 X, int32 Y, bool bAllowWater, int32 MaxSearchRadius) const
 {
     X = FMath::Clamp(X, 0, GridWidth - 1);
     Y = FMath::Clamp(Y, 0, GridHeight - 1);
+    MaxSearchRadius = FMath::Clamp(MaxSearchRadius, 0, 8);
 
-    int32 BestWater = INDEX_NONE;
-    float BestWaterCost = RWGBlockedCost;
-    for (int32 Radius = 0; Radius <= 8; ++Radius)
+    for (int32 Radius = 0; Radius <= MaxSearchRadius; ++Radius)
     {
-        int32 BestDry = INDEX_NONE;
-        float BestDryCost = RWGBlockedCost;
+        int32 Best = INDEX_NONE;
+        float BestCost = TNumericLimits<float>::Max();
         for (int32 DY = -Radius; DY <= Radius; ++DY)
         {
             for (int32 DX = -Radius; DX <= Radius; ++DX)
@@ -629,38 +629,33 @@ int32 FVoxelRWGPlanner::FindNearestWalkable(int32 X, int32 Y) const
                 if (Cost >= RWGBlockedCost) { continue; }
 
                 const bool bWater = GridWaterFlags.IsValidIndex(Index) && GridWaterFlags[Index] != 0;
-                if (bWater)
+                if (bWater && !bAllowWater) { continue; }
+
+                // Prefer the cheapest candidate on the nearest ring. For local
+                // roads the search radius is deliberately small so snapping
+                // cannot leap to a distant bank or unrelated street.
+                const float CandidateScore = Cost + Radius * 0.001f;
+                if (CandidateScore < BestCost)
                 {
-                    if (Cost < BestWaterCost)
-                    {
-                        BestWaterCost = Cost;
-                        BestWater = Index;
-                    }
-                }
-                else if (Cost < BestDryCost)
-                {
-                    BestDryCost = Cost;
-                    BestDry = Index;
+                    BestCost = CandidateScore;
+                    Best = Index;
                 }
             }
         }
-
-        // Endpoints occasionally round to a route-grid sample just offshore.
-        // Prefer a dry neighbour within one grid step before permitting a
-        // water endpoint; otherwise the route immediately dives into water.
-        if (BestDry != INDEX_NONE) { return BestDry; }
-        if (Radius >= 2 && BestWater != INDEX_NONE) { return BestWater; }
+        if (Best != INDEX_NONE) { return Best; }
     }
-    return BestWater;
+    return INDEX_NONE;
 }
 
 bool FVoxelRWGPlanner::FindPath(
-    int32 StartX, int32 StartY, int32 GoalX, int32 GoalY, TArray<int32>& OutPath) const
+    int32 StartX, int32 StartY, int32 GoalX, int32 GoalY,
+    bool bAllowWaterCrossing, TArray<int32>& OutPath) const
 {
     OutPath.Reset();
     if (GridWidth <= 0 || GridHeight <= 0) { return false; }
-    const int32 Start = FindNearestWalkable(StartX, StartY);
-    const int32 Goal = FindNearestWalkable(GoalX, GoalY);
+    const int32 EndpointSearchRadius = bAllowWaterCrossing ? 8 : 2;
+    const int32 Start = FindNearestWalkable(StartX, StartY, bAllowWaterCrossing, EndpointSearchRadius);
+    const int32 Goal = FindNearestWalkable(GoalX, GoalY, bAllowWaterCrossing, EndpointSearchRadius);
     if (Start == INDEX_NONE || Goal == INDEX_NONE) { return false; }
     if (Start == Goal) { OutPath.Add(Start); return true; }
 
@@ -707,10 +702,26 @@ bool FVoxelRWGPlanner::FindPath(
             if (NX < 0 || NX >= GridWidth || NY < 0 || NY >= GridHeight) { continue; }
             const int32 Next = GridIndex(NX, NY);
             if (Closed[Next] || GridCosts[Next] >= RWGBlockedCost) { continue; }
+            if (!bAllowWaterCrossing && GridWaterFlags.IsValidIndex(Next) && GridWaterFlags[Next] != 0)
+            {
+                continue;
+            }
             const bool bDiagonal = D >= 4;
-            if (bDiagonal &&
-                (GridCosts[GridIndex(CX + DX[D], CY)] >= RWGBlockedCost ||
-                 GridCosts[GridIndex(CX, CY + DY[D])] >= RWGBlockedCost)) { continue; }
+            if (bDiagonal)
+            {
+                const int32 SideX = GridIndex(CX + DX[D], CY);
+                const int32 SideY = GridIndex(CX, CY + DY[D]);
+                if (GridCosts[SideX] >= RWGBlockedCost || GridCosts[SideY] >= RWGBlockedCost)
+                {
+                    continue;
+                }
+                if (!bAllowWaterCrossing &&
+                    ((GridWaterFlags.IsValidIndex(SideX) && GridWaterFlags[SideX] != 0) ||
+                     (GridWaterFlags.IsValidIndex(SideY) && GridWaterFlags[SideY] != 0)))
+                {
+                    continue;
+                }
+            }
 
             const float Step = bDiagonal ? 1.41421356f : 1.0f;
             const float CandidateG = G[Current.Index] +
@@ -730,11 +741,13 @@ bool FVoxelRWGPlanner::FindPath(
 }
 
 bool FVoxelRWGPlanner::BuildRoad(
-    int32 FromId, const FVector& From, int32 ToId, const FVector& To, EVoxelRWGRoadType Type)
+    int32 FromId, const FVector& From, int32 ToId, const FVector& To,
+    EVoxelRWGRoadType Type, const FVoxelWorldGenerator& Generator)
 {
+    const bool bAllowWaterCrossing = Type != EVoxelRWGRoadType::Local;
     TArray<int32> Path;
     if (!FindPath(WorldToGridX(From.X), WorldToGridY(From.Y),
-        WorldToGridX(To.X), WorldToGridY(To.Y), Path)) { return false; }
+        WorldToGridX(To.X), WorldToGridY(To.Y), bAllowWaterCrossing, Path)) { return false; }
 
     FVoxelRWGRoad Road;
     Road.Id = 3000 + Roads.Num();
@@ -749,11 +762,38 @@ bool FVoxelRWGPlanner::BuildRoad(
         if (Road.Points.Num() == 0 || Distance2D(Road.Points.Last(), P) > 1.0f) { Road.Points.Add(P); }
     }
     if (Road.Points.Num() == 0 || Distance2D(Road.Points.Last(), To) > 1.0f) { Road.Points.Add(To); }
+
+    // Validate the whole local polyline against the exact terrain/water query.
+    // This catches narrow water channels that fall between coarse route-grid
+    // samples and also catches endpoint snaps that would draw a straight chord
+    // across water. Main/connector routes may cross and receive bridge decks.
+    if (!bAllowWaterCrossing)
+    {
+        for (int32 SegmentIndex = 1; SegmentIndex < Road.Points.Num(); ++SegmentIndex)
+        {
+            const FVector& A = Road.Points[SegmentIndex - 1];
+            const FVector& B = Road.Points[SegmentIndex];
+            const float Length = Distance2D(A, B);
+            const int32 Steps = FMath::Clamp(FMath::CeilToInt(Length / 8.0f), 1, 4096);
+            for (int32 Step = 0; Step <= Steps; ++Step)
+            {
+                const float T = static_cast<float>(Step) / static_cast<float>(Steps);
+                const int32 WX = FMath::Clamp(FMath::RoundToInt(FMath::Lerp(A.X, B.X, T)), 0, Settings.WorldBlocksX - 1);
+                const int32 WY = FMath::Clamp(FMath::RoundToInt(FMath::Lerp(A.Y, B.Y, T)), 0, Settings.WorldBlocksY - 1);
+                const float Height = Generator.GetSurfaceHeightFloat(WX, WY);
+                if (Generator.GetWaterColumn(WX, WY, Height).WaterSurfaceBlockZ != INDEX_NONE)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+
     Roads.Add(MoveTemp(Road));
     return true;
 }
 
-void FVoxelRWGPlanner::BuildRoadNetwork()
+void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
 {
     TSet<uint64> ConnectedPairs;
     TSet<uint64> FailedPairs;
@@ -790,7 +830,7 @@ void FVoxelRWGPlanner::BuildRoadNetwork()
             const EVoxelRWGRoadType Type = BestDistance >
                 float(FMath::Min(Settings.WorldBlocksX, Settings.WorldBlocksY)) * 0.27f
                 ? EVoxelRWGRoadType::Main : EVoxelRWGRoadType::Connector;
-            if (BuildRoad(A.Id, A.Position, B.Id, B.Position, Type))
+            if (BuildRoad(A.Id, A.Position, B.Id, B.Position, Type, Generator))
             {
                 ConnectedPairs.Add(PairKey(BestFrom, BestTo));
                 Connected.Add(BestTo);
@@ -825,7 +865,7 @@ void FVoxelRWGPlanner::BuildRoadNetwork()
                 const float D = Distance2D(Settlements[A].Position, Settlements[B].Position);
                 if (D > MaxLoop || Random.FRand() > 0.19f) { continue; }
                 if (BuildRoad(Settlements[A].Id, Settlements[A].Position,
-                    Settlements[B].Id, Settlements[B].Position, EVoxelRWGRoadType::Connector))
+                    Settlements[B].Id, Settlements[B].Position, EVoxelRWGRoadType::Connector, Generator))
                 {
                     ConnectedPairs.Add(PairKey(A, B));
                     ++Extra;
