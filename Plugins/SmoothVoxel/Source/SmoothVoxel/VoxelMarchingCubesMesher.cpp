@@ -760,14 +760,43 @@ void FVoxelMarchingCubesMesher::Build(
                         continue;
                     }
 
+                    const FVector Edge01 =
+                        Output.Vertices[I1] - Output.Vertices[I0];
+                    const FVector Edge12 =
+                        Output.Vertices[I2] - Output.Vertices[I1];
+                    const FVector Edge20 =
+                        Output.Vertices[I0] - Output.Vertices[I2];
+
+                    /*
+                     * Density averaging around a dug voxel can leave an
+                     * almost-zero-area MC triangle on an otherwise solid
+                     * wall. Such slivers can look like razor-thin faces and
+                     * are poor collision targets, so discard only triangles
+                     * far below the scale of a voxel.
+                     */
+                    const float MinEdgeLength =
+                        FMath::Max(Input.VoxelSize * 0.005f, 0.01f);
+                    const float MinEdgeLengthSquared =
+                        FMath::Square(MinEdgeLength);
+
+                    if (Edge01.SizeSquared() < MinEdgeLengthSquared ||
+                        Edge12.SizeSquared() < MinEdgeLengthSquared ||
+                        Edge20.SizeSquared() < MinEdgeLengthSquared)
+                    {
+                        continue;
+                    }
+
                     FVector FaceNormal =
                         FVector::CrossProduct(
-                            Output.Vertices[I1] -
-                                Output.Vertices[I0],
-                            Output.Vertices[I2] -
-                                Output.Vertices[I0]);
+                            Edge01,
+                            Output.Vertices[I2] - Output.Vertices[I0]);
 
-                    if (!FaceNormal.Normalize())
+                    const float MinDoubleArea =
+                        FMath::Square(Input.VoxelSize) * 0.001f;
+
+                    if (FaceNormal.SizeSquared() <
+                            FMath::Square(MinDoubleArea) ||
+                        !FaceNormal.Normalize())
                     {
                         continue;
                     }
