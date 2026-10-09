@@ -35,6 +35,13 @@ public:
         AVoxelWorld* InWorld,
         const FIntVector& InChunkCoord);
 
+    /* Bulk-apply generated data on the Game Thread after worker generation. */
+    void SetGeneratedData(
+        TArray<uint8>&& InBlocks,
+        TArray<uint8>&& InBaseBlocks,
+        TArray<uint8>&& InBiomes,
+        TArray<uint8>&& InModificationFlags);
+
 
     /*
      * Работа с блоками.
