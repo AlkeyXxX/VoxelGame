@@ -61,15 +61,13 @@ namespace
         const int32 TerrainHeight =
             Generator.GetSurfaceHeight(WorldX, WorldY);
 
-        const int32 WaterSurfaceBlockZ =
-            Generator.GetWaterSurfaceBlockZ(
+        const FVoxelWaterColumn WaterColumn =
+            Generator.GetWaterColumn(
                 WorldX,
                 WorldY,
                 TerrainHeight);
 
-        return WaterSurfaceBlockZ > SeaLevel
-            ? FMath::Min(TerrainHeight, WaterSurfaceBlockZ - 2)
-            : TerrainHeight;
+        return WaterColumn.EffectiveTerrainHeight;
     }
 
     FORCEINLINE int32 GridIndex(
@@ -280,14 +278,14 @@ void FVoxelTerrainLODMesher::Build(
             Input.SampleStep) + 1;
 
     TArray<int32> Heights;
-    TArray<int32> WaterSurfaceBlockZs;
+    TArray<uint8> InlandWaterMask;
     TArray<float> SurfaceHeights;
     TArray<FLinearColor> Colors;
 
     Heights.SetNumZeroed(
         CountX * CountY);
 
-    WaterSurfaceBlockZs.SetNumUninitialized(
+    InlandWaterMask.SetNumZeroed(
         CountX * CountY);
 
     SurfaceHeights.SetNumZeroed(
@@ -334,16 +332,14 @@ void FVoxelTerrainLODMesher::Build(
                     ClampedWorldX,
                     ClampedWorldY);
 
-            const int32 WaterSurfaceBlockZ =
-                Input.Generator.GetWaterSurfaceBlockZ(
+            const FVoxelWaterColumn WaterColumn =
+                Input.Generator.GetWaterColumn(
                     ClampedWorldX,
                     ClampedWorldY,
                     Height);
 
             const int32 EffectiveHeight =
-                WaterSurfaceBlockZ > Input.SeaLevel
-                    ? FMath::Min(Height, WaterSurfaceBlockZ - 2)
-                    : Height;
+                WaterColumn.EffectiveTerrainHeight;
 
             const EVoxelBiome Biome =
                 Input.Generator.GetBiome(
@@ -365,11 +361,10 @@ void FVoxelTerrainLODMesher::Build(
             Heights[Index] =
                 EffectiveHeight;
 
-            WaterSurfaceBlockZs[Index] =
-                WaterSurfaceBlockZ;
+            InlandWaterMask[Index] =
+                WaterColumn.bCarved ? 1 : 0;
 
-            if (WaterSurfaceBlockZ > Input.SeaLevel &&
-                EffectiveHeight < Height)
+            if (WaterColumn.bCarved)
             {
                 Colors[Index] =
                     FLinearColor(
@@ -657,41 +652,20 @@ void FVoxelTerrainLODMesher::Build(
                     static_cast<float>(Heights[I11])
                 ) * 0.25f;
 
-            int32 WaterSurfaceBlockZ = INDEX_NONE;
-            const int32 CellWaterLevels[4] =
-            {
-                WaterSurfaceBlockZs[I00],
-                WaterSurfaceBlockZs[I10],
-                WaterSurfaceBlockZs[I01],
-                WaterSurfaceBlockZs[I11]
-            };
-
-            for (int32 WaterIndex = 0; WaterIndex < 4; ++WaterIndex)
-            {
-                if (CellWaterLevels[WaterIndex] > Input.SeaLevel)
-                {
-                    WaterSurfaceBlockZ =
-                        FMath::Max(
-                            WaterSurfaceBlockZ,
-                            CellWaterLevels[WaterIndex]);
-                }
-            }
+            const bool bInlandWaterCell =
+                InlandWaterMask[I00] != 0 ||
+                InlandWaterMask[I10] != 0 ||
+                InlandWaterMask[I01] != 0 ||
+                InlandWaterMask[I11] != 0;
 
             if (AverageHeight <
-                static_cast<float>(Input.SeaLevel))
-            {
-                WaterSurfaceBlockZ =
-                    FMath::Max(
-                        WaterSurfaceBlockZ,
-                        Input.SeaLevel);
-            }
-
-            if (WaterSurfaceBlockZ != INDEX_NONE)
+                    static_cast<float>(Input.SeaLevel) ||
+                bInlandWaterCell)
             {
                 const float WaterZ =
                     (
                         static_cast<float>(
-                            WaterSurfaceBlockZ) +
+                            Input.SeaLevel) +
                         0.95f) *
                     Input.VoxelSize;
 
