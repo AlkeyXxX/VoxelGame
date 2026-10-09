@@ -257,23 +257,14 @@ namespace
      * actor may not exist yet while streaming asynchronously, but treating
      * that halo as Air creates temporary/fake faces at chunk boundaries.
      */
-    uint8 GetGeneratedBlockAtWorld(
-        const FVoxelWorldGenerator& Generator,
-        int32 WorldX,
-        int32 WorldY,
+    uint8 GetGeneratedBlockFromColumn(
+        int32 Height,
+        EVoxelBiome Biome,
+        EVoxelLandform Landform,
         int32 WorldZ,
         int32 SeaLevel,
         int32 BeachWidth)
     {
-        const int32 Height =
-            Generator.GetSurfaceHeight(WorldX, WorldY);
-
-        const EVoxelBiome Biome =
-            Generator.GetBiome(WorldX, WorldY, Height);
-
-        const EVoxelLandform Landform =
-            Generator.GetLandform(WorldX, WorldY);
-
         if (WorldZ > Height)
         {
             return WorldZ <= SeaLevel
@@ -300,8 +291,6 @@ namespace
 
             if (Landform == EVoxelLandform::Mountains)
             {
-                // Snow was handled above. Use grass for green-biome
-                // mountain surfaces to avoid the giant-boulder look.
                 return Biome == EVoxelBiome::Desert
                     ? uint8(EVoxelBlock::Sandstone)
                     : uint8(EVoxelBlock::Grass);
@@ -345,6 +334,116 @@ namespace
     }
 
 }
+
+void FVoxelMarchingCubesDataSnapshot::Build(
+    FVoxelMarchingCubesBuildInput& OutData) const
+{
+    OutData.Init(ChunkSize);
+    OutData.VoxelSize = VoxelSize;
+
+    if (ChunkSize <= 0)
+    {
+        return;
+    }
+
+    const int32 Side = ChunkSize + 2;
+    const int32 WorldBlocksX = WorldSizeX * ChunkSize;
+    const int32 WorldBlocksY = WorldSizeY * ChunkSize;
+    const int32 WorldBlocksZ = WorldSizeZ * ChunkSize;
+
+    /*
+     * All work below uses only immutable value data. Surface height,
+     * biome, and landform are computed once per XY column rather than once
+     * for every Z sample; this is important for a 34^3 MC halo.
+     */
+    for (int32 Y = -1; Y <= ChunkSize; ++Y)
+    {
+        const int32 WorldY = ChunkCoord.Y * ChunkSize + Y;
+
+        for (int32 X = -1; X <= ChunkSize; ++X)
+        {
+            const int32 WorldX = ChunkCoord.X * ChunkSize + X;
+            const bool bValidColumn =
+                WorldX >= 0 && WorldX < WorldBlocksX &&
+                WorldY >= 0 && WorldY < WorldBlocksY;
+
+            int32 Height = 0;
+            EVoxelBiome Biome = EVoxelBiome::Plains;
+            EVoxelLandform Landform = EVoxelLandform::Flatlands;
+
+            if (bValidColumn)
+            {
+                Height = Generator.GetSurfaceHeight(WorldX, WorldY);
+                Biome = Generator.GetBiome(WorldX, WorldY, Height);
+                Landform = Generator.GetLandform(WorldX, WorldY);
+            }
+
+            const int32 SourceChunkX =
+                X < 0 ? -1 : (X >= ChunkSize ? 1 : 0);
+            const int32 LocalX =
+                X < 0 ? ChunkSize - 1 :
+                (X >= ChunkSize ? 0 : X);
+
+            const int32 SourceChunkY =
+                Y < 0 ? -1 : (Y >= ChunkSize ? 1 : 0);
+            const int32 LocalY =
+                Y < 0 ? ChunkSize - 1 :
+                (Y >= ChunkSize ? 0 : Y);
+
+            for (int32 Z = -1; Z <= ChunkSize; ++Z)
+            {
+                const int32 WorldZ = ChunkCoord.Z * ChunkSize + Z;
+                const int32 SourceChunkZ =
+                    Z < 0 ? -1 : (Z >= ChunkSize ? 1 : 0);
+                const int32 LocalZ =
+                    Z < 0 ? ChunkSize - 1 :
+                    (Z >= ChunkSize ? 0 : Z);
+
+                uint8 Block = uint8(EVoxelBlock::Air);
+
+                if (bValidColumn &&
+                    WorldZ >= 0 && WorldZ < WorldBlocksZ)
+                {
+                    const FIntVector SourceChunkCoord(
+                        ChunkCoord.X + SourceChunkX,
+                        ChunkCoord.Y + SourceChunkY,
+                        ChunkCoord.Z + SourceChunkZ);
+
+                    const int32 SourceLocalIndex =
+                        LocalX +
+                        LocalY * ChunkSize +
+                        LocalZ * ChunkSize * ChunkSize;
+
+                    const TMap<int32, uint8>* SourceModifications =
+                        ChunkModifications.Find(SourceChunkCoord);
+
+                    const bool bIsModified =
+                        SourceModifications &&
+                        SourceModifications->Contains(SourceLocalIndex);
+
+                    if (!bIsModified)
+                    {
+                        Block = GetGeneratedBlockFromColumn(
+                            Height,
+                            Biome,
+                            Landform,
+                            WorldZ,
+                            SeaLevel,
+                            BeachWidth);
+                    }
+                }
+
+                const int32 Index =
+                    (X + 1) +
+                    (Y + 1) * Side +
+                    (Z + 1) * Side * Side;
+
+                OutData.Blocks[Index] = Block;
+            }
+        }
+    }
+}
+
 
 
 AVoxelWorld::AVoxelWorld()
@@ -1571,139 +1670,54 @@ void AVoxelWorld::BuildNeighborData(
  * construction blocks stay on the separate cubic layer.
  * Local block coordinates range from [-1, Size].
  */
+void AVoxelWorld::CaptureMarchingCubesDataSnapshot(
+    const FIntVector& ChunkCoord,
+    FVoxelMarchingCubesDataSnapshot& OutSnapshot) const
+{
+    OutSnapshot.Generator = WorldGenerator;
+    OutSnapshot.ChunkCoord = ChunkCoord;
+    OutSnapshot.ChunkSize = ChunkSize;
+    OutSnapshot.WorldSizeX = WorldSizeX;
+    OutSnapshot.WorldSizeY = WorldSizeY;
+    OutSnapshot.WorldSizeZ = WorldSizeZ;
+    OutSnapshot.SeaLevel = SeaLevel;
+    OutSnapshot.BeachWidth = BeachWidth;
+    OutSnapshot.VoxelSize = VoxelSize;
+    OutSnapshot.ChunkModifications.Reset();
+
+    /*
+     * Only the target chunk and its 26 adjacent chunks can contribute
+     * to the one-voxel halo. Never copy/read AVoxelChunk objects on a worker.
+     */
+    for (int32 Z = -1; Z <= 1; ++Z)
+    {
+        for (int32 Y = -1; Y <= 1; ++Y)
+        {
+            for (int32 X = -1; X <= 1; ++X)
+            {
+                const FIntVector SourceCoord =
+                    ChunkCoord + FIntVector(X, Y, Z);
+
+                if (const TMap<int32, uint8>* Mods =
+                    ModifiedBlocks.Find(SourceCoord))
+                {
+                    OutSnapshot.ChunkModifications.Add(
+                        SourceCoord,
+                        *Mods);
+                }
+            }
+        }
+    }
+}
+
+
 void AVoxelWorld::BuildMarchingCubesData(
     const FIntVector& ChunkCoord,
     FVoxelMarchingCubesBuildInput& OutData) const
 {
-    OutData.Init(ChunkSize);
-    OutData.VoxelSize = VoxelSize;
-
-    const int32 Side = ChunkSize + 2;
-
-    /*
-     * Cache this chunk and its 26 neighbours once. The previous version
-     * searched the Chunks TMap and recomputed world/local coordinates for
-     * every one of the (ChunkSize + 2)^3 samples, repeated for each rebuild.
-     */
-    const AVoxelChunk* NeighborChunks[3][3][3] = {};
-
-    for (int32 NZ = -1; NZ <= 1; ++NZ)
-    {
-        for (int32 NY = -1; NY <= 1; ++NY)
-        {
-            for (int32 NX = -1; NX <= 1; ++NX)
-            {
-                NeighborChunks[NX + 1][NY + 1][NZ + 1] =
-                    Chunks.FindRef(
-                        ChunkCoord + FIntVector(NX, NY, NZ));
-            }
-        }
-    }
-
-    for (int32 Z = -1; Z <= ChunkSize; ++Z)
-    {
-        const int32 SourceChunkZ =
-            Z < 0 ? -1 : (Z >= ChunkSize ? 1 : 0);
-        const int32 LocalZ =
-            Z < 0 ? ChunkSize - 1 :
-            (Z >= ChunkSize ? 0 : Z);
-
-        for (int32 Y = -1; Y <= ChunkSize; ++Y)
-        {
-            const int32 SourceChunkY =
-                Y < 0 ? -1 : (Y >= ChunkSize ? 1 : 0);
-            const int32 LocalY =
-                Y < 0 ? ChunkSize - 1 :
-                (Y >= ChunkSize ? 0 : Y);
-
-            for (int32 X = -1; X <= ChunkSize; ++X)
-            {
-                const int32 SourceChunkX =
-                    X < 0 ? -1 : (X >= ChunkSize ? 1 : 0);
-                const int32 LocalX =
-                    X < 0 ? ChunkSize - 1 :
-                    (X >= ChunkSize ? 0 : X);
-
-                uint8 Block = uint8(EVoxelBlock::Air);
-
-                const FIntVector SourceChunkCoord =
-                    ChunkCoord + FIntVector(
-                        SourceChunkX,
-                        SourceChunkY,
-                        SourceChunkZ);
-
-                const AVoxelChunk* SourceChunk =
-                    NeighborChunks
-                        [SourceChunkX + 1]
-                        [SourceChunkY + 1]
-                        [SourceChunkZ + 1];
-
-                if (SourceChunk && SourceChunk->HasGeneratedData())
-                {
-                    Block = SourceChunk->GetTerrainBlock(
-                        LocalX,
-                        LocalY,
-                        LocalZ);
-                }
-                else if (IsChunkInsideWorld(SourceChunkCoord))
-                {
-                    /*
-                     * Neighbour terrain may still be generating (or be
-                     * outside the full-chunk streaming radius). Sample its
-                     * procedural block directly so the MC halo remains
-                     * continuous instead of inventing an Air wall.
-                     * Apply saved/player edits with the same rule as
-                     * GetTerrainBlock: modified cells belong to the cubic
-                     * layer and are excluded from the smooth surface.
-                     */
-                    const FIntVector WorldBlock(
-                        ChunkCoord.X * ChunkSize + X,
-                        ChunkCoord.Y * ChunkSize + Y,
-                        ChunkCoord.Z * ChunkSize + Z);
-
-                    const int32 SourceLocalIndex =
-                        LocalX +
-                        LocalY * ChunkSize +
-                        LocalZ * ChunkSize * ChunkSize;
-
-                    bool bIsModified = false;
-                    if (const TMap<int32, uint8>* SourceModifications =
-                        ModifiedBlocks.Find(SourceChunkCoord))
-                    {
-                        bIsModified =
-                            SourceModifications->Contains(SourceLocalIndex);
-                    }
-
-                    if (bIsModified)
-                    {
-                        Block = uint8(EVoxelBlock::Air);
-                    }
-                    else if (WorldBlock.X >= 0 &&
-                             WorldBlock.X < WorldSizeX * ChunkSize &&
-                             WorldBlock.Y >= 0 &&
-                             WorldBlock.Y < WorldSizeY * ChunkSize &&
-                             WorldBlock.Z >= 0 &&
-                             WorldBlock.Z < WorldSizeZ * ChunkSize)
-                    {
-                        Block = GetGeneratedBlockAtWorld(
-                            WorldGenerator,
-                            WorldBlock.X,
-                            WorldBlock.Y,
-                            WorldBlock.Z,
-                            SeaLevel,
-                            BeachWidth);
-                    }
-                }
-
-                const int32 Index =
-                    (X + 1) +
-                    (Y + 1) * Side +
-                    (Z + 1) * Side * Side;
-
-                OutData.Blocks[Index] = Block;
-            }
-        }
-    }
+    FVoxelMarchingCubesDataSnapshot Snapshot;
+    CaptureMarchingCubesDataSnapshot(ChunkCoord, Snapshot);
+    Snapshot.Build(OutData);
 }
 
 bool AVoxelWorld::IsPositionInsideWater(
