@@ -112,7 +112,7 @@ namespace
     float GetMCSurfaceHeightFromColumns(
         const int32 ColumnHeights[4])
     {
-        constexpr float IsoLevel = 0.49f;
+        constexpr float LODIsoLevel = 0.49f;
 
         int32 MinHeight = ColumnHeights[0];
         int32 MaxHeight = ColumnHeights[0];
@@ -146,8 +146,8 @@ namespace
         {
             const float CurrentDensity = DensityAtNodeZ(NodeZ);
 
-            if (PreviousDensity >= IsoLevel &&
-                CurrentDensity < IsoLevel)
+            if (PreviousDensity >= LODIsoLevel &&
+                CurrentDensity < LODIsoLevel)
             {
                 const float Denominator =
                     CurrentDensity - PreviousDensity;
@@ -155,7 +155,7 @@ namespace
                 const float Alpha =
                     FMath::IsNearlyZero(Denominator)
                         ? 0.0f
-                        : (IsoLevel - PreviousDensity) / Denominator;
+                        : (LODIsoLevel - PreviousDensity) / Denominator;
 
                 return
                     static_cast<float>(PreviousNodeZ) +
