@@ -419,6 +419,17 @@ void FVoxelMarchingCubesDataSnapshot::Build(
                 Landform = Generator.GetLandform(WorldX, WorldY);
             }
 
+            const FVoxelRWGRoadStamp* RoadStamp = nullptr;
+            if (bValidColumn && WaterSurfaceBlockZ == INDEX_NONE && RoadStamps.IsValid())
+            {
+                RoadStamp = RoadStamps->Find(FIntPoint(WorldX, WorldY));
+                if (RoadStamp && RoadStamp->SurfaceZ != INDEX_NONE)
+                {
+                    LocalSurfaceHeight = static_cast<float>(RoadStamp->SurfaceZ) -
+                        static_cast<float>(ChunkCoord.Z * ChunkSize);
+                }
+            }
+
             OutData.TerrainSurfaceHeights[
                 (X + 1) + (Y + 1) * Side] =
                 LocalSurfaceHeight;
@@ -477,6 +488,22 @@ void FVoxelMarchingCubesDataSnapshot::Build(
                             WorldZ,
                             SeaLevel,
                             BeachWidth);
+
+                        if (RoadStamp && RoadStamp->SurfaceZ != INDEX_NONE)
+                        {
+                            if (WorldZ > RoadStamp->SurfaceZ && WorldZ <= EffectiveHeight)
+                            {
+                                Block = uint8(EVoxelBlock::Air);
+                            }
+                            else if (WorldZ == RoadStamp->SurfaceZ)
+                            {
+                                Block = RoadStamp->SurfaceBlock;
+                            }
+                            else if (WorldZ > EffectiveHeight && WorldZ < RoadStamp->SurfaceZ)
+                            {
+                                Block = RoadStamp->FillBlock;
+                            }
+                        }
                     }
                 }
 
