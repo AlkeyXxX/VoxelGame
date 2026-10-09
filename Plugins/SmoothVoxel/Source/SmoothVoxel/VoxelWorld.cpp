@@ -914,8 +914,18 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
     }
 
     RWGRoadSurfaceStamps = NewStamps;
-    UE_LOG(LogTemp, Display, TEXT("RWG terrain stamps built: %d XY columns; dry road surface and shoulder cut/fill."),
-        RWGRoadSurfaceStamps.IsValid() ? RWGRoadSurfaceStamps->Num() : 0);
+
+    TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe> NewLODHeights =
+        MakeShared<TMap<FIntPoint, int32>, ESPMode::ThreadSafe>();
+    for (const TPair<FIntPoint, FVoxelRWGRoadStamp>& Pair : *NewStamps)
+    {
+        NewLODHeights->Add(Pair.Key, Pair.Value.SurfaceZ);
+    }
+    RWGRoadLODHeights = NewLODHeights;
+
+    UE_LOG(LogTemp, Display, TEXT("RWG terrain stamps built: %d XY columns (LOD heights=%d); dry road surface and shoulder cut/fill."),
+        RWGRoadSurfaceStamps.IsValid() ? RWGRoadSurfaceStamps->Num() : 0,
+        RWGRoadLODHeights.IsValid() ? RWGRoadLODHeights->Num() : 0);
 }
 
 
@@ -1425,6 +1435,7 @@ void AVoxelWorld::GenerateWorld()
 
     // A full world regeneration clears the previous road plan and its terrain edits.
     RWGRoadSurfaceStamps.Reset();
+    RWGRoadLODHeights.Reset();
     ClearRWGRoadSurface();
 
     /*
@@ -3824,6 +3835,8 @@ void AVoxelWorld::UpdateFarLOD(
 
     const FVoxelWorldGenerator GeneratorCopy =
         WorldGenerator;
+    const TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe> RoadLODHeightsCopy =
+        RWGRoadLODHeights;
 
     const int32 LODWorldSizeX =
         WorldSizeX;
@@ -3858,6 +3871,7 @@ void AVoxelWorld::UpdateFarLOD(
         [
             WeakWorld,
             GeneratorCopy,
+            RoadLODHeightsCopy,
             CenterChunk,
             LODWorldSizeX,
             LODWorldSizeY,
@@ -3882,6 +3896,8 @@ void AVoxelWorld::UpdateFarLOD(
 
             BuildInput.Generator =
                 GeneratorCopy;
+            BuildInput.RoadSurfaceHeights =
+                RoadLODHeightsCopy;
 
             BuildInput.WorldSizeX =
                 LODWorldSizeX;
