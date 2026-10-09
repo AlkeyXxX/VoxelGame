@@ -386,10 +386,10 @@ public:
     UMaterialInterface* RWGRoadMaterial = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="20.0"))
-    float RWGRoadWidthMainBlocks = 8.0f;
+    float RWGRoadWidthMainBlocks = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="16.0"))
-    float RWGRoadWidthConnectorBlocks = 5.0f;
+    float RWGRoadWidthConnectorBlocks = 6.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="12.0"))
     float RWGRoadWidthLocalBlocks = 3.5f;
