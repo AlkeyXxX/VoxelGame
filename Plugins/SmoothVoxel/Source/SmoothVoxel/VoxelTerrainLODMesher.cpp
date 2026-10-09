@@ -418,7 +418,7 @@ void FVoxelTerrainLODMesher::Build(
                     Input.RoadSurfaceHeights,
                     ClampedWorldX,
                     ClampedWorldY,
-                    FMath::Max(0, Input.SampleStep / 2),
+                    FMath::Clamp(Input.SampleStep / 2, 0, 2),
                     RoadHeight))
                 {
                     EffectiveHeight = RoadHeight;
@@ -531,7 +531,7 @@ void FVoxelTerrainLODMesher::Build(
                         PreviousWorldX,
                         PreviousWorldY,
                         Input.RoadSurfaceHeights,
-                        FMath::Max(0, Input.SampleStep / 2));
+                        FMath::Clamp(Input.SampleStep / 2, 0, 2));
 
                 ColumnHeights[1] =
                     GetEffectiveSurfaceHeight(
@@ -539,7 +539,7 @@ void FVoxelTerrainLODMesher::Build(
                         WorldX,
                         PreviousWorldY,
                         Input.RoadSurfaceHeights,
-                        FMath::Max(0, Input.SampleStep / 2));
+                        FMath::Clamp(Input.SampleStep / 2, 0, 2));
 
                 ColumnHeights[2] =
                     GetEffectiveSurfaceHeight(
@@ -547,7 +547,7 @@ void FVoxelTerrainLODMesher::Build(
                         PreviousWorldX,
                         WorldY,
                         Input.RoadSurfaceHeights,
-                        FMath::Max(0, Input.SampleStep / 2));
+                        FMath::Clamp(Input.SampleStep / 2, 0, 2));
 
                 ColumnHeights[3] =
                     Heights[Index];
