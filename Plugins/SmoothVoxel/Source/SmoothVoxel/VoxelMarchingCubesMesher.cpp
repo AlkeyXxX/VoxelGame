@@ -79,108 +79,71 @@ namespace
         int32 Size,
         const FVector& Position)
     {
-        int32 X = FMath::RoundToInt(Position.X);
-        int32 Y = FMath::RoundToInt(Position.Y);
-        int32 Z = FMath::RoundToInt(Position.Z);
+        /*
+         * Evaluate the gradient of the trilinearly interpolated density
+         * field at the actual surface position. Rounding Position to the
+         * nearest sample node can give adjacent triangles unrelated normal
+         * directions around dug blocks, which may flip their winding and
+         * make otherwise valid faces disappear with back-face culling.
+         */
+        const float PX = FMath::Clamp(
+            Position.X,
+            0.0f,
+            static_cast<float>(Size));
 
-        const int32 MaxNode = Size + 1;
+        const float PY = FMath::Clamp(
+            Position.Y,
+            0.0f,
+            static_cast<float>(Size));
 
-        X = FMath::Clamp(X, 0, MaxNode);
-        Y = FMath::Clamp(Y, 0, MaxNode);
-        Z = FMath::Clamp(Z, 0, MaxNode);
+        const float PZ = FMath::Clamp(
+            Position.Z,
+            0.0f,
+            static_cast<float>(Size));
 
-        float DX = 0.0f;
-        float DY = 0.0f;
-        float DZ = 0.0f;
+        const int32 X0 = FMath::FloorToInt(PX);
+        const int32 Y0 = FMath::FloorToInt(PY);
+        const int32 Z0 = FMath::FloorToInt(PZ);
 
-        if (X == 0)
-        {
-            DX =
-                Densities[
-                    DensityIndex(X + 1, Y, Z, Size)] -
-                Densities[
-                    DensityIndex(X, Y, Z, Size)];
-        }
-        else if (X == MaxNode)
-        {
-            DX =
-                Densities[
-                    DensityIndex(X, Y, Z, Size)] -
-                Densities[
-                    DensityIndex(X - 1, Y, Z, Size)];
-        }
-        else
-        {
-            DX =
-                0.5f *
-                (Densities[
-                    DensityIndex(X + 1, Y, Z, Size)] -
-                 Densities[
-                    DensityIndex(X - 1, Y, Z, Size)]);
-        }
+        const int32 X1 = FMath::Min(X0 + 1, Size + 1);
+        const int32 Y1 = FMath::Min(Y0 + 1, Size + 1);
+        const int32 Z1 = FMath::Min(Z0 + 1, Size + 1);
 
-        if (Y == 0)
-        {
-            DY =
-                Densities[
-                    DensityIndex(X, Y + 1, Z, Size)] -
-                Densities[
-                    DensityIndex(X, Y, Z, Size)];
-        }
-        else if (Y == MaxNode)
-        {
-            DY =
-                Densities[
-                    DensityIndex(X, Y, Z, Size)] -
-                Densities[
-                    DensityIndex(X, Y - 1, Z, Size)];
-        }
-        else
-        {
-            DY =
-                0.5f *
-                (Densities[
-                    DensityIndex(X, Y + 1, Z, Size)] -
-                 Densities[
-                    DensityIndex(X, Y - 1, Z, Size)]);
-        }
+        const float TX = PX - static_cast<float>(X0);
+        const float TY = PY - static_cast<float>(Y0);
+        const float TZ = PZ - static_cast<float>(Z0);
 
-        if (Z == 0)
-        {
-            DZ =
-                Densities[
-                    DensityIndex(X, Y, Z + 1, Size)] -
-                Densities[
-                    DensityIndex(X, Y, Z, Size)];
-        }
-        else if (Z == MaxNode)
-        {
-            DZ =
-                Densities[
-                    DensityIndex(X, Y, Z, Size)] -
-                Densities[
-                    DensityIndex(X, Y, Z - 1, Size)];
-        }
-        else
-        {
-            DZ =
-                0.5f *
-                (Densities[
-                    DensityIndex(X, Y, Z + 1, Size)] -
-                 Densities[
-                    DensityIndex(X, Y, Z - 1, Size)]);
-        }
+        const float D000 = Densities[DensityIndex(X0, Y0, Z0, Size)];
+        const float D100 = Densities[DensityIndex(X1, Y0, Z0, Size)];
+        const float D010 = Densities[DensityIndex(X0, Y1, Z0, Size)];
+        const float D110 = Densities[DensityIndex(X1, Y1, Z0, Size)];
+        const float D001 = Densities[DensityIndex(X0, Y0, Z1, Size)];
+        const float D101 = Densities[DensityIndex(X1, Y0, Z1, Size)];
+        const float D011 = Densities[DensityIndex(X0, Y1, Z1, Size)];
+        const float D111 = Densities[DensityIndex(X1, Y1, Z1, Size)];
+
+        const float DX = FMath::Lerp(
+            FMath::Lerp(D100 - D000, D110 - D010, TY),
+            FMath::Lerp(D101 - D001, D111 - D011, TY),
+            TZ);
+
+        const float DY = FMath::Lerp(
+            FMath::Lerp(D010 - D000, D110 - D100, TX),
+            FMath::Lerp(D011 - D001, D111 - D101, TX),
+            TZ);
+
+        const float DZ = FMath::Lerp(
+            FMath::Lerp(D001 - D000, D101 - D100, TX),
+            FMath::Lerp(D011 - D010, D111 - D110, TX),
+            TY);
 
         FVector Gradient(DX, DY, DZ);
 
-        if (!Gradient.Normalize())
-        {
-            Gradient = FVector::UpVector;
-        }
-
+        // A zero gradient must not force an arbitrary up-facing triangle
+        // winding. The triangle table's order is preserved in that case.
+        Gradient.Normalize();
         return Gradient;
     }
-
     int32 GetSurfaceMaterialPriority(uint8 Block)
     {
         switch (static_cast<EVoxelBlock>(Block))
@@ -692,8 +655,13 @@ void FVoxelMarchingCubesMesher::Build(
                             Position *
                             Input.VoxelSize);
 
-                        Output.Normals.Add(
-                            -Gradient);
+                        FVector VertexNormal = -Gradient;
+                        if (!VertexNormal.Normalize())
+                        {
+                            VertexNormal = FVector::UpVector;
+                        }
+
+                        Output.Normals.Add(VertexNormal);
 
                         const int32 MaterialBlockZ =
                             FMath::FloorToInt(
