@@ -2396,45 +2396,80 @@ bool AVoxelWorld::PlaceBlockByRayWithType(
         return false;
     }
 
-    const FVector PlacePoint =
-        Hit.ImpactPoint +
-        Hit.ImpactNormal *
-        (VoxelSize * 0.51f);
-
-    FIntVector WorldBlock;
-
-    if (!WorldToBlock(
-        PlacePoint,
-        WorldBlock))
-    {
-        return false;
-    }
-
-    const FIntVector LocalBlock =
-        WorldBlockToLocal(WorldBlock);
-
-    AVoxelChunk* TargetChunk =
-        GetChunk(
-            WorldBlockToChunk(
-                WorldBlock));
-
-    if (!TargetChunk)
-    {
-        return false;
-    }
-
     /*
-     * Не перезаписываем существующий твёрдый блок.
-     * Воду также не считаем свободным местом для строительства.
+     * Marching Cubes surfaces are smooth and their hit normal is not
+     * necessarily axis-aligned. A single 0.51-voxel offset can still land
+     * in a solid voxel even when the point just outside the visible surface
+     * is empty. Probe outwards in small steps and pick the nearest cell that
+     * is actually available. Water is also replaceable by a placed block.
      */
-    const EVoxelBlock ExistingBlock =
-        static_cast<EVoxelBlock>(
-            TargetChunk->GetBlock(
-                LocalBlock.X,
-                LocalBlock.Y,
-                LocalBlock.Z));
+    const FVector PlacementNormal =
+        Hit.ImpactNormal.GetSafeNormal();
 
-    if (ExistingBlock != EVoxelBlock::Air)
+    if (PlacementNormal.IsNearlyZero())
+    {
+        return false;
+    }
+
+    const float ProbeStep =
+        FMath::Max(VoxelSize * 0.05f, 1.0f);
+
+    const float MaxProbeDistance =
+        VoxelSize * 1.1f;
+
+    FIntVector WorldBlock = FIntVector::ZeroValue;
+    FIntVector LocalBlock = FIntVector::ZeroValue;
+    AVoxelChunk* TargetChunk = nullptr;
+    bool bFoundPlacementCell = false;
+
+    for (float Distance = ProbeStep;
+         Distance <= MaxProbeDistance + KINDA_SMALL_NUMBER;
+         Distance += ProbeStep)
+    {
+        const FVector ProbePoint =
+            Hit.ImpactPoint + PlacementNormal * Distance;
+
+        FIntVector CandidateWorldBlock;
+        if (!WorldToBlock(ProbePoint, CandidateWorldBlock))
+        {
+            continue;
+        }
+
+        const FIntVector CandidateChunkCoord =
+            WorldBlockToChunk(CandidateWorldBlock);
+
+        AVoxelChunk* CandidateChunk =
+            GetChunk(CandidateChunkCoord);
+
+        if (!CandidateChunk || !CandidateChunk->HasGeneratedData())
+        {
+            continue;
+        }
+
+        const FIntVector CandidateLocalBlock =
+            WorldBlockToLocal(CandidateWorldBlock);
+
+        const EVoxelBlock CandidateBlock =
+            static_cast<EVoxelBlock>(
+                CandidateChunk->GetBlock(
+                    CandidateLocalBlock.X,
+                    CandidateLocalBlock.Y,
+                    CandidateLocalBlock.Z));
+
+        if (CandidateBlock != EVoxelBlock::Air &&
+            CandidateBlock != EVoxelBlock::Water)
+        {
+            continue;
+        }
+
+        WorldBlock = CandidateWorldBlock;
+        LocalBlock = CandidateLocalBlock;
+        TargetChunk = CandidateChunk;
+        bFoundPlacementCell = true;
+        break;
+    }
+
+    if (!bFoundPlacementCell || !TargetChunk)
     {
         return false;
     }
