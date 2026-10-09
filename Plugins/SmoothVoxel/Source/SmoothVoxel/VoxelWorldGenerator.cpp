@@ -378,8 +378,8 @@ bool FVoxelWorldGenerator::IsLakeMask(
 
     /*
      * Broad noise selects a small number of lake regions. Fine noise only
-     * roughens their shorelines; height and landform checks are applied by
-     * GetWaterSurfaceBlockZ so this mask does not flood mountains.
+     * roughens their shorelines; the water-column query also checks height
+     * and landform so this mask does not flood mountains.
      */
     const FVector2D LakeShapePosition(
         NormalizedX * 5.0f + Settings.Seed * 0.031f,
