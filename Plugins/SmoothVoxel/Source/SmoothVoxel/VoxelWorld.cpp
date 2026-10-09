@@ -766,7 +766,6 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
         TArray<FProcMeshTangent> Tangents;
 
         const float HalfWidth = FMath::Max(0.5f, WidthBlocks * 0.5f);
-        float TotalSampleDistance = 0.0f;
 
         for (const FVoxelRWGRoad& Road : Planner.GetRoads())
         {
@@ -791,12 +790,6 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                     const float Z = SampleSurfaceHeight(X, Y);
                     const FVector Point(X, Y, Z);
 
-                    if (Centerline.Num() > 0)
-                    {
-                        TotalSampleDistance += FVector2D(
-                            Point.X - Centerline.Last().X,
-                            Point.Y - Centerline.Last().Y).Size();
-                    }
                     Centerline.Add(Point);
                 }
             }
