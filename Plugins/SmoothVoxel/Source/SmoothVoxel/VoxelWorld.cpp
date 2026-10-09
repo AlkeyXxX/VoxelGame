@@ -726,9 +726,29 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
 
     if (bDrawRWGDebugPreview && GetWorld())
     {
+        // F2 may be pressed more than once in PIE. Clear the previous RWG
+        // overlay so previews do not accumulate into a dense wireframe dome.
+        FlushPersistentDebugLines(GetWorld());
+
         const auto ToWorldPosition = [this](const FVector& P)
         {
             return GetActorLocation() + FVector(P.X * VoxelSize, P.Y * VoxelSize, P.Z * VoxelSize);
+        };
+
+        const int32 SafeWorldBlocksX = FMath::Max(1, WorldSizeX * ChunkSize);
+        const int32 SafeWorldBlocksY = FMath::Max(1, WorldSizeY * ChunkSize);
+
+        // RoadPlanner's A* polyline is sampled at a coarse grid interval.
+        // Densify each segment and re-sample the exact terrain/water surface;
+        // otherwise long straight lines can pass through hills and appear to stop.
+        const auto SampleRoadSurface = [this, SafeWorldBlocksX, SafeWorldBlocksY](float X, float Y)
+        {
+            const int32 BlockX = FMath::Clamp(FMath::RoundToInt(X), 0, SafeWorldBlocksX - 1);
+            const int32 BlockY = FMath::Clamp(FMath::RoundToInt(Y), 0, SafeWorldBlocksY - 1);
+            const float RawHeight = WorldGenerator.GetSurfaceHeightFloat(BlockX, BlockY);
+            const FVoxelWaterColumn WaterColumn =
+                WorldGenerator.GetWaterColumn(BlockX, BlockY, RawHeight);
+            return WaterColumn.EffectiveSurfaceHeight + 1.25f;
         };
 
         for (const FVoxelRWGRoad& Road : Planner.GetRoads())
@@ -748,26 +768,47 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
 
             for (int32 I = 1; I < Road.Points.Num(); ++I)
             {
-                DrawDebugLine(GetWorld(), ToWorldPosition(Road.Points[I - 1]),
-                    ToWorldPosition(Road.Points[I]), Color, false,
-                    RWGDebugDrawDuration, 0, Thickness);
+                const FVector& A = Road.Points[I - 1];
+                const FVector& B = Road.Points[I];
+                const float SegmentLength = FVector2D(B.X - A.X, B.Y - A.Y).Size();
+                const int32 Steps = FMath::Clamp(
+                    FMath::CeilToInt(SegmentLength / 8.0f), 1, 512);
+
+                FVector Previous(
+                    A.X, A.Y, SampleRoadSurface(A.X, A.Y));
+
+                for (int32 Step = 1; Step <= Steps; ++Step)
+                {
+                    const float T = static_cast<float>(Step) / static_cast<float>(Steps);
+                    const float X = FMath::Lerp(A.X, B.X, T);
+                    const float Y = FMath::Lerp(A.Y, B.Y, T);
+                    const FVector Current(X, Y, SampleRoadSurface(X, Y));
+
+                    DrawDebugLine(GetWorld(), ToWorldPosition(Previous),
+                        ToWorldPosition(Current), Color, false,
+                        RWGDebugDrawDuration, 0, Thickness);
+                    Previous = Current;
+                }
             }
         }
 
+        // Markers intentionally stay small. The hub radius is a logical
+        // settlement footprint in blocks; drawing it as a 3D sphere creates
+        // a huge wireframe dome over the terrain.
         for (const FVoxelRWGSettlement& Hub : Planner.GetSettlements())
         {
             const FColor Color = Hub.Type == EVoxelRWGSettlementType::City
                 ? FColor::Red : FColor::Yellow;
             DrawDebugSphere(GetWorld(), ToWorldPosition(Hub.Position),
-                FMath::Max(250.0f, Hub.Radius * VoxelSize), 16, Color,
-                false, RWGDebugDrawDuration, 0, 2.0f);
+                2.5f * VoxelSize, 8, Color, false,
+                RWGDebugDrawDuration, 0, 2.0f);
         }
 
         for (const FVoxelRWGPOI& POI : Planner.GetPOIs())
         {
             DrawDebugSphere(GetWorld(), ToWorldPosition(POI.Position),
-                FMath::Max(80.0f, POI.Radius * VoxelSize), 8, FColor::Green,
-                false, RWGDebugDrawDuration, 0, 1.5f);
+                0.9f * VoxelSize, 6, FColor::Green, false,
+                RWGDebugDrawDuration, 0, 1.5f);
         }
     }
 
