@@ -273,6 +273,17 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
         RidgeMedium * 0.27f +
         RidgeFine * 0.11f;
 
+    /*
+     * Cut lower channels between the ridges. This is a cheap, deterministic
+     * erosion-inspired profile rather than a simulated hydraulic erosion
+     * pass: it subtracts from broad mountain mass where the ridge signals
+     * are far from their crests, keeping ranges from becoming solid plateaus.
+     */
+    const float MountainValleySignal =
+        FMath::Abs(RidgeBroadSource) * 0.62f +
+        FMath::Abs(RidgeMediumSource) * 0.27f +
+        FMath::Abs(RidgeFineSource) * 0.11f;
+
     const FVector2D MountainShoulderPosition(
         NormalizedX * 6.8f - Settings.Seed * 0.014f,
         NormalizedY * 6.8f + Settings.Seed * 0.022f);
@@ -291,12 +302,19 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
                 1.0f),
             0.72f);
 
+    const float MountainDrainageCut =
+        MountainValleySignal *
+        MountainMask *
+        HeightVariation *
+        0.55f;
+
     const float MountainCandidate =
         static_cast<float>(Settings.BaseHeight) +
         TerrainNoise * HeightVariation * 0.38f +
         MountainShoulderNoise * HeightVariation * 0.75f +
         MountainMask * HeightVariation * 2.65f +
-        RidgeNoise * HeightVariation * 1.25f +
+        RidgeNoise * HeightVariation * 1.25f -
+        MountainDrainageCut +
         DetailNoise *
             static_cast<float>(Settings.DetailHeightVariation) * 0.35f;
 
