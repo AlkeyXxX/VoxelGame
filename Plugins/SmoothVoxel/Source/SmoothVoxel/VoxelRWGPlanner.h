@@ -95,6 +95,7 @@ private:
     int32 GridHeight = 0;
     TArray<float> GridHeights;
     TArray<float> GridCosts;
+    TArray<uint8> GridWaterFlags;
 
     int32 GridIndex(int32 X, int32 Y) const;
     FVector GridPosition(int32 X, int32 Y) const;
