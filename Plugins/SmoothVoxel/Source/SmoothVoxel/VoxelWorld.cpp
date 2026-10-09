@@ -181,9 +181,11 @@ namespace
                         }
                         else if (Landform == EVoxelLandform::Mountains)
                         {
+                            // Green-biome mountain tops use a grassy surface;
+                            // Snow and desert already have dedicated branches.
                             Block = Biome == EVoxelBiome::Desert
                                 ? uint8(EVoxelBlock::Sandstone)
-                                : uint8(EVoxelBlock::Stone);
+                                : uint8(EVoxelBlock::Grass);
                         }
                         else if (Biome == EVoxelBiome::Desert)
                         {
@@ -208,7 +210,11 @@ namespace
                     else if (Landform == EVoxelLandform::Mountains &&
                              WorldZ >= Height - 3)
                     {
-                        Block = uint8(EVoxelBlock::Stone);
+                        // Keep the outer few blocks grassy on green
+                        // mountain faces. Snow mountains remain rocky.
+                        Block = Biome == EVoxelBiome::Snow
+                            ? uint8(EVoxelBlock::Stone)
+                            : uint8(EVoxelBlock::Grass);
                     }
                     else if (WorldZ >= Height - 3)
                     {
@@ -294,9 +300,11 @@ namespace
 
             if (Landform == EVoxelLandform::Mountains)
             {
+                // Snow was handled above. Use grass for green-biome
+                // mountain surfaces to avoid the giant-boulder look.
                 return Biome == EVoxelBiome::Desert
                     ? uint8(EVoxelBlock::Sandstone)
-                    : uint8(EVoxelBlock::Stone);
+                    : uint8(EVoxelBlock::Grass);
             }
 
             if (Biome == EVoxelBiome::Desert)
@@ -323,7 +331,9 @@ namespace
         if (Landform == EVoxelLandform::Mountains &&
             WorldZ >= Height - 3)
         {
-            return uint8(EVoxelBlock::Stone);
+            return Biome == EVoxelBiome::Snow
+                ? uint8(EVoxelBlock::Stone)
+                : uint8(EVoxelBlock::Grass);
         }
 
         if (WorldZ >= Height - 3)
