@@ -316,7 +316,7 @@ float FVoxelWorldGenerator::GetMoisture(
     return FMath::Clamp(Noise * 0.5f + 0.5f, 0.0f, 1.0f);
 }
 
-bool FVoxelWorldGenerator::IsRiverMask(
+float FVoxelWorldGenerator::GetRiverField(
     int32 WorldX,
     int32 WorldY) const
 {
@@ -357,11 +357,19 @@ bool FVoxelWorldGenerator::IsRiverMask(
     const float RiverNoise =
         FMath::PerlinNoise2D(RiverSamplePosition);
 
-    return FMath::Abs(RiverNoise) <= 0.0045f;
+    return RiverNoise;
 }
 
 
-bool FVoxelWorldGenerator::IsLakeMask(
+bool FVoxelWorldGenerator::IsRiverMask(
+    int32 WorldX,
+    int32 WorldY) const
+{
+    return FMath::Abs(GetRiverField(WorldX, WorldY)) <= 0.0045f;
+}
+
+
+float FVoxelWorldGenerator::GetLakeScore(
     int32 WorldX,
     int32 WorldY) const
 {
@@ -398,7 +406,15 @@ bool FVoxelWorldGenerator::IsLakeMask(
     const float LakeScore =
         LakeShape * 0.82f + LakeDetail * 0.18f;
 
-    return LakeScore >= 0.42f;
+    return LakeScore;
+}
+
+
+bool FVoxelWorldGenerator::IsLakeMask(
+    int32 WorldX,
+    int32 WorldY) const
+{
+    return GetLakeScore(WorldX, WorldY) >= 0.42f;
 }
 
 
@@ -411,20 +427,14 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
     Column.WaterSurfaceBlockZ = INDEX_NONE;
     Column.EffectiveTerrainHeight = SurfaceHeight;
     Column.bCarved = false;
+    Column.bShoreAdjusted = false;
 
     /*
-     * Existing submerged lowlands remain filled up to SeaLevel. Explicit
-     * lakes and river channels use that same surface level, avoiding a
-     * one-block step where inland water joins the sea or a low basin.
+     * Keep existing low basins filled to the global sea level.
      */
     if (SurfaceHeight < Settings.SeaLevel)
     {
         Column.WaterSurfaceBlockZ = Settings.SeaLevel;
-        return Column;
-    }
-
-    if (SurfaceHeight > Settings.SeaLevel + 3)
-    {
         return Column;
     }
 
@@ -433,22 +443,60 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
         return Column;
     }
 
-    const bool bLake =
-        SurfaceHeight <= Settings.SeaLevel + 2 &&
-        IsLakeMask(WorldX, WorldY);
+    if (SurfaceHeight > Settings.SeaLevel + 3)
+    {
+        return Column;
+    }
+
+    const float RiverField = GetRiverField(WorldX, WorldY);
+    const float LakeScore = GetLakeScore(WorldX, WorldY);
 
     const bool bRiver =
-        IsRiverMask(WorldX, WorldY);
+        FMath::Abs(RiverField) <= 0.0045f;
+
+    const bool bLake =
+        SurfaceHeight <= Settings.SeaLevel + 2 &&
+        LakeScore >= 0.42f;
 
     if (bLake || bRiver)
     {
         Column.WaterSurfaceBlockZ = Settings.SeaLevel;
+
+        // Two water layers keep the river/lake readable without a deep trench.
         Column.EffectiveTerrainHeight =
             FMath::Min(
                 SurfaceHeight,
                 Settings.SeaLevel - 2);
 
         Column.bCarved =
+            Column.EffectiveTerrainHeight < SurfaceHeight;
+
+        return Column;
+    }
+
+    /*
+     * A narrow, dry shelf around water keeps the shoreline no more than one
+     * block above the water surface. The field thresholds are slightly wider
+     * than the wet masks, so this blends the edge without extra neighbor-noise
+     * sampling or chunk-order dependence.
+     */
+    const bool bRiverShore =
+        FMath::Abs(RiverField) <= 0.0090f;
+
+    const bool bLakeShore =
+        LakeScore >= 0.385f;
+
+    if (bRiverShore || bLakeShore)
+    {
+        const int32 ShoreHeight =
+            Settings.SeaLevel + 1;
+
+        Column.EffectiveTerrainHeight =
+            FMath::Min(
+                SurfaceHeight,
+                ShoreHeight);
+
+        Column.bShoreAdjusted =
             Column.EffectiveTerrainHeight < SurfaceHeight;
     }
 
