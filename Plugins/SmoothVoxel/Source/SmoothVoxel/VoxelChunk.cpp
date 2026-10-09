@@ -46,6 +46,11 @@ void AVoxelChunk::EndPlay(
         MeshBuildCancellationToken->AtomicSet(true);
     }
 
+    if (DataGenerationCancellationToken.IsValid())
+    {
+        DataGenerationCancellationToken->AtomicSet(true);
+    }
+
     Super::EndPlay(EndPlayReason);
 }
 
