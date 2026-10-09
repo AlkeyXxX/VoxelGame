@@ -96,7 +96,7 @@ public:
     float GetMoisture(int32 WorldX, int32 WorldY) const;
 
     /* Actual water cap and effective terrain bed for one global XY column. */
-    FVoxelWaterColumn GetWaterColumn(int32 WorldX, int32 WorldY, int32 SurfaceHeight) const;
+    FVoxelWaterColumn GetWaterColumn(int32 WorldX, int32 WorldY, float SurfaceHeight) const;
 
     EVoxelBiome GetBiome(
         int32 WorldX,
