@@ -813,19 +813,19 @@ void FVoxelMarchingCubesMesher::Build(
 
                         const int32 MaterialBlockZ =
                             FMath::FloorToInt(
-                                Position.Z);
+                                SurfacePosition.Z);
 
                         const uint8 RepresentativeBlock =
                             GetRepresentativeBlock(
                                 Input,
-                                FMath::FloorToInt(Position.X),
-                                FMath::FloorToInt(Position.Y),
+                                FMath::FloorToInt(SurfacePosition.X),
+                                FMath::FloorToInt(SurfacePosition.Y),
                                 MaterialBlockZ);
 
                         Output.UV0.Add(
                             FVector2D(
-                                Position.X * 0.05f,
-                                Position.Y * 0.05f));
+                                SurfacePosition.X * 0.05f,
+                                SurfacePosition.Y * 0.05f));
 
                         Output.VertexColors.Add(
                             GetBlockColor(
