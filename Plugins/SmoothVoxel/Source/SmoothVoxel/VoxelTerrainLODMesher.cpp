@@ -331,26 +331,75 @@ void FVoxelTerrainLODMesher::Build(
 
     /*
      * Apply the same vertical density interpolation as the full MC mesh.
-     * At LOD1 (step 1), the surrounding entries are the exact four block
-     * columns used by GetDensity() at this node. Coarser tiers use their
-     * neighboring sampled columns and retain the same vertical convention.
+     * LOD1 already contains every block column, so reuse its neighboring
+     * height samples. Coarser tiers query the three adjacent voxel columns
+     * too; this keeps their shared border heights consistent with LOD1 and
+     * with full-resolution chunks. Only the horizontal triangulation is
+     * decimated at the farther tiers.
      */
     for (int32 Y = 0; Y < CountY; ++Y)
     {
         for (int32 X = 0; X < CountX; ++X)
         {
-            const int32 PreviousX = FMath::Max(0, X - 1);
-            const int32 PreviousY = FMath::Max(0, Y - 1);
+            const int32 Index =
+                GridIndex(X, Y, CountX);
 
-            const int32 ColumnHeights[4] =
+            int32 ColumnHeights[4];
+
+            if (Input.SampleStep == 1)
             {
-                Heights[GridIndex(PreviousX, PreviousY, CountX)],
-                Heights[GridIndex(X, PreviousY, CountX)],
-                Heights[GridIndex(PreviousX, Y, CountX)],
-                Heights[GridIndex(X, Y, CountX)]
-            };
+                const int32 PreviousX = FMath::Max(0, X - 1);
+                const int32 PreviousY = FMath::Max(0, Y - 1);
 
-            SurfaceHeights[GridIndex(X, Y, CountX)] =
+                ColumnHeights[0] =
+                    Heights[GridIndex(PreviousX, PreviousY, CountX)];
+                ColumnHeights[1] =
+                    Heights[GridIndex(X, PreviousY, CountX)];
+                ColumnHeights[2] =
+                    Heights[GridIndex(PreviousX, Y, CountX)];
+                ColumnHeights[3] =
+                    Heights[Index];
+            }
+            else
+            {
+                const int32 WorldX =
+                    FMath::Clamp(
+                        StartBlockX + X * Input.SampleStep,
+                        0,
+                        WorldBlocksX - 1);
+
+                const int32 WorldY =
+                    FMath::Clamp(
+                        StartBlockY + Y * Input.SampleStep,
+                        0,
+                        WorldBlocksY - 1);
+
+                const int32 PreviousWorldX =
+                    FMath::Max(0, WorldX - 1);
+
+                const int32 PreviousWorldY =
+                    FMath::Max(0, WorldY - 1);
+
+                ColumnHeights[0] =
+                    Input.Generator.GetSurfaceHeight(
+                        PreviousWorldX,
+                        PreviousWorldY);
+
+                ColumnHeights[1] =
+                    Input.Generator.GetSurfaceHeight(
+                        WorldX,
+                        PreviousWorldY);
+
+                ColumnHeights[2] =
+                    Input.Generator.GetSurfaceHeight(
+                        PreviousWorldX,
+                        WorldY);
+
+                ColumnHeights[3] =
+                    Heights[Index];
+            }
+
+            SurfaceHeights[Index] =
                 GetMCSurfaceHeightFromColumns(ColumnHeights);
         }
     }
