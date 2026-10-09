@@ -69,6 +69,8 @@ private:
     TArray<FVoxelRWGSettlement> Settlements;
     TArray<FVoxelRWGPOI> POIs;
     TArray<FVoxelRWGRoad> Roads;
+    int32 ConnectedSettlementCount = 0;
+    int32 FailedSettlementRoadCount = 0;
     int32 GridWidth = 0;
     int32 GridHeight = 0;
     TArray<float> GridHeights;
