@@ -794,7 +794,7 @@ void FVoxelMarchingCubesMesher::Build(
                     const float MinDoubleArea =
                         FMath::Square(Input.VoxelSize) * 0.001f;
 
-                    if (FaceNormal.SizeSquared() <
+                    if (FaceNormal.SizeSquared() <=
                             FMath::Square(MinDoubleArea) ||
                         !FaceNormal.Normalize())
                     {
