@@ -101,6 +101,15 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
     int32 WorldX,
     int32 WorldY) const
 {
+    return FMath::RoundToInt(
+        GetSurfaceHeightFloat(WorldX, WorldY));
+}
+
+
+float FVoxelWorldGenerator::GetSurfaceHeightFloat(
+    int32 WorldX,
+    int32 WorldY) const
+{
     const int32 SafeSizeX = FMath::Max(1, Settings.WorldBlocksX);
     const int32 SafeSizeY = FMath::Max(1, Settings.WorldBlocksY);
 
@@ -112,47 +121,30 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
         (static_cast<float>(FMath::Clamp(WorldY, 0, SafeSizeY - 1)) + 0.5f) /
         static_cast<float>(SafeSizeY);
 
-    /*
-     * Macro terrain noise remains deterministic in global block space.
-     * Landform regions modulate its amplitude rather than replacing it,
-     * so Full chunks and all LOD levels use exactly the same surface.
-     */
-    const float MacroScale =
-        FMath::Max(Settings.NoiseScale * 0.22f, 0.0001f);
-
     const FVector2D MacroSamplePosition(
-        (WorldX + Settings.Seed * 13) * MacroScale,
-        (WorldY + Settings.Seed * 17) * MacroScale);
+        (WorldX + Settings.Seed * 13) *
+            FMath::Max(Settings.NoiseScale * 0.22f, 0.0001f),
+        (WorldY + Settings.Seed * 17) *
+            FMath::Max(Settings.NoiseScale * 0.22f, 0.0001f));
 
     const float MacroNoise =
         FMath::PerlinNoise2D(MacroSamplePosition);
 
     const float Flatness =
-        FMath::Clamp(
-            Settings.PlateauStrength,
-            0.0f,
-            1.0f);
+        FMath::Clamp(Settings.PlateauStrength, 0.0f, 1.0f);
 
     const float MacroExponent =
-        FMath::Lerp(
-            1.0f,
-            2.8f,
-            Flatness);
+        FMath::Lerp(1.0f, 2.8f, Flatness);
 
     const float MacroSign =
         MacroNoise < 0.0f ? -1.0f : 1.0f;
 
     const float ShapedMacroNoise =
         MacroSign *
-        FMath::Pow(
-            FMath::Abs(MacroNoise),
-            MacroExponent);
+        FMath::Pow(FMath::Abs(MacroNoise), MacroExponent);
 
     const float TerrainNoise =
-        FMath::Lerp(
-            MacroNoise,
-            ShapedMacroNoise,
-            Flatness);
+        FMath::Lerp(MacroNoise, ShapedMacroNoise, Flatness);
 
     const FVector2D HillSamplePosition(
         (WorldX - Settings.Seed * 53) *
@@ -172,121 +164,122 @@ int32 FVoxelWorldGenerator::GetSurfaceHeight(
     const float DetailNoise =
         FMath::PerlinNoise2D(DetailSamplePosition);
 
-    const EVoxelLandform Landform =
-        GetLandform(WorldX, WorldY);
-
     const float HeightVariation =
         static_cast<float>(Settings.HeightVariation);
 
-    const int32 RawMacroHeight =
-        Settings.BaseHeight +
-        FMath::RoundToInt(
-            TerrainNoise * HeightVariation);
+    /*
+     * These are continuous height signals. Do not round individual noise
+     * terms: quantizing each octave independently is what produced the
+     * one-block terraces across otherwise smooth hills.
+     */
+    const float FlatHeight =
+        static_cast<float>(Settings.BaseHeight) +
+        TerrainNoise * HeightVariation * 0.18f +
+        HillNoise * 0.6f +
+        DetailNoise *
+            static_cast<float>(Settings.DetailHeightVariation) * 0.15f;
 
-    int32 Height = Settings.BaseHeight;
+    const float HillHeight =
+        static_cast<float>(Settings.BaseHeight) +
+        TerrainNoise * HeightVariation * 0.35f +
+        HillNoise * HeightVariation * 0.95f +
+        DetailNoise *
+            static_cast<float>(Settings.DetailHeightVariation) * 0.45f;
 
-    switch (Landform)
+    const FVector2D RidgeSamplePosition(
+        NormalizedX * 23.0f + Settings.Seed * 0.031f,
+        NormalizedY * 23.0f - Settings.Seed * 0.017f);
+
+    const float RidgeSource =
+        FMath::PerlinNoise2D(RidgeSamplePosition);
+
+    const float RidgeNoise =
+        1.0f - FMath::Abs(RidgeSource);
+
+    const float LandformNoise =
+        GetLandformNoise(WorldX, WorldY);
+
+    const float MountainMask =
+        FMath::Pow(
+            FMath::Clamp(
+                (LandformNoise - 0.10f) / 0.42f,
+                0.0f,
+                1.0f),
+            0.65f);
+
+    const float MountainCandidate =
+        static_cast<float>(Settings.BaseHeight) +
+        TerrainNoise * HeightVariation * 0.25f +
+        MountainMask * HeightVariation * 4.0f +
+        RidgeNoise * HeightVariation * 0.45f +
+        DetailNoise *
+            static_cast<float>(Settings.DetailHeightVariation) * 0.45f;
+
+    /*
+     * Blend landform amplitudes instead of switching formulas at a hard
+     * mask threshold. The former discrete Flatlands/Hills/Mountains switch
+     * could introduce sharp ridges even after rounding was removed.
+     */
+    const auto SmoothStep = [](float Edge0, float Edge1, float Value)
     {
-    case EVoxelLandform::Flatlands:
-        /*
-         * Wide, mostly level ground for cities and large POIs.
-         * There is still a little macro variation so fields do not look
-         * like an artificial plane.
-         */
+        const float T =
+            FMath::Clamp((Value - Edge0) / (Edge1 - Edge0), 0.0f, 1.0f);
+        return T * T * (3.0f - 2.0f * T);
+    };
+
+    const bool bStartArea =
+        FMath::Abs(NormalizedX - 0.5f) <= 0.01f &&
+        FMath::Abs(NormalizedY - 0.5f) <= 0.01f;
+
+    float Height = FlatHeight;
+
+    if (!bStartArea)
+    {
+        const float FlatWeight =
+            1.0f - SmoothStep(-0.14f, -0.02f, LandformNoise);
+
+        const float MountainWeight =
+            SmoothStep(0.08f, 0.34f, LandformNoise);
+
+        const float LowlandAndHills =
+            FMath::Lerp(HillHeight, FlatHeight, FlatWeight);
+
+        const float MountainHeight =
+            FMath::Max(
+                FMath::Max(HillHeight, MountainCandidate),
+                static_cast<float>(Settings.SeaLevel + 2));
+
         Height =
-            Settings.BaseHeight +
-            FMath::RoundToInt(
-                TerrainNoise * HeightVariation * 0.18f) +
-            FMath::RoundToInt(
-                HillNoise * 0.6f) +
-            FMath::RoundToInt(
-                DetailNoise *
-                static_cast<float>(Settings.DetailHeightVariation) *
-                0.15f);
-        break;
-
-    case EVoxelLandform::Hills:
-        /*
-         * Rolling hills use the broad hill noise as a true height signal,
-         * not only the tiny detail-noise budget. This makes ridges visible
-         * while keeping their tops below mountain peaks.
-         */
-        Height =
-            Settings.BaseHeight +
-            FMath::RoundToInt(
-                TerrainNoise * HeightVariation * 0.35f) +
-            FMath::RoundToInt(
-                HillNoise * HeightVariation * 0.95f) +
-            FMath::RoundToInt(
-                DetailNoise *
-                static_cast<float>(Settings.DetailHeightVariation) *
-                0.45f);
-        break;
-
-    case EVoxelLandform::Mountains:
-    default:
-        /*
-         * Elevated, broken ridges. The broad landform mask gives the area
-         * mountain-scale elevation while a second normalized noise adds
-         * ridges; Desert mountains will later use sandstone surfaces.
-         */
-        {
-            const float MountainMask =
-                FMath::Pow(
-                    FMath::Clamp(
-                        (GetLandformNoise(WorldX, WorldY) - 0.10f) /
-                            0.42f,
-                        0.0f,
-                        1.0f),
-                    0.65f);
-
-            const FVector2D RidgeSamplePosition(
-                NormalizedX * 23.0f + Settings.Seed * 0.031f,
-                NormalizedY * 23.0f - Settings.Seed * 0.017f);
-
-            const float RidgeSource =
-                FMath::PerlinNoise2D(RidgeSamplePosition);
-
-            const float RidgeNoise =
-                1.0f - FMath::Abs(RidgeSource);
-
-            Height =
-                Settings.BaseHeight +
-                FMath::RoundToInt(
-                    TerrainNoise * HeightVariation * 0.25f +
-                    MountainMask * HeightVariation * 4.0f +
-                    RidgeNoise * HeightVariation * 0.45f) +
-                FMath::RoundToInt(
-                    DetailNoise *
-                    static_cast<float>(Settings.DetailHeightVariation) *
-                    0.45f);
-
-            Height =
-                FMath::Max(
-                    Height,
-                    Settings.SeaLevel + 2);
-        }
-        break;
+            FMath::Lerp(
+                LowlandAndHills,
+                MountainHeight,
+                MountainWeight);
     }
 
     /*
-     * Preserve low basins for seas/lakes. Mountain regions remain above
-     * sea level, while low terrain keeps the previous water behavior.
+     * Preserve the existing broad low-basin mask for water generation.
+     * This is a macro-region constraint; all heights within the resulting
+     * shape remain fractional and can be meshed continuously.
      */
-    if (Landform != EVoxelLandform::Mountains &&
-        RawMacroHeight <= Settings.SeaLevel)
+    const float RawMacroHeight =
+        static_cast<float>(Settings.BaseHeight) +
+        TerrainNoise * HeightVariation;
+
+    if (GetLandformNoise(WorldX, WorldY) <= 0.10f &&
+        RawMacroHeight <= static_cast<float>(Settings.SeaLevel))
     {
         Height =
             FMath::Min(
                 Height,
-                Settings.SeaLevel - 1);
+                static_cast<float>(Settings.SeaLevel - 1));
     }
 
     return FMath::Clamp(
         Height,
-        1,
-        Settings.MaxTerrainHeight);
+        1.0f,
+        static_cast<float>(Settings.MaxTerrainHeight));
 }
+
 
 float FVoxelWorldGenerator::GetTemperature(
     int32 WorldX,
@@ -421,11 +414,12 @@ bool FVoxelWorldGenerator::IsLakeMask(
 FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
     int32 WorldX,
     int32 WorldY,
-    int32 SurfaceHeight) const
+    float SurfaceHeight) const
 {
     FVoxelWaterColumn Column;
     Column.WaterSurfaceBlockZ = INDEX_NONE;
-    Column.EffectiveTerrainHeight = SurfaceHeight;
+    Column.EffectiveTerrainHeight = FMath::RoundToInt(SurfaceHeight);
+    Column.EffectiveSurfaceHeight = SurfaceHeight;
     Column.bCarved = false;
     Column.bShoreAdjusted = false;
 
@@ -465,11 +459,16 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
         // Two water layers keep the river/lake readable without a deep trench.
         Column.EffectiveTerrainHeight =
             FMath::Min(
-                SurfaceHeight,
+                FMath::RoundToInt(SurfaceHeight),
                 Settings.SeaLevel - 2);
 
+        Column.EffectiveSurfaceHeight =
+            FMath::Min(
+                SurfaceHeight,
+                static_cast<float>(Settings.SeaLevel - 2));
+
         Column.bCarved =
-            Column.EffectiveTerrainHeight < SurfaceHeight;
+            Column.EffectiveSurfaceHeight < SurfaceHeight;
 
         return Column;
     }
@@ -493,11 +492,16 @@ FVoxelWaterColumn FVoxelWorldGenerator::GetWaterColumn(
 
         Column.EffectiveTerrainHeight =
             FMath::Min(
-                SurfaceHeight,
+                FMath::RoundToInt(SurfaceHeight),
                 ShoreHeight);
 
+        Column.EffectiveSurfaceHeight =
+            FMath::Min(
+                SurfaceHeight,
+                static_cast<float>(ShoreHeight));
+
         Column.bShoreAdjusted =
-            Column.EffectiveTerrainHeight < SurfaceHeight;
+            Column.EffectiveSurfaceHeight < SurfaceHeight;
     }
 
     return Column;
