@@ -700,6 +700,7 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
     PlanSettings.WorldBlocksY = FMath::Max(1, WorldSizeY * ChunkSize);
     PlanSettings.SeaLevel = SeaLevel;
     PlanSettings.GridSpacing = RWGGridSpacing;
+    PlanSettings.CellSizeBlocks = RWGCellSizeBlocks;
     PlanSettings.TargetSettlementCount = RWGTargetSettlementCount;
     PlanSettings.TargetPOICount = RWGTargetPOICount;
 
