@@ -186,15 +186,45 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
         DetailNoise *
             static_cast<float>(Settings.DetailHeightVariation) * 0.45f;
 
+    /*
+     * A low-frequency domain warp bends the mountain ridges into long,
+     * connected ranges instead of a field of unrelated sharp peaks. A
+     * ridged noise signal then adds narrow crests inside those ranges.
+     * Sampling in normalized world coordinates keeps the shape scale
+     * consistent when the world size changes.
+     */
+    const FVector2D RidgeWarpXPosition(
+        NormalizedX * 3.8f + Settings.Seed * 0.019f,
+        NormalizedY * 3.8f - Settings.Seed * 0.027f);
+
+    const FVector2D RidgeWarpYPosition(
+        NormalizedX * 3.8f - Settings.Seed * 0.023f,
+        NormalizedY * 3.8f + Settings.Seed * 0.031f);
+
+    const float RidgeWarpX =
+        FMath::PerlinNoise2D(RidgeWarpXPosition) * 0.085f;
+
+    const float RidgeWarpY =
+        FMath::PerlinNoise2D(RidgeWarpYPosition) * 0.085f;
+
     const FVector2D RidgeSamplePosition(
-        NormalizedX * 23.0f + Settings.Seed * 0.031f,
-        NormalizedY * 23.0f - Settings.Seed * 0.017f);
+        (NormalizedX + RidgeWarpX) * 10.5f + Settings.Seed * 0.031f,
+        (NormalizedY + RidgeWarpY) * 10.5f - Settings.Seed * 0.017f);
 
     const float RidgeSource =
         FMath::PerlinNoise2D(RidgeSamplePosition);
 
     const float RidgeNoise =
-        1.0f - FMath::Abs(RidgeSource);
+        FMath::Pow(
+            FMath::Clamp(1.0f - FMath::Abs(RidgeSource), 0.0f, 1.0f),
+            1.65f);
+
+    const FVector2D MountainShoulderPosition(
+        NormalizedX * 6.8f - Settings.Seed * 0.014f,
+        NormalizedY * 6.8f + Settings.Seed * 0.022f);
+
+    const float MountainShoulderNoise =
+        FMath::PerlinNoise2D(MountainShoulderPosition);
 
     const float LandformNoise =
         GetLandformNoise(WorldX, WorldY);
@@ -202,18 +232,19 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
     const float MountainMask =
         FMath::Pow(
             FMath::Clamp(
-                (LandformNoise - 0.10f) / 0.42f,
+                (LandformNoise - 0.08f) / 0.48f,
                 0.0f,
                 1.0f),
-            0.65f);
+            0.72f);
 
     const float MountainCandidate =
         static_cast<float>(Settings.BaseHeight) +
-        TerrainNoise * HeightVariation * 0.25f +
-        MountainMask * HeightVariation * 4.0f +
-        RidgeNoise * HeightVariation * 0.45f +
+        TerrainNoise * HeightVariation * 0.38f +
+        MountainShoulderNoise * HeightVariation * 0.75f +
+        MountainMask * HeightVariation * 2.65f +
+        RidgeNoise * HeightVariation * 1.25f +
         DetailNoise *
-            static_cast<float>(Settings.DetailHeightVariation) * 0.45f;
+            static_cast<float>(Settings.DetailHeightVariation) * 0.35f;
 
     /*
      * Blend landform amplitudes instead of switching formulas at a hard
@@ -246,7 +277,7 @@ float FVoxelWorldGenerator::GetSurfaceHeightFloat(
 
         const float MountainHeight =
             FMath::Max(
-                FMath::Max(HillHeight, MountainCandidate),
+                MountainCandidate,
                 static_cast<float>(Settings.SeaLevel + 2));
 
         Height =
