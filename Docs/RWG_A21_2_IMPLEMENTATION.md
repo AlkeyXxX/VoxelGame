@@ -40,7 +40,7 @@ The first map-wide planning pass is now available from `AVoxelWorld`:
 - Press **F2** in PIE to build a deterministic layout report for the current seed.
 - The planner samples the existing terrain/water generator on a configurable coarse grid, prefers buildable dry settlement sites, and increases route cost on steep ground.
 - It places settlement hubs (city/town/village/rural/industrial categories), biome-tagged POI markers, a settlement road backbone, a limited number of connector loops, and local roads from each POI to its hub.
-- Road paths use A* over the sampled cost grid. Deep water is blocked; shallow water is assigned a high cost so the planner prefers dry detours, and route endpoints prefer nearby dry grid samples when possible.
+- Road paths use A* over the sampled cost grid. Deep water is blocked; shallow water is assigned a high cost so backbone routes prefer dry detours. Local POI access roads are stricter: the A* path disallows water cells and the completed polyline is checked against the exact water generator; if access from the nearest road would cross water, the planner tries the parent settlement and otherwise omits that driveway rather than drawing it across water.
 - The export is written to `Saved/RWG/WorldLayout.csv`; the planner summary appears in the Output Log and the debug overlay is drawn temporarily in the current world.
 - Default test scale: 12 settlement hubs, 72 POIs, 32-block route-grid spacing, and 512-block macro cells on a 4096×4096-block map. These are tuning defaults, not asserted A21.2 source values.
 
@@ -50,10 +50,10 @@ The planner is deliberately data-only at this stage. It now builds a determinist
 
 F2 now also builds a non-colliding `UProceduralMeshComponent` road surface from the planned routes:
 
-- Main, connector and local roads are separate mesh sections with independent width controls in voxel blocks.
-- Centerlines are resampled at short intervals; both road shoulders are sampled against the voxel terrain to reduce buried edges. Where a path crosses a detected water span, the preview interpolates a bridge deck between dry banks instead of dipping to the waterline. POIs near an existing backbone road can connect to that road, and access ribbons stop near the POI footprint rather than at its center.
+- Main, connector and local roads are separate mesh sections with independent width controls in voxel blocks. Current defaults are 10 blocks for main roads, 6 for connectors, and 3.5 for local/gravel access roads.
+- Centerlines are resampled at short intervals; both road shoulders are sampled against the voxel terrain to reduce buried edges. Where a backbone path crosses a detected water span, the preview interpolates a bridge deck between dry banks instead of dipping to the waterline. POIs near an existing backbone road can connect to that road, and local access ribbons stop near the POI footprint rather than at its center. Local access roads are not allowed to cross a detected water span.
 - The road surface and bridge deck are visual geometry only: they do not modify voxel blocks, create collision, or yet generate A21-style road tiles, terrain cut/fill, bridge supports, intersections, or driveway transitions.
-- In the `VoxelWorld` Details panel, optionally assign `RWGRoadMaterial`; otherwise the mesh uses Unreal's default surface material. Tune `RWGRoadWidthMainBlocks`, `RWGRoadWidthConnectorBlocks`, and `RWGRoadWidthLocalBlocks` as needed. Turn off `bBuildRWGRoadSurface` to suppress the mesh while keeping the CSV/debug plan.
+- In the `VoxelWorld` Details panel, optionally assign `RWGRoadMaterial`; otherwise the mesh uses Unreal's default surface material. Tune `RWGRoadWidthMainBlocks`, `RWGRoadWidthConnectorBlocks`, and `RWGRoadWidthLocalBlocks` as needed. Widths are in voxel blocks: with `VoxelSize=100 cm`, for example, main width 10 is about 10 metres. Turn off `bBuildRWGRoadSurface` to suppress the mesh while keeping the CSV/debug plan.
 
 ## Validation checklist
 
