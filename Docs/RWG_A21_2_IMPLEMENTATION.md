@@ -52,6 +52,7 @@ The planner is deliberately data-only at this stage. It does **not** yet change 
 2. Verify the active GameMode and PlayerController use the expected Blueprint classes.
 3. Run PIE: test `F` for debug flight and `F1` for the debug menu.
 4. Test chunk boundaries, terrain edits, hotbar, water/coast transitions and save/load.
-5. Check the Output Log for compile/runtime errors before using this branch as the new baseline.
+5. Press F2 in PIE and inspect `Saved/RWG/WorldLayout.csv`; confirm the debug roads and markers align with the generated terrain.
+6. Check the Output Log for compile/runtime errors before using this branch as the new baseline.
 
 The branch has been assembled on GitHub, but it has not been compiled or launched in the user's local Unreal installation from this environment.
