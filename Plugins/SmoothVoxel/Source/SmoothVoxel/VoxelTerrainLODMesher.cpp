@@ -480,6 +480,144 @@ void FVoxelTerrainLODMesher::Build(
         }
     }
 
+    /*
+     * Morph each LOD's outer border onto the next coarser triangulation.
+     * The generator heights at shared grid nodes are already identical,
+     * but a fine edge contains extra vertices that would otherwise sit off
+     * the coarse edge and leave cracks. Within a narrow transition band,
+     * blend toward the coarse grid's exact piecewise-linear surface.
+     *
+     * The coarse interpolation uses the same I00-I11 diagonal as the mesh
+     * below. The source heights are immutable here so processing order
+     * cannot influence neighboring vertices.
+     */
+    if (Input.SampleStep < 8 &&
+        CountX > 2 &&
+        CountY > 2)
+    {
+        const TArray<float> OriginalSurfaceHeights = SurfaceHeights;
+        const int32 CoarseStride = 2;
+        const float CoarseStepBlocks =
+            static_cast<float>(Input.SampleStep * CoarseStride);
+        const float MorphBandBlocks =
+            CoarseStepBlocks * 2.0f;
+
+        auto GetCoarseInterpolatedHeight =
+            [&OriginalSurfaceHeights, CountX, CountY](
+                int32 GridX,
+                int32 GridY)
+            {
+                const int32 X0 =
+                    (GridX / 2) * 2;
+                const int32 Y0 =
+                    (GridY / 2) * 2;
+
+                const int32 X1 =
+                    FMath::Min(X0 + 2, CountX - 1);
+                const int32 Y1 =
+                    FMath::Min(Y0 + 2, CountY - 1);
+
+                const float TX =
+                    X1 > X0
+                        ? static_cast<float>(GridX - X0) /
+                            static_cast<float>(X1 - X0)
+                        : 0.0f;
+
+                const float TY =
+                    Y1 > Y0
+                        ? static_cast<float>(GridY - Y0) /
+                            static_cast<float>(Y1 - Y0)
+                        : 0.0f;
+
+                const float H00 =
+                    OriginalSurfaceHeights[
+                        GridIndex(X0, Y0, CountX)];
+                const float H10 =
+                    OriginalSurfaceHeights[
+                        GridIndex(X1, Y0, CountX)];
+                const float H01 =
+                    OriginalSurfaceHeights[
+                        GridIndex(X0, Y1, CountX)];
+                const float H11 =
+                    OriginalSurfaceHeights[
+                        GridIndex(X1, Y1, CountX)];
+
+                // Match the mesh's fixed diagonal from lower-left to upper-right.
+                if (TX >= TY)
+                {
+                    return
+                        H00 * (1.0f - TX) +
+                        H10 * (TX - TY) +
+                        H11 * TY;
+                }
+
+                return
+                    H00 * (1.0f - TY) +
+                    H01 * (TY - TX) +
+                    H11 * TX;
+            };
+
+        for (int32 Y = 0; Y < CountY; ++Y)
+        {
+            if (Input.CancellationToken.IsValid() &&
+                static_cast<bool>(*Input.CancellationToken))
+            {
+                return;
+            }
+
+            for (int32 X = 0; X < CountX; ++X)
+            {
+                const int32 DistanceX =
+                    FMath::Min(X, CountX - 1 - X) *
+                    Input.SampleStep;
+
+                const int32 DistanceY =
+                    FMath::Min(Y, CountY - 1 - Y) *
+                    Input.SampleStep;
+
+                const int32 DistanceToOuterEdge =
+                    FMath::Min(DistanceX, DistanceY);
+
+                if (DistanceToOuterEdge >= MorphBandBlocks)
+                {
+                    continue;
+                }
+
+                float MorphWeight = 1.0f;
+
+                if (DistanceToOuterEdge > CoarseStepBlocks)
+                {
+                    const float T = FMath::Clamp(
+                        (static_cast<float>(DistanceToOuterEdge) -
+                            CoarseStepBlocks) /
+                            (MorphBandBlocks - CoarseStepBlocks),
+                        0.0f,
+                        1.0f);
+
+                    MorphWeight =
+                        1.0f - T * T * (3.0f - 2.0f * T);
+                }
+
+                if (MorphWeight <= KINDA_SMALL_NUMBER)
+                {
+                    continue;
+                }
+
+                const int32 Index =
+                    GridIndex(X, Y, CountX);
+
+                const float CoarseHeight =
+                    GetCoarseInterpolatedHeight(X, Y);
+
+                SurfaceHeights[Index] =
+                    FMath::Lerp(
+                        OriginalSurfaceHeights[Index],
+                        CoarseHeight,
+                        MorphWeight);
+            }
+        }
+    }
+
     Output.Vertices.SetNumZeroed(
         CountX * CountY);
 
@@ -602,27 +740,30 @@ void FVoxelTerrainLODMesher::Build(
                     0,
                     Input.WorldSizeY - 1);
 
-            if (!IsCellInRing(
+            const bool bRenderCell =
+                IsCellInRing(
                     CellChunkX,
                     CellChunkY,
                     Input.CenterChunk,
                     Input.InnerRadiusChunks,
-                    Input.OuterRadiusChunks))
-            {
-                continue;
-            }
+                    Input.OuterRadiusChunks);
 
             /*
              * Use a single consistent diagonal to keep the coarse
-             * terrain stable while the player moves.
+             * terrain stable while the player moves. Normal accumulation
+             * continues for hidden cells as well, so the visible ring edge
+             * does not get a one-sided normal and a dark lighting seam.
              */
-            Output.Triangles.Add(I00);
-            Output.Triangles.Add(I11);
-            Output.Triangles.Add(I10);
+            if (bRenderCell)
+            {
+                Output.Triangles.Add(I00);
+                Output.Triangles.Add(I11);
+                Output.Triangles.Add(I10);
 
-            Output.Triangles.Add(I00);
-            Output.Triangles.Add(I01);
-            Output.Triangles.Add(I11);
+                Output.Triangles.Add(I00);
+                Output.Triangles.Add(I01);
+                Output.Triangles.Add(I11);
+            }
 
             /*
              * Winding above is intentionally kept stable for the mesh,
