@@ -709,48 +709,64 @@ void FVoxelMarchingCubesMesher::Build(
                         FVector MeshPosition = SurfacePosition;
                         const int32 SurfaceCellZ =
                             FMath::FloorToInt(SurfacePosition.Z);
-                        const int32 CandidateBlockZ =
-                            SurfaceCellZ - 1;
-
-                        if (CandidateBlockZ >= -1 &&
-                            CandidateBlockZ <= Size)
+                        const int32 CandidateBlockZ[2] =
                         {
-                            const int32 FloorX =
-                                FMath::FloorToInt(SurfacePosition.X);
-                            const int32 FloorY =
-                                FMath::FloorToInt(SurfacePosition.Y);
-                            const int32 RoundedX =
-                                FMath::RoundToInt(SurfacePosition.X);
-                            const int32 RoundedY =
-                                FMath::RoundToInt(SurfacePosition.Y);
-                            const bool bOnXBoundary =
-                                FMath::Abs(
-                                    SurfacePosition.X -
-                                    static_cast<float>(RoundedX)) < 0.0001f;
-                            const bool bOnYBoundary =
-                                FMath::Abs(
-                                    SurfacePosition.Y -
-                                    static_cast<float>(RoundedY)) < 0.0001f;
+                            SurfaceCellZ,
+                            SurfaceCellZ - 1
+                        };
 
-                            const int32 CandidateX[2] =
-                            {
-                                FloorX,
-                                bOnXBoundary ? RoundedX - 1 : FloorX
-                            };
-                            const int32 CandidateY[2] =
-                            {
-                                FloorY,
-                                bOnYBoundary ? RoundedY - 1 : FloorY
-                            };
-                            const int32 CandidateXCount =
-                                bOnXBoundary ? 2 : 1;
-                            const int32 CandidateYCount =
-                                bOnYBoundary ? 2 : 1;
+                        const int32 FloorX =
+                            FMath::FloorToInt(SurfacePosition.X);
+                        const int32 FloorY =
+                            FMath::FloorToInt(SurfacePosition.Y);
+                        const int32 RoundedX =
+                            FMath::RoundToInt(SurfacePosition.X);
+                        const int32 RoundedY =
+                            FMath::RoundToInt(SurfacePosition.Y);
+                        const bool bOnXBoundary =
+                            FMath::Abs(
+                                SurfacePosition.X -
+                                static_cast<float>(RoundedX)) < 0.0001f;
+                        const bool bOnYBoundary =
+                            FMath::Abs(
+                                SurfacePosition.Y -
+                                static_cast<float>(RoundedY)) < 0.0001f;
 
-                            bool bAbovePlacedBlock = false;
+                        const int32 CandidateX[2] =
+                        {
+                            FloorX,
+                            bOnXBoundary ? RoundedX - 1 : FloorX
+                        };
+                        const int32 CandidateY[2] =
+                        {
+                            FloorY,
+                            bOnYBoundary ? RoundedY - 1 : FloorY
+                        };
+                        const int32 CandidateXCount =
+                            bOnXBoundary ? 2 : 1;
+                        const int32 CandidateYCount =
+                            bOnYBoundary ? 2 : 1;
+
+                        bool bFoundPlacedBlock = false;
+                        float UndercutTargetZ = 0.0f;
+
+                        /*
+                         * A vertex can sit just below the block's top plane
+                         * or just above it, so test the voxel at Floor(Z) and
+                         * the voxel directly below. The shared vertex then
+                         * gets the same target no matter which MC cell owns
+                         * its edge cache.
+                         */
+                        for (int32 CZ = 0; CZ < 2; ++CZ)
+                        {
+                            const int32 BlockZ = CandidateBlockZ[CZ];
+                            if (BlockZ < -1 || BlockZ > Size)
+                            {
+                                continue;
+                            }
 
                             for (int32 CY = 0;
-                                 CY < CandidateYCount && !bAbovePlacedBlock;
+                                 CY < CandidateYCount;
                                  ++CY)
                             {
                                 for (int32 CX = 0;
@@ -766,7 +782,7 @@ void FVoxelMarchingCubesMesher::Build(
                                                 Input,
                                                 BlockX,
                                                 BlockY,
-                                                CandidateBlockZ));
+                                                BlockZ));
 
                                     const bool bDensityHasBlock =
                                         IsVoxelSolid(
@@ -774,20 +790,37 @@ void FVoxelMarchingCubesMesher::Build(
                                                 Input,
                                                 BlockX,
                                                 BlockY,
-                                                CandidateBlockZ));
+                                                BlockZ));
 
                                     if (!bTerrainHasBlock && bDensityHasBlock)
                                     {
-                                        bAbovePlacedBlock = true;
-                                        break;
+                                        const float CandidateTargetZ =
+                                            static_cast<float>(BlockZ + 1) -
+                                            1.0f / 13.0f;
+
+                                        if (!bFoundPlacedBlock ||
+                                            CandidateTargetZ > UndercutTargetZ)
+                                        {
+                                            UndercutTargetZ = CandidateTargetZ;
+                                            bFoundPlacedBlock = true;
+                                        }
                                     }
                                 }
                             }
+                        }
 
-                            if (bAbovePlacedBlock)
-                            {
-                                MeshPosition.Z -= 1.0f / 13.0f;
-                            }
+                        if (bFoundPlacedBlock)
+                        {
+                            /*
+                             * Put the smooth surface at least 1/13 voxel
+                             * below the placed block top. Using a target
+                             * plane (rather than just subtracting an offset)
+                             * guarantees the cube top cannot remain covered.
+                             */
+                            MeshPosition.Z =
+                                FMath::Min(
+                                    MeshPosition.Z,
+                                    UndercutTargetZ);
                         }
 
                         const int32 VertexIndex =
