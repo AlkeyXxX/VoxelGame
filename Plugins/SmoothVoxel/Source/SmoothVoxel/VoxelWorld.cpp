@@ -134,7 +134,8 @@ namespace
         if (WorldZ == EffectiveHeight)
         {
             const bool bCarvedWaterBed =
-                EffectiveHeight < TerrainHeight;
+                WaterSurfaceBlockZ != INDEX_NONE &&
+                EffectiveHeight < WaterSurfaceBlockZ;
 
             if (bCarvedWaterBed)
             {
