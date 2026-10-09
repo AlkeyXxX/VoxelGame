@@ -749,6 +749,176 @@ void AVoxelWorld::ClearRWGRoadSurface()
     }
 }
 
+void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
+{
+    TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> NewStamps =
+        MakeShared<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe>();
+
+    const int32 SafeWorldBlocksX = FMath::Max(1, WorldSizeX * ChunkSize);
+    const int32 SafeWorldBlocksY = FMath::Max(1, WorldSizeY * ChunkSize);
+    const int32 SafeWorldBlocksZ = FMath::Max(2, WorldSizeZ * ChunkSize);
+    constexpr float ShoulderWidthBlocks = 3.0f;
+    constexpr float LateralSampleStep = 0.75f;
+
+    for (const FVoxelRWGRoad& Road : Planner.GetRoads())
+    {
+        if (Road.Points.Num() < 2)
+        {
+            continue;
+        }
+
+        float WidthBlocks = RWGRoadWidthLocalBlocks;
+        uint8 RoadSurfaceBlock = uint8(EVoxelBlock::Sand);
+        uint8 RoadPriority = 1;
+        if (Road.Type == EVoxelRWGRoadType::Main)
+        {
+            WidthBlocks = RWGRoadWidthMainBlocks;
+            RoadSurfaceBlock = uint8(EVoxelBlock::Stone);
+            RoadPriority = 3;
+        }
+        else if (Road.Type == EVoxelRWGRoadType::Connector)
+        {
+            WidthBlocks = RWGRoadWidthConnectorBlocks;
+            RoadSurfaceBlock = uint8(EVoxelBlock::Dirt);
+            RoadPriority = 2;
+        }
+
+        const float HalfWidth = FMath::Max(0.5f, WidthBlocks * 0.5f);
+        const float StampHalfWidth = HalfWidth + ShoulderWidthBlocks;
+
+        for (int32 SegmentIndex = 1; SegmentIndex < Road.Points.Num(); ++SegmentIndex)
+        {
+            const FVector& A = Road.Points[SegmentIndex - 1];
+            const FVector& B = Road.Points[SegmentIndex];
+            const FVector2D Delta(B.X - A.X, B.Y - A.Y);
+            const float SegmentLength = Delta.Size();
+            if (SegmentLength <= SMALL_NUMBER)
+            {
+                continue;
+            }
+
+            const FVector2D Direction = Delta / SegmentLength;
+            const FVector2D Side(-Direction.Y, Direction.X);
+            const int32 Steps = FMath::Clamp(FMath::CeilToInt(SegmentLength / 1.5f), 1, 8192);
+
+            for (int32 Step = SegmentIndex == 1 ? 0 : 1; Step <= Steps; ++Step)
+            {
+                const float T = static_cast<float>(Step) / static_cast<float>(Steps);
+                const float CenterX = FMath::Lerp(A.X, B.X, T);
+                const float CenterY = FMath::Lerp(A.Y, B.Y, T);
+                // Planner route Z is stored at terrain height + 0.8 block.
+                const float CenterSurfaceZ = FMath::Lerp(A.Z, B.Z, T) - 0.8f;
+
+                for (float Lateral = -StampHalfWidth;
+                     Lateral <= StampHalfWidth + KINDA_SMALL_NUMBER;
+                     Lateral += LateralSampleStep)
+                {
+                    const float SampleX = CenterX + Side.X * Lateral;
+                    const float SampleY = CenterY + Side.Y * Lateral;
+                    const int32 BlockX = FMath::RoundToInt(SampleX);
+                    const int32 BlockY = FMath::RoundToInt(SampleY);
+                    if (BlockX < 0 || BlockX >= SafeWorldBlocksX ||
+                        BlockY < 0 || BlockY >= SafeWorldBlocksY)
+                    {
+                        continue;
+                    }
+
+                    const float NativeHeight =
+                        WorldGenerator.GetSurfaceHeightFloat(BlockX, BlockY);
+                    const FVoxelWaterColumn Water =
+                        WorldGenerator.GetWaterColumn(BlockX, BlockY, NativeHeight);
+
+                    // Leave water columns intact. The main/connector road ribbon
+                    // provides a raised, collidable bridge deck across these spans.
+                    if (Water.WaterSurfaceBlockZ != INDEX_NONE)
+                    {
+                        continue;
+                    }
+
+                    const int32 NativeSurfaceZ = Water.EffectiveTerrainHeight;
+                    const bool bRoadSurface = FMath::Abs(Lateral) <= HalfWidth + 0.25f;
+                    const float ShoulderAlpha = FMath::Clamp(
+                        (FMath::Abs(Lateral) - HalfWidth) / ShoulderWidthBlocks,
+                        0.0f, 1.0f);
+                    const float StampedHeight = bRoadSurface
+                        ? CenterSurfaceZ
+                        : FMath::Lerp(CenterSurfaceZ, static_cast<float>(NativeSurfaceZ), ShoulderAlpha);
+                    const int32 SurfaceZ = FMath::Clamp(
+                        FMath::RoundToInt(StampedHeight), 1, SafeWorldBlocksZ - 2);
+
+                    uint8 SurfaceBlock = RoadSurfaceBlock;
+                    uint8 Priority = RoadPriority;
+                    if (!bRoadSurface)
+                    {
+                        const EVoxelBiome Biome = WorldGenerator.GetBiome(
+                            BlockX, BlockY, NativeSurfaceZ);
+                        const EVoxelLandform Landform = WorldGenerator.GetLandform(BlockX, BlockY);
+                        if (Biome == EVoxelBiome::Snow)
+                        {
+                            SurfaceBlock = uint8(EVoxelBlock::Snow);
+                        }
+                        else if (Biome == EVoxelBiome::Desert)
+                        {
+                            SurfaceBlock = Landform == EVoxelLandform::Mountains
+                                ? uint8(EVoxelBlock::Sandstone)
+                                : uint8(EVoxelBlock::Sand);
+                        }
+                        else
+                        {
+                            SurfaceBlock = Landform == EVoxelLandform::Mountains
+                                ? uint8(EVoxelBlock::Grass)
+                                : uint8(EVoxelBlock::Grass);
+                        }
+                        Priority = 0;
+                    }
+
+                    FVoxelRWGRoadStamp Stamp;
+                    Stamp.SurfaceZ = SurfaceZ;
+                    Stamp.SurfaceBlock = SurfaceBlock;
+                    Stamp.FillBlock = uint8(EVoxelBlock::Dirt);
+                    Stamp.Priority = Priority;
+                    Stamp.bRoadSurface = bRoadSurface;
+
+                    const FIntPoint Key(BlockX, BlockY);
+                    FVoxelRWGRoadStamp* Existing = NewStamps->Find(Key);
+                    if (!Existing)
+                    {
+                        NewStamps->Add(Key, Stamp);
+                    }
+                    else if (bRoadSurface && !Existing->bRoadSurface)
+                    {
+                        *Existing = Stamp;
+                    }
+                    else if (bRoadSurface && Existing->bRoadSurface)
+                    {
+                        Existing->SurfaceZ = FMath::RoundToInt(
+                            (static_cast<float>(Existing->SurfaceZ) + static_cast<float>(Stamp.SurfaceZ)) * 0.5f);
+                        if (Stamp.Priority > Existing->Priority)
+                        {
+                            Existing->SurfaceBlock = Stamp.SurfaceBlock;
+                            Existing->Priority = Stamp.Priority;
+                        }
+                    }
+                    else if (!Existing->bRoadSurface)
+                    {
+                        // On overlapping shoulders use the less invasive cut/fill target.
+                        if (FMath::Abs(float(NativeSurfaceZ) - float(Stamp.SurfaceZ)) <
+                            FMath::Abs(float(NativeSurfaceZ) - float(Existing->SurfaceZ)))
+                        {
+                            *Existing = Stamp;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    RWGRoadSurfaceStamps = NewStamps;
+    UE_LOG(LogTemp, Display, TEXT("RWG terrain stamps built: %d XY columns; dry road surface and shoulder cut/fill."),
+        RWGRoadSurfaceStamps.IsValid() ? RWGRoadSurfaceStamps->Num() : 0);
+}
+
+
 void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
 {
     if (!bBuildRWGRoadSurface)
@@ -805,6 +975,15 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
     {
         const int32 BlockX = FMath::Clamp(FMath::RoundToInt(X), 0, SafeWorldBlocksX - 1);
         const int32 BlockY = FMath::Clamp(FMath::RoundToInt(Y), 0, SafeWorldBlocksY - 1);
+        if (RWGRoadSurfaceStamps.IsValid())
+        {
+            if (const FVoxelRWGRoadStamp* Stamp =
+                RWGRoadSurfaceStamps->Find(FIntPoint(BlockX, BlockY)))
+            {
+                return static_cast<float>(Stamp->SurfaceZ) + 0.82f;
+            }
+        }
+
         const float RawHeight = WorldGenerator.GetSurfaceHeightFloat(BlockX, BlockY);
         const FVoxelWaterColumn Water = WorldGenerator.GetWaterColumn(BlockX, BlockY, RawHeight);
 
