@@ -55,8 +55,7 @@ namespace
     int32 GetEffectiveSurfaceHeight(
         const FVoxelWorldGenerator& Generator,
         int32 WorldX,
-        int32 WorldY,
-        int32 SeaLevel)
+        int32 WorldY)
     {
         const int32 TerrainHeight =
             Generator.GetSurfaceHeight(WorldX, WorldY);
@@ -443,22 +442,19 @@ void FVoxelTerrainLODMesher::Build(
                     GetEffectiveSurfaceHeight(
                         Input.Generator,
                         PreviousWorldX,
-                        PreviousWorldY,
-                        Input.SeaLevel);
+                        PreviousWorldY);
 
                 ColumnHeights[1] =
                     GetEffectiveSurfaceHeight(
                         Input.Generator,
                         WorldX,
-                        PreviousWorldY,
-                        Input.SeaLevel);
+                        PreviousWorldY);
 
                 ColumnHeights[2] =
                     GetEffectiveSurfaceHeight(
                         Input.Generator,
                         PreviousWorldX,
-                        WorldY,
-                        Input.SeaLevel);
+                        WorldY);
 
                 ColumnHeights[3] =
                     Heights[Index];
@@ -639,10 +635,9 @@ void FVoxelTerrainLODMesher::Build(
             Output.Normals[I01] += N1;
 
             /*
-             * Keep the legacy sea surface driven by average terrain height,
-             * while inland rivers/lakes use their deterministic sampled level.
-             * Choosing the highest marked inland level keeps neighboring cells
-             * connected when a river meets a sea-level basin.
+             * Sea, lakes, and generated river channels share one water level.
+             * The terrain average preserves existing sea/coast detection, while
+             * carved inland-water markers extend the surface into riverbeds.
              */
             const float AverageHeight =
                 (
