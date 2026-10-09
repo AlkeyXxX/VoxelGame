@@ -14,14 +14,22 @@ struct FVoxelMarchingCubesBuildInput
      */
     TArray<uint8> Blocks;
 
+    /*
+     * Density-only occupancy. Player-placed solid blocks remain hidden
+     * from the smooth mesh itself, but still contribute to nearby density
+     * samples so terrain can meet their cubic faces instead of receding.
+     */
+    TArray<uint8> DensityBlocks;
+
     void Init(int32 InSize)
     {
         Size = InSize;
 
         const int32 Side = Size + 2;
 
-        Blocks.SetNumZeroed(
-            Side * Side * Side);
+        const int32 SampleCount = Side * Side * Side;
+        Blocks.SetNumZeroed(SampleCount);
+        DensityBlocks.SetNumZeroed(SampleCount);
     }
 };
 
@@ -37,6 +45,12 @@ public:
 private:
 
     static uint8 GetBlock(
+        const FVoxelMarchingCubesBuildInput& Input,
+        int32 X,
+        int32 Y,
+        int32 Z);
+
+    static uint8 GetDensityBlock(
         const FVoxelMarchingCubesBuildInput& Input,
         int32 X,
         int32 Y,
