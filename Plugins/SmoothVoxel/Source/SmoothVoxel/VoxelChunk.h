@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/ThreadSafeBool.h"
 #include "GameFramework/Actor.h"
 
 #include "VoxelTypes.h"
@@ -240,6 +241,7 @@ private:
      */
     uint32 MeshGenerationVersion = 0;
     TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> MeshBuildCancellationToken;
+    TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> DataGenerationCancellationToken;
     uint32 DataGenerationVersion = 0;
     bool bGeneratedDataReady = false;
 
