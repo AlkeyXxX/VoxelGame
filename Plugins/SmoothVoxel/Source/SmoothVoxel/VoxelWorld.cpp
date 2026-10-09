@@ -7,6 +7,7 @@
 #include "Misc/Paths.h"
 #include "HAL/PlatformFilemanager.h"
 #include "DrawDebugHelpers.h"
+#include "Materials/Material.h"
 #include "VoxelWorldSaveGame.h"
 #include "VoxelBlockLibrary.h"
 #include "VoxelInventoryComponent.h"
@@ -690,6 +691,203 @@ void AVoxelWorld::GenerateRWGLayoutFromInput()
 }
 
 
+void AVoxelWorld::ClearRWGRoadSurface()
+{
+    if (RWGRoadMesh)
+    {
+        RWGRoadMesh->ClearAllMeshSections();
+    }
+}
+
+void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
+{
+    if (!bBuildRWGRoadSurface)
+    {
+        ClearRWGRoadSurface();
+        return;
+    }
+
+    if (!RWGRoadMesh)
+    {
+        RWGRoadMesh = NewObject<UProceduralMeshComponent>(this, TEXT("RWGRoadSurface"));
+        if (!RWGRoadMesh)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("RWG: failed to allocate road surface component."));
+            return;
+        }
+
+        AddInstanceComponent(RWGRoadMesh);
+        RWGRoadMesh->SetMobility(EComponentMobility::Movable);
+        RWGRoadMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        RWGRoadMesh->SetGenerateOverlapEvents(false);
+        RWGRoadMesh->SetCanEverAffectNavigation(false);
+        RWGRoadMesh->CastShadow = false;
+
+        if (GetRootComponent())
+        {
+            RWGRoadMesh->SetupAttachment(GetRootComponent());
+        }
+        else
+        {
+            SetRootComponent(RWGRoadMesh);
+        }
+        RWGRoadMesh->RegisterComponent();
+    }
+
+    RWGRoadMesh->ClearAllMeshSections();
+    UMaterialInterface* EffectiveRoadMaterial = RWGRoadMaterial
+        ? RWGRoadMaterial
+        : (Material ? Material : UMaterial::GetDefaultMaterial(MD_Surface));
+
+    const int32 SafeWorldBlocksX = FMath::Max(1, WorldSizeX * ChunkSize);
+    const int32 SafeWorldBlocksY = FMath::Max(1, WorldSizeY * ChunkSize);
+
+    const auto SampleSurfaceHeight = [this, SafeWorldBlocksX, SafeWorldBlocksY](float X, float Y)
+    {
+        const int32 BlockX = FMath::Clamp(FMath::RoundToInt(X), 0, SafeWorldBlocksX - 1);
+        const int32 BlockY = FMath::Clamp(FMath::RoundToInt(Y), 0, SafeWorldBlocksY - 1);
+        const float RawHeight = WorldGenerator.GetSurfaceHeightFloat(BlockX, BlockY);
+        const FVoxelWaterColumn Water = WorldGenerator.GetWaterColumn(BlockX, BlockY, RawHeight);
+        const float VisibleSurface = Water.WaterSurfaceBlockZ != INDEX_NONE
+            ? FMath::Max(Water.EffectiveSurfaceHeight, static_cast<float>(Water.WaterSurfaceBlockZ))
+            : Water.EffectiveSurfaceHeight;
+        return VisibleSurface + 0.22f;
+    };
+
+    const auto BuildRoadTypeSection = [this, &Planner, &SampleSurfaceHeight,
+        EffectiveRoadMaterial](EVoxelRWGRoadType RoadType, int32 SectionIndex, float WidthBlocks,
+        const FLinearColor& Tint)
+    {
+        TArray<FVector> Vertices;
+        TArray<int32> Triangles;
+        TArray<FVector> Normals;
+        TArray<FVector2D> UVs;
+        TArray<FLinearColor> VertexColors;
+        TArray<FProcMeshTangent> Tangents;
+
+        const float HalfWidth = FMath::Max(0.5f, WidthBlocks * 0.5f);
+        float TotalSampleDistance = 0.0f;
+
+        for (const FVoxelRWGRoad& Road : Planner.GetRoads())
+        {
+            if (Road.Type != RoadType || Road.Points.Num() < 2)
+            {
+                continue;
+            }
+
+            TArray<FVector> Centerline;
+            for (int32 SegmentIndex = 1; SegmentIndex < Road.Points.Num(); ++SegmentIndex)
+            {
+                const FVector& A = Road.Points[SegmentIndex - 1];
+                const FVector& B = Road.Points[SegmentIndex];
+                const float SegmentLength = FVector2D(B.X - A.X, B.Y - A.Y).Size();
+                const int32 Steps = FMath::Clamp(FMath::CeilToInt(SegmentLength / 8.0f), 1, 2048);
+
+                for (int32 Step = SegmentIndex == 1 ? 0 : 1; Step <= Steps; ++Step)
+                {
+                    const float T = static_cast<float>(Step) / static_cast<float>(Steps);
+                    const float X = FMath::Lerp(A.X, B.X, T);
+                    const float Y = FMath::Lerp(A.Y, B.Y, T);
+                    const float Z = SampleSurfaceHeight(X, Y);
+                    const FVector Point(X, Y, Z);
+
+                    if (Centerline.Num() > 0)
+                    {
+                        TotalSampleDistance += FVector2D(
+                            Point.X - Centerline.Last().X,
+                            Point.Y - Centerline.Last().Y).Size();
+                    }
+                    Centerline.Add(Point);
+                }
+            }
+
+            if (Centerline.Num() < 2)
+            {
+                continue;
+            }
+
+            const int32 VertexStart = Vertices.Num();
+            float DistanceAlongRoad = 0.0f;
+            for (int32 PointIndex = 0; PointIndex < Centerline.Num(); ++PointIndex)
+            {
+                const FVector& Center = Centerline[PointIndex];
+                const FVector& Prev = Centerline[FMath::Max(0, PointIndex - 1)];
+                const FVector& Next = Centerline[FMath::Min(Centerline.Num() - 1, PointIndex + 1)];
+                FVector2D Direction(Next.X - Prev.X, Next.Y - Prev.Y);
+                if (!Direction.Normalize())
+                {
+                    Direction = FVector2D(1.0f, 0.0f);
+                }
+
+                const FVector2D Side(-Direction.Y, Direction.X);
+                const FVector Left(
+                    (Center.X + Side.X * HalfWidth) * VoxelSize,
+                    (Center.Y + Side.Y * HalfWidth) * VoxelSize,
+                    Center.Z * VoxelSize);
+                const FVector Right(
+                    (Center.X - Side.X * HalfWidth) * VoxelSize,
+                    (Center.Y - Side.Y * HalfWidth) * VoxelSize,
+                    Center.Z * VoxelSize);
+
+                if (PointIndex > 0)
+                {
+                    DistanceAlongRoad += FVector2D(
+                        Center.X - Prev.X, Center.Y - Prev.Y).Size();
+                }
+                const float V = DistanceAlongRoad / 8.0f;
+
+                Vertices.Add(Left);
+                Vertices.Add(Right);
+                Normals.Add(FVector::UpVector);
+                Normals.Add(FVector::UpVector);
+                UVs.Add(FVector2D(0.0f, V));
+                UVs.Add(FVector2D(1.0f, V));
+                VertexColors.Add(Tint);
+                VertexColors.Add(Tint);
+                const FVector Tangent(Direction.X, Direction.Y, 0.0f);
+                Tangents.Add(FProcMeshTangent(Tangent, false));
+                Tangents.Add(FProcMeshTangent(Tangent, false));
+            }
+
+            for (int32 PointIndex = 0; PointIndex < Centerline.Num() - 1; ++PointIndex)
+            {
+                const int32 L0 = VertexStart + PointIndex * 2;
+                const int32 R0 = L0 + 1;
+                const int32 L1 = L0 + 2;
+                const int32 R1 = L0 + 3;
+                // Consistent upward-facing winding for this ribbon segment.
+                Triangles.Add(L0);
+                Triangles.Add(R0);
+                Triangles.Add(L1);
+                Triangles.Add(R0);
+                Triangles.Add(R1);
+                Triangles.Add(L1);
+            }
+        }
+
+        if (Vertices.Num() > 0 && Triangles.Num() > 0)
+        {
+            RWGRoadMesh->CreateMeshSection_LinearColor(
+                SectionIndex, Vertices, Triangles, Normals, UVs,
+                VertexColors, Tangents, false);
+            RWGRoadMesh->SetMaterial(SectionIndex, EffectiveRoadMaterial);
+        }
+    };
+
+    // Sections stay separate to allow future per-road materials and LOD rules.
+    BuildRoadTypeSection(EVoxelRWGRoadType::Main, 0, RWGRoadWidthMainBlocks,
+        FLinearColor(0.12f, 0.12f, 0.12f, 1.0f));
+    BuildRoadTypeSection(EVoxelRWGRoadType::Connector, 1, RWGRoadWidthConnectorBlocks,
+        FLinearColor(0.20f, 0.19f, 0.17f, 1.0f));
+    BuildRoadTypeSection(EVoxelRWGRoadType::Local, 2, RWGRoadWidthLocalBlocks,
+        FLinearColor(0.28f, 0.26f, 0.22f, 1.0f));
+
+    UE_LOG(LogTemp, Display, TEXT("RWG road surface built: %d road paths, grid widths main=%.1f connector=%.1f local=%.1f blocks; collision disabled."),
+        Planner.GetRoads().Num(),
+        RWGRoadWidthMainBlocks, RWGRoadWidthConnectorBlocks, RWGRoadWidthLocalBlocks);
+}
+
+
 bool AVoxelWorld::GenerateRWGLayoutAndExport()
 {
     ConfigureWorldGenerator();
@@ -724,6 +922,8 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
         UE_LOG(LogTemp, Error, TEXT("RWG could not write layout file: %s"), *OutputPath);
         return false;
     }
+
+    BuildRWGRoadSurface(Planner);
 
     if (bDrawRWGDebugPreview && GetWorld())
     {
