@@ -242,14 +242,17 @@ namespace
                 const int32 WorldY =
                     ChunkCoord.Y * ChunkSize + Y;
 
+                const float SmoothSurfaceHeight =
+                    Generator.GetSurfaceHeightFloat(WorldX, WorldY);
+
                 const int32 Height =
-                    Generator.GetSurfaceHeight(WorldX, WorldY);
+                    FMath::RoundToInt(SmoothSurfaceHeight);
 
                 const FVoxelWaterColumn WaterColumn =
                     Generator.GetWaterColumn(
                         WorldX,
                         WorldY,
-                        Height);
+                        SmoothSurfaceHeight);
 
                 const int32 WaterSurfaceBlockZ =
                     WaterColumn.WaterSurfaceBlockZ;
@@ -349,17 +352,24 @@ void FVoxelMarchingCubesDataSnapshot::Build(
             int32 Height = 0;
             int32 EffectiveHeight = 0;
             int32 WaterSurfaceBlockZ = INDEX_NONE;
+            float LocalSurfaceHeight =
+                -static_cast<float>(ChunkCoord.Z * ChunkSize) - 2.0f;
             EVoxelBiome Biome = EVoxelBiome::Plains;
             EVoxelLandform Landform = EVoxelLandform::Flatlands;
 
             if (bValidColumn)
             {
-                Height = Generator.GetSurfaceHeight(WorldX, WorldY);
+                const float SmoothSurfaceHeight =
+                    Generator.GetSurfaceHeightFloat(WorldX, WorldY);
+
+                Height =
+                    FMath::RoundToInt(SmoothSurfaceHeight);
+
                 const FVoxelWaterColumn WaterColumn =
                     Generator.GetWaterColumn(
                         WorldX,
                         WorldY,
-                        Height);
+                        SmoothSurfaceHeight);
 
                 WaterSurfaceBlockZ =
                     WaterColumn.WaterSurfaceBlockZ;
@@ -367,9 +377,17 @@ void FVoxelMarchingCubesDataSnapshot::Build(
                 EffectiveHeight =
                     WaterColumn.EffectiveTerrainHeight;
 
+                LocalSurfaceHeight =
+                    WaterColumn.EffectiveSurfaceHeight -
+                    static_cast<float>(ChunkCoord.Z * ChunkSize);
+
                 Biome = Generator.GetBiome(WorldX, WorldY, Height);
                 Landform = Generator.GetLandform(WorldX, WorldY);
             }
+
+            OutData.TerrainSurfaceHeights[
+                (X + 1) + (Y + 1) * Side] =
+                LocalSurfaceHeight;
 
             const int32 SourceChunkX =
                 X < 0 ? -1 : (X >= ChunkSize ? 1 : 0);
