@@ -3220,32 +3220,32 @@ void AVoxelWorld::UpdateFarLOD(
      * deterministic and prevents stale geometry from previous centers.
      */
     /*
-     * Keep far-ring grids bounded in size. Dense one-block samples over the
-     * 16/32/64-chunk rings create million-vertex meshes and overload the
-     * worker pool each time the player crosses a chunk boundary. Visual LOD
-     * quality will be revisited separately; streaming must stay responsive.
+     * Keep mountain silhouettes and the broad terrain profile faithful at
+     * distance. Each ring uses a sampling step that doubles outward; the
+     * water surface has its own finer grid in FVoxelTerrainLODMesher.
+     * Exact shared generator heights keep borders aligned between rings.
      */
     ScheduleLOD(
         FarLOD1Mesh,
-        2,
+        1,
         StreamingRadius + 1,
         LOD1Radius);
 
     ScheduleLOD(
         FarLOD2Mesh,
-        4,
+        2,
         LOD1Radius + 1,
         LOD2Radius);
 
     ScheduleLOD(
         FarLOD3Mesh,
-        8,
+        4,
         LOD2Radius + 1,
         LOD3Radius);
 
     ScheduleLOD(
         FarLOD4Mesh,
-        16,
+        8,
         LOD3Radius + 1,
         LOD4Radius);
 }
