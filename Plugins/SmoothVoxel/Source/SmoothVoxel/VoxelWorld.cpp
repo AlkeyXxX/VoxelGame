@@ -785,7 +785,7 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
                     const FVector Current(X, Y, SampleRoadSurface(X, Y));
 
                     DrawDebugLine(GetWorld(), ToWorldPosition(Previous),
-                        ToWorldPosition(Current), Color, false,
+                        ToWorldPosition(Current), Color, true,
                         RWGDebugDrawDuration, 0, Thickness);
                     Previous = Current;
                 }
@@ -800,14 +800,16 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
             const FColor Color = Hub.Type == EVoxelRWGSettlementType::City
                 ? FColor::Red : FColor::Yellow;
             DrawDebugSphere(GetWorld(), ToWorldPosition(Hub.Position),
-                2.5f * VoxelSize, 8, Color, false,
+                2.5f * VoxelSize, 8, Color,
+                true,
                 RWGDebugDrawDuration, 0, 2.0f);
         }
 
         for (const FVoxelRWGPOI& POI : Planner.GetPOIs())
         {
             DrawDebugSphere(GetWorld(), ToWorldPosition(POI.Position),
-                0.9f * VoxelSize, 6, FColor::Green, false,
+                0.9f * VoxelSize, 6, FColor::Green,
+                true,
                 RWGDebugDrawDuration, 0, 1.5f);
         }
     }
