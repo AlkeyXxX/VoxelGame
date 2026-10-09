@@ -251,7 +251,7 @@ public:
         BlueprintReadWrite,
         Category="Voxel|Streaming",
         meta=(ClampMin="1", ClampMax="32"))
-    int32 MaxChunkMeshRebuildsPerTick = 8;
+    int32 MaxChunkMeshRebuildsPerTick = 4;
 
 
     /*
@@ -467,6 +467,7 @@ private:
 
     TMap<int64, uint8> PersistentObjectStates;
     float TimeSinceLastAutoSave = 0.0f;
+    float TimeSinceLastStreamingUpdate = 0.0f;
 
 
     /*
