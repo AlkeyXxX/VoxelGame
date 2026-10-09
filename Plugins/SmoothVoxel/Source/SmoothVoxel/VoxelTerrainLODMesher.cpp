@@ -52,10 +52,57 @@ namespace
     const FLinearColor WaterColor(
         0.05f, 0.35f, 0.85f, 1.0f);
 
+    bool FindRoadSurfaceHeightNear(
+        const TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe>& RoadSurfaceHeights,
+        int32 WorldX,
+        int32 WorldY,
+        int32 SearchRadius,
+        float& OutHeight)
+    {
+        if (!RoadSurfaceHeights.IsValid())
+        {
+            return false;
+        }
+
+        SearchRadius = FMath::Clamp(SearchRadius, 0, 8);
+        int32 BestDistanceSquared = MAX_int32;
+        int32 BestHeight = INDEX_NONE;
+
+        for (int32 DY = -SearchRadius; DY <= SearchRadius; ++DY)
+        {
+            for (int32 DX = -SearchRadius; DX <= SearchRadius; ++DX)
+            {
+                const int32 DistanceSquared = DX * DX + DY * DY;
+                if (DistanceSquared > SearchRadius * SearchRadius ||
+                    DistanceSquared >= BestDistanceSquared)
+                {
+                    continue;
+                }
+
+                if (const int32* Height =
+                    RoadSurfaceHeights->Find(FIntPoint(WorldX + DX, WorldY + DY)))
+                {
+                    BestDistanceSquared = DistanceSquared;
+                    BestHeight = *Height;
+                }
+            }
+        }
+
+        if (BestHeight == INDEX_NONE)
+        {
+            return false;
+        }
+
+        OutHeight = static_cast<float>(BestHeight);
+        return true;
+    }
+
     float GetEffectiveSurfaceHeight(
         const FVoxelWorldGenerator& Generator,
         int32 WorldX,
-        int32 WorldY)
+        int32 WorldY,
+        const TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe>& RoadSurfaceHeights,
+        int32 RoadSearchRadius)
     {
         const float TerrainHeight =
             Generator.GetSurfaceHeightFloat(WorldX, WorldY);
@@ -65,6 +112,18 @@ namespace
                 WorldX,
                 WorldY,
                 TerrainHeight);
+
+        // Water remains governed by the water generator; only dry land snaps
+        // to the active road/shoulder height map.
+        if (WaterColumn.WaterSurfaceBlockZ == INDEX_NONE)
+        {
+            float RoadHeight = 0.0f;
+            if (FindRoadSurfaceHeightNear(
+                RoadSurfaceHeights, WorldX, WorldY, RoadSearchRadius, RoadHeight))
+            {
+                return RoadHeight;
+            }
+        }
 
         return WaterColumn.EffectiveSurfaceHeight;
     }
@@ -350,8 +409,21 @@ void FVoxelTerrainLODMesher::Build(
                     ClampedWorldY,
                     SmoothSurfaceHeight);
 
-            const float EffectiveHeight =
+            float EffectiveHeight =
                 WaterColumn.EffectiveSurfaceHeight;
+            if (WaterColumn.WaterSurfaceBlockZ == INDEX_NONE)
+            {
+                float RoadHeight = 0.0f;
+                if (FindRoadSurfaceHeightNear(
+                    Input.RoadSurfaceHeights,
+                    ClampedWorldX,
+                    ClampedWorldY,
+                    FMath::Max(0, Input.SampleStep / 2),
+                    RoadHeight))
+                {
+                    EffectiveHeight = RoadHeight;
+                }
+            }
 
             const EVoxelBiome Biome =
                 Input.Generator.GetBiome(
@@ -457,19 +529,25 @@ void FVoxelTerrainLODMesher::Build(
                     GetEffectiveSurfaceHeight(
                         Input.Generator,
                         PreviousWorldX,
-                        PreviousWorldY);
+                        PreviousWorldY,
+                        Input.RoadSurfaceHeights,
+                        FMath::Max(0, Input.SampleStep / 2));
 
                 ColumnHeights[1] =
                     GetEffectiveSurfaceHeight(
                         Input.Generator,
                         WorldX,
-                        PreviousWorldY);
+                        PreviousWorldY,
+                        Input.RoadSurfaceHeights,
+                        FMath::Max(0, Input.SampleStep / 2));
 
                 ColumnHeights[2] =
                     GetEffectiveSurfaceHeight(
                         Input.Generator,
                         PreviousWorldX,
-                        WorldY);
+                        WorldY,
+                        Input.RoadSurfaceHeights,
+                        FMath::Max(0, Input.SampleStep / 2));
 
                 ColumnHeights[3] =
                     Heights[Index];
