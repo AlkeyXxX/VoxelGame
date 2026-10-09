@@ -2952,21 +2952,26 @@ void AVoxelWorld::UpdateFarLOD(
         StreamingRadius + 1,
         LOD1Radius);
 
+    /*
+     * Keep both nearest rings at block-level sampling. Otherwise a small
+     * hill can disappear in LOD2 and then pop into existence when the player
+     * crosses into LOD1. Farther rings progressively simplify by 2x.
+     */
     ScheduleLOD(
         FarLOD2Mesh,
-        2,
+        1,
         LOD1Radius + 1,
         LOD2Radius);
 
     ScheduleLOD(
         FarLOD3Mesh,
-        4,
+        2,
         LOD2Radius + 1,
         LOD3Radius);
 
     ScheduleLOD(
         FarLOD4Mesh,
-        8,
+        4,
         LOD3Radius + 1,
         LOD4Radius);
 }
