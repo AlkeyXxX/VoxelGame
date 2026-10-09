@@ -323,6 +323,10 @@ void FVoxelMarchingCubesDataSnapshot::Build(
     }
 
     const int32 Side = ChunkSize + 2;
+
+    OutData.TerrainSurfaceHeights.SetNumZeroed(
+        Side * Side);
+
     const int32 WorldBlocksX = WorldSizeX * ChunkSize;
     const int32 WorldBlocksY = WorldSizeY * ChunkSize;
     const int32 WorldBlocksZ = WorldSizeZ * ChunkSize;
