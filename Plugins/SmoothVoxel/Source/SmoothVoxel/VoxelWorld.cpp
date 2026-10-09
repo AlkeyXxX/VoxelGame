@@ -753,16 +753,23 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
         const float RawHeight = WorldGenerator.GetSurfaceHeightFloat(BlockX, BlockY);
         const FVoxelWaterColumn Water = WorldGenerator.GetWaterColumn(BlockX, BlockY, RawHeight);
 
-        // Marching Cubes renders the top of the highest solid/water voxel,
-        // not the unrounded continuous height field. Follow the same discrete
-        // block level, then lift the ribbon slightly above the generated mesh.
+        // Use the discrete top of the generated voxel column instead of the
+        // continuous noise height, then lift the ribbon above the MC surface.
         const int32 TopVisibleBlockZ = Water.WaterSurfaceBlockZ != INDEX_NONE
             ? FMath::Max(Water.EffectiveTerrainHeight, Water.WaterSurfaceBlockZ)
             : Water.EffectiveTerrainHeight;
         return static_cast<float>(TopVisibleBlockZ) + 0.82f;
     };
 
-    const auto BuildRoadTypeSection = [this, &Planner, &SampleSurfaceHeight,
+    const auto IsWaterAt = [this, SafeWorldBlocksX, SafeWorldBlocksY](float X, float Y)
+    {
+        const int32 BlockX = FMath::Clamp(FMath::RoundToInt(X), 0, SafeWorldBlocksX - 1);
+        const int32 BlockY = FMath::Clamp(FMath::RoundToInt(Y), 0, SafeWorldBlocksY - 1);
+        const float RawHeight = WorldGenerator.GetSurfaceHeightFloat(BlockX, BlockY);
+        return WorldGenerator.GetWaterColumn(BlockX, BlockY, RawHeight).WaterSurfaceBlockZ != INDEX_NONE;
+    };
+
+    const auto BuildRoadTypeSection = [this, &Planner, &SampleSurfaceHeight, &IsWaterAt,
         EffectiveRoadMaterial](EVoxelRWGRoadType RoadType, int32 SectionIndex, float WidthBlocks,
         const FLinearColor& Tint)
     {
@@ -783,6 +790,7 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
             }
 
             TArray<FVector> Centerline;
+            TArray<uint8> CenterlineWaterFlags;
             for (int32 SegmentIndex = 1; SegmentIndex < Road.Points.Num(); ++SegmentIndex)
             {
                 const FVector& A = Road.Points[SegmentIndex - 1];
@@ -796,15 +804,64 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                     const float X = FMath::Lerp(A.X, B.X, T);
                     const float Y = FMath::Lerp(A.Y, B.Y, T);
                     const float Z = SampleSurfaceHeight(X, Y);
-                    const FVector Point(X, Y, Z);
-
-                    Centerline.Add(Point);
+                    Centerline.Emplace(X, Y, Z);
+                    CenterlineWaterFlags.Add(IsWaterAt(X, Y) ? 1 : 0);
                 }
             }
 
             if (Centerline.Num() < 2)
             {
                 continue;
+            }
+
+            // Where a route crosses a river, interpolate the deck between the
+            // banks instead of dropping it to the waterline. This produces a
+            // simple bridge preview; actual terrain carving/bridge supports are
+            // a later generation stage.
+            for (int32 Index = 0; Index < Centerline.Num();)
+            {
+                if (CenterlineWaterFlags[Index] == 0)
+                {
+                    ++Index;
+                    continue;
+                }
+
+                const int32 WaterStart = Index;
+                while (Index < Centerline.Num() && CenterlineWaterFlags[Index] != 0)
+                {
+                    ++Index;
+                }
+                const int32 WaterEndExclusive = Index;
+                if (WaterStart <= 0 || WaterEndExclusive >= Centerline.Num())
+                {
+                    continue;
+                }
+
+                const int32 StartLand = WaterStart - 1;
+                const int32 EndLand = WaterEndExclusive;
+                float TotalLength = 0.0f;
+                for (int32 PointIndex = StartLand + 1; PointIndex <= EndLand; ++PointIndex)
+                {
+                    TotalLength += FVector2D(
+                        Centerline[PointIndex].X - Centerline[PointIndex - 1].X,
+                        Centerline[PointIndex].Y - Centerline[PointIndex - 1].Y).Size();
+                }
+
+                if (TotalLength <= SMALL_NUMBER)
+                {
+                    continue;
+                }
+
+                float Travelled = 0.0f;
+                for (int32 PointIndex = WaterStart; PointIndex < WaterEndExclusive; ++PointIndex)
+                {
+                    Travelled += FVector2D(
+                        Centerline[PointIndex].X - Centerline[PointIndex - 1].X,
+                        Centerline[PointIndex].Y - Centerline[PointIndex - 1].Y).Size();
+                    const float Alpha = FMath::Clamp(Travelled / TotalLength, 0.0f, 1.0f);
+                    Centerline[PointIndex].Z = FMath::Lerp(
+                        Centerline[StartLand].Z, Centerline[EndLand].Z, Alpha);
+                }
             }
 
             const int32 VertexStart = Vertices.Num();
@@ -825,14 +882,22 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                 }
 
                 const FVector2D Side(-Direction.Y, Direction.X);
-                const FVector Left(
-                    (Center.X + Side.X * HalfWidth) * VoxelSize,
-                    (Center.Y + Side.Y * HalfWidth) * VoxelSize,
-                    Center.Z * VoxelSize);
-                const FVector Right(
-                    (Center.X - Side.X * HalfWidth) * VoxelSize,
-                    (Center.Y - Side.Y * HalfWidth) * VoxelSize,
-                    Center.Z * VoxelSize);
+                const float LeftX = Center.X + Side.X * HalfWidth;
+                const float LeftY = Center.Y + Side.Y * HalfWidth;
+                const float RightX = Center.X - Side.X * HalfWidth;
+                const float RightY = Center.Y - Side.Y * HalfWidth;
+
+                // Sample both edges independently on dry land. A wide ribbon
+                // otherwise cuts into hills when its centerline is lower than
+                // the terrain beneath either shoulder. Across water, preserve
+                // the interpolated bridge deck height instead of dipping to water.
+                const float LeftZ = IsWaterAt(LeftX, LeftY)
+                    ? Center.Z : SampleSurfaceHeight(LeftX, LeftY);
+                const float RightZ = IsWaterAt(RightX, RightY)
+                    ? Center.Z : SampleSurfaceHeight(RightX, RightY);
+
+                const FVector Left(LeftX * VoxelSize, LeftY * VoxelSize, LeftZ * VoxelSize);
+                const FVector Right(RightX * VoxelSize, RightY * VoxelSize, RightZ * VoxelSize);
 
                 if (PointIndex > 0)
                 {
