@@ -284,7 +284,18 @@ float FVoxelMarchingCubesMesher::GetDensity(
                             BlockY,
                             BlockZ));
 
-                if (!bHasFractionalHeights)
+                /*
+                 * The fractional field covers only the valid halo range
+                 * [-1, Input.Size]. GetDensity() evaluates one extra sample
+                 * at the outermost density nodes; those samples are Air and
+                 * must not index the fractional height array.
+                 */
+                const bool bOutsideVoxelHalo =
+                    BlockX < -1 || BlockX > Input.Size ||
+                    BlockY < -1 || BlockY > Input.Size ||
+                    BlockZ < -1 || BlockZ > Input.Size;
+
+                if (!bHasFractionalHeights || bOutsideVoxelHalo)
                 {
                     if (IsVoxelSolid(Block))
                     {
