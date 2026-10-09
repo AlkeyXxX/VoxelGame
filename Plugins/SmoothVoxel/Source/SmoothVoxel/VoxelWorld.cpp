@@ -2931,32 +2931,32 @@ void AVoxelWorld::UpdateFarLOD(
      * deterministic and prevents stale geometry from previous centers.
      */
     /*
-     * Keep the first rings detailed enough to preserve the visual
-     * transition from Full terrain, then increase the sample step
-     * aggressively with distance. This keeps the vertex count almost
-     * constant even though the visible radius becomes much larger.
+     * Sample the generated height field more densely at every LOD tier.
+     * The nearest far ring uses one-block spacing to match the full terrain
+     * silhouette closely; distant rings progressively decimate the surface.
+     * Every step divides ChunkSize, keeping ring boundaries grid-aligned.
      */
     ScheduleLOD(
         FarLOD1Mesh,
-        2,
+        1,
         StreamingRadius + 1,
         LOD1Radius);
 
     ScheduleLOD(
         FarLOD2Mesh,
-        4,
+        2,
         LOD1Radius + 1,
         LOD2Radius);
 
     ScheduleLOD(
         FarLOD3Mesh,
-        8,
+        4,
         LOD2Radius + 1,
         LOD3Radius);
 
     ScheduleLOD(
         FarLOD4Mesh,
-        16,
+        8,
         LOD3Radius + 1,
         LOD4Radius);
 }
