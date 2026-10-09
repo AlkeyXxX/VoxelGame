@@ -305,14 +305,6 @@ namespace
     }
 
 
-    /*
-     * Sample the same procedural terrain used by chunk generation.
-     * Marching Cubes needs a one-voxel halo around a chunk; a neighbour
-     * actor may not exist yet while streaming asynchronously, but treating
-     * that halo as Air creates temporary/fake faces at chunk boundaries.
-     */
-
-
 }
 
 void FVoxelMarchingCubesDataSnapshot::Build(
