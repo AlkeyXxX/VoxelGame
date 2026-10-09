@@ -89,6 +89,7 @@ void AVoxelChunk::SetGeneratedData(
     BaseBlocks = MoveTemp(InBaseBlocks);
     Biomes = MoveTemp(InBiomes);
     ModificationFlags = MoveTemp(InModificationFlags);
+    ++DataGenerationVersion;
     bGeneratedDataReady = true;
 }
 
