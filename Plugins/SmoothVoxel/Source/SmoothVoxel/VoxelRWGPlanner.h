@@ -107,10 +107,12 @@ private:
     void ClaimCellForSettlement(const FVoxelRWGSettlement& Settlement);
     void PlaceSettlements(const FVoxelWorldGenerator& Generator);
     void PlacePOIs(const FVoxelWorldGenerator& Generator);
-    void BuildRoadNetwork();
-    bool BuildRoad(int32 FromId, const FVector& From, int32 ToId, const FVector& To, EVoxelRWGRoadType Type);
-    bool FindPath(int32 StartX, int32 StartY, int32 GoalX, int32 GoalY, TArray<int32>& OutPath) const;
-    int32 FindNearestWalkable(int32 X, int32 Y) const;
+    void BuildRoadNetwork(const FVoxelWorldGenerator& Generator);
+    bool BuildRoad(int32 FromId, const FVector& From, int32 ToId, const FVector& To,
+        EVoxelRWGRoadType Type, const FVoxelWorldGenerator& Generator);
+    bool FindPath(int32 StartX, int32 StartY, int32 GoalX, int32 GoalY,
+        bool bAllowWaterCrossing, TArray<int32>& OutPath) const;
+    int32 FindNearestWalkable(int32 X, int32 Y, bool bAllowWater, int32 MaxSearchRadius) const;
     FVector GetBlockPosition(float X, float Y, const FVoxelWorldGenerator& Generator) const;
 
     static FString CellTypeName(EVoxelRWGCellType Type);
