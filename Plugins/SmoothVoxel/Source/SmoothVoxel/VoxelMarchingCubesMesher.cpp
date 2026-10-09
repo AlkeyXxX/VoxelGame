@@ -329,6 +329,7 @@ float FVoxelMarchingCubesMesher::GetDensity(
                  * subtract density locally and remain editable.
                  */
                 const bool bExpectedSolid =
+                    Block != EVoxelBlock::Water &&
                     BlockZ <= FMath::RoundToInt(ColumnHeight);
 
                 const float ActualSolid =
