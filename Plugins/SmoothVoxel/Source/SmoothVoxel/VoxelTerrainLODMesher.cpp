@@ -363,7 +363,8 @@ void FVoxelTerrainLODMesher::Build(
             InlandWaterMask[Index] =
                 WaterColumn.bCarved ? 1 : 0;
 
-            if (WaterColumn.bCarved)
+            if (WaterColumn.bCarved ||
+                WaterColumn.bShoreAdjusted)
             {
                 Colors[Index] =
                     FLinearColor(
