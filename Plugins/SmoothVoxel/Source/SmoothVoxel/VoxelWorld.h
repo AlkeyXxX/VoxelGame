@@ -100,8 +100,9 @@ public:
 
     /*
      * Build a deterministic map-wide settlement/POI/road plan and export it
-     * to Saved/RWG/WorldLayout.csv. This is an explicit debug/tool action;
-     * it is not run automatically during BeginPlay.
+     * to Saved/RWG/WorldLayout.csv. Also applies dry road-bed/shoulder stamps,
+     * refreshes loaded chunks and far LOD, and builds the collidable road mesh.
+     * This is an explicit action; it is not run automatically during BeginPlay.
      */
     UFUNCTION(BlueprintCallable, Category="Voxel|RWG")
     bool GenerateRWGLayoutAndExport();
