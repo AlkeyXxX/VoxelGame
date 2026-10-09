@@ -15,6 +15,13 @@ struct FVoxelMarchingCubesBuildInput
      */
     TArray<uint8> Blocks;
 
+    /*
+     * Fractional terrain surface height per local XY column, including
+     * the one-column halo. Values are relative to the chunk's Z origin.
+     * MC uses this field for smooth terrain while block deltas preserve edits.
+     */
+    TArray<float> TerrainSurfaceHeights;
+
     TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancellationToken;
 
     void Init(int32 InSize)
@@ -25,6 +32,9 @@ struct FVoxelMarchingCubesBuildInput
 
         Blocks.SetNumZeroed(
             Side * Side * Side);
+
+        TerrainSurfaceHeights.SetNumZeroed(
+            Side * Side);
     }
 };
 
