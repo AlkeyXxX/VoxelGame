@@ -32,7 +32,7 @@ struct FSVoxelOctreeNode
 
 	FVector GetWorldOrigin(const FVector& WorldOrigin, float BaseVoxelSize) const
 	{
-		return WorldOrigin + FVector(OriginCells) * BaseVoxelSize;
+		return WorldOrigin + FVector(OriginCells.X, OriginCells.Y, OriginCells.Z) * BaseVoxelSize;
 	}
 
 	float GetWorldSize(int32 CellsPerAxis, float BaseVoxelSize) const

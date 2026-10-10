@@ -44,7 +44,7 @@ namespace
 		}
 	}
 
-	void SelectNode(
+	bool SelectNode(
 		const FSVoxelOctreeNode& Node,
 		const FVector& CameraWorldLocation,
 		const FSVoxelOctreeSelectionSettings& Settings,
@@ -66,8 +66,13 @@ namespace
 
 		if (!bShouldSplit)
 		{
+			if (OutLeaves.Num() >= Settings.MaxLeafCount)
+			{
+				return false;
+			}
+
 			OutLeaves.Add(Node);
-			return;
+			return true;
 		}
 
 		TArray<FSVoxelOctreeNode> Children;
@@ -76,8 +81,13 @@ namespace
 
 		for (const FSVoxelOctreeNode& Child : Children)
 		{
-			SelectNode(Child, CameraWorldLocation, Settings, OutLeaves);
+			if (!SelectNode(Child, CameraWorldLocation, Settings, OutLeaves))
+			{
+				return false;
+			}
 		}
+
+		return true;
 	}
 
 	void BuildLookup(
@@ -272,11 +282,15 @@ bool FSVoxelOctreeSelector::BuildBalancedLeaves(
 	const int32 RootSpan = Settings.CellsPerAxis * (1 << Settings.MaxLod);
 	OutLeaves.Reserve(FMath::Min(Settings.MaxLeafCount, 4096));
 
-	SelectNode(
+	if (!SelectNode(
 		FSVoxelOctreeNode(FIntVector::ZeroValue, Settings.MaxLod),
 		CameraWorldLocation,
 		Settings,
-		OutLeaves);
+		OutLeaves))
+	{
+		OutLeaves.Reset();
+		return false;
+	}
 
 	TSet<FSVoxelOctreeNode> SplitSet;
 
