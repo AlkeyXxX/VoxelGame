@@ -768,17 +768,23 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
         }
 
         float WidthBlocks = RWGRoadWidthLocalBlocks;
-        uint8 RoadSurfaceBlock = uint8(EVoxelBlock::Sand);
+        uint8 RoadSurfaceBlock = uint8(EVoxelBlock::Dirt);
         uint8 RoadPriority = 1;
         if (Road.Type == EVoxelRWGRoadType::Main)
         {
             WidthBlocks = RWGRoadWidthMainBlocks;
             RoadSurfaceBlock = uint8(EVoxelBlock::Stone);
-            RoadPriority = 3;
+            RoadPriority = 4;
         }
         else if (Road.Type == EVoxelRWGRoadType::Connector)
         {
             WidthBlocks = RWGRoadWidthConnectorBlocks;
+            RoadSurfaceBlock = uint8(EVoxelBlock::Stone);
+            RoadPriority = 3;
+        }
+        else if (Road.Type == EVoxelRWGRoadType::Rural)
+        {
+            WidthBlocks = RWGRoadWidthRuralBlocks;
             RoadSurfaceBlock = uint8(EVoxelBlock::Dirt);
             RoadPriority = 2;
         }
@@ -806,8 +812,27 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                 const float T = static_cast<float>(Step) / static_cast<float>(Steps);
                 const float CenterX = FMath::Lerp(A.X, B.X, T);
                 const float CenterY = FMath::Lerp(A.Y, B.Y, T);
-                // Planner route Z is stored at terrain height + 0.8 block.
-                const float CenterSurfaceZ = FMath::Lerp(A.Z, B.Z, T) - 0.8f;
+                // The A* cost field samples heights every 32 blocks, so its
+                // interpolated profile can be below unseen full-resolution hills.
+                // Keep grading constrained to a small cut/fill around native land.
+                float CenterSurfaceZ = FMath::Lerp(A.Z, B.Z, T) - 0.8f;
+                const int32 CenterBlockX = FMath::Clamp(
+                    FMath::RoundToInt(CenterX), 0, SafeWorldBlocksX - 1);
+                const int32 CenterBlockY = FMath::Clamp(
+                    FMath::RoundToInt(CenterY), 0, SafeWorldBlocksY - 1);
+                const float CenterNativeHeight =
+                    WorldGenerator.GetSurfaceHeightFloat(CenterBlockX, CenterBlockY);
+                const FVoxelWaterColumn CenterWater = WorldGenerator.GetWaterColumn(
+                    CenterBlockX, CenterBlockY, CenterNativeHeight);
+                if (CenterWater.WaterSurfaceBlockZ == INDEX_NONE)
+                {
+                    constexpr float MaxCutBlocks = 2.0f;
+                    constexpr float MaxFillBlocks = 1.0f;
+                    CenterSurfaceZ = FMath::Clamp(
+                        CenterSurfaceZ,
+                        static_cast<float>(CenterWater.EffectiveTerrainHeight) - MaxCutBlocks,
+                        static_cast<float>(CenterWater.EffectiveTerrainHeight) + MaxFillBlocks);
+                }
 
                 for (float Lateral = -StampHalfWidth;
                      Lateral <= StampHalfWidth + KINDA_SMALL_NUMBER;
@@ -988,7 +1013,9 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
             if (const FVoxelRWGRoadStamp* Stamp =
                 RWGRoadSurfaceStamps->Find(FIntPoint(BlockX, BlockY)))
             {
-                return static_cast<float>(Stamp->SurfaceZ) + 0.82f;
+                // The MC boundary is roughly one block above the stamped
+                // surface layer; the bridge must meet that visible surface.
+                return static_cast<float>(Stamp->SurfaceZ) + 1.12f;
             }
         }
 
@@ -1000,7 +1027,7 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
         const int32 TopVisibleBlockZ = Water.WaterSurfaceBlockZ != INDEX_NONE
             ? FMath::Max(Water.EffectiveTerrainHeight, Water.WaterSurfaceBlockZ)
             : Water.EffectiveTerrainHeight;
-        return static_cast<float>(TopVisibleBlockZ) + 0.82f;
+        return static_cast<float>(TopVisibleBlockZ) + 1.12f;
     };
 
     const auto IsWaterAt = [this, SafeWorldBlocksX, SafeWorldBlocksY](float X, float Y)
@@ -1056,10 +1083,10 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                 continue;
             }
 
-            // Where a route crosses a river, interpolate the deck between the
-            // banks instead of dropping it to the waterline. This produces a
-            // simple bridge preview; actual terrain carving/bridge supports are
-            // a later generation stage.
+            // Dry-road appearance comes from road stamps in voxel terrain.
+            // Build a procedural ribbon only for complete water crossings, where
+            // the voxel terrain intentionally remains water.
+            TArray<FIntPoint> BridgeRuns;
             for (int32 Index = 0; Index < Centerline.Num();)
             {
                 if (CenterlineWaterFlags[Index] == 0)
@@ -1104,78 +1131,81 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                     Centerline[PointIndex].Z = FMath::Lerp(
                         Centerline[StartLand].Z, Centerline[EndLand].Z, Alpha);
                 }
+                BridgeRuns.Add(FIntPoint(StartLand, EndLand));
             }
 
-            const int32 VertexStart = Vertices.Num();
-            float DistanceAlongRoad = 0.0f;
-            for (int32 PointIndex = 0; PointIndex < Centerline.Num(); ++PointIndex)
+            // Each bridge is a separate strip from bank to bank. There are no
+            // mesh triangles laid over dry terrain, so chunk/LOD transitions
+            // cannot bury or visually double the normal road surface.
+            for (const FIntPoint& BridgeRun : BridgeRuns)
             {
-                const FVector& Center = Centerline[PointIndex];
-                const FVector& Prev = Centerline[FMath::Max(0, PointIndex - 1)];
-                const FVector& Next = Centerline[FMath::Min(Centerline.Num() - 1, PointIndex + 1)];
-                FVector2D Direction(Next.X - Prev.X, Next.Y - Prev.Y);
-                if (Direction.SizeSquared() <= SMALL_NUMBER)
+                const int32 StartPoint = BridgeRun.X;
+                const int32 EndPoint = BridgeRun.Y;
+                const int32 VertexStart = Vertices.Num();
+                float DistanceAlongRoad = 0.0f;
+
+                for (int32 PointIndex = StartPoint; PointIndex <= EndPoint; ++PointIndex)
                 {
-                    Direction = FVector2D(1.0f, 0.0f);
+                    const FVector& Center = Centerline[PointIndex];
+                    const FVector& Prev = Centerline[FMath::Max(0, PointIndex - 1)];
+                    const FVector& Next = Centerline[FMath::Min(Centerline.Num() - 1, PointIndex + 1)];
+                    FVector2D Direction(Next.X - Prev.X, Next.Y - Prev.Y);
+                    if (Direction.SizeSquared() <= SMALL_NUMBER)
+                    {
+                        Direction = FVector2D(1.0f, 0.0f);
+                    }
+                    else
+                    {
+                        Direction.Normalize();
+                    }
+
+                    const FVector2D Side(-Direction.Y, Direction.X);
+                    const float LeftX = Center.X + Side.X * HalfWidth;
+                    const float LeftY = Center.Y + Side.Y * HalfWidth;
+                    const float RightX = Center.X - Side.X * HalfWidth;
+                    const float RightY = Center.Y - Side.Y * HalfWidth;
+
+                    const float LeftZ = IsWaterAt(LeftX, LeftY)
+                        ? Center.Z : FMath::Max(Center.Z, SampleSurfaceHeight(LeftX, LeftY));
+                    const float RightZ = IsWaterAt(RightX, RightY)
+                        ? Center.Z : FMath::Max(Center.Z, SampleSurfaceHeight(RightX, RightY));
+
+                    const FVector Left(LeftX * VoxelSize, LeftY * VoxelSize, LeftZ * VoxelSize);
+                    const FVector Right(RightX * VoxelSize, RightY * VoxelSize, RightZ * VoxelSize);
+
+                    if (PointIndex > StartPoint)
+                    {
+                        DistanceAlongRoad += FVector2D(
+                            Center.X - Prev.X, Center.Y - Prev.Y).Size();
+                    }
+                    const float V = DistanceAlongRoad / 8.0f;
+
+                    Vertices.Add(Left);
+                    Vertices.Add(Right);
+                    Normals.Add(FVector::UpVector);
+                    Normals.Add(FVector::UpVector);
+                    UVs.Add(FVector2D(0.0f, V));
+                    UVs.Add(FVector2D(1.0f, V));
+                    VertexColors.Add(Tint);
+                    VertexColors.Add(Tint);
+                    const FVector Tangent(Direction.X, Direction.Y, 0.0f);
+                    Tangents.Add(FProcMeshTangent(Tangent, false));
+                    Tangents.Add(FProcMeshTangent(Tangent, false));
                 }
-                else
+
+                for (int32 PointIndex = StartPoint; PointIndex < EndPoint; ++PointIndex)
                 {
-                    Direction.Normalize();
+                    const int32 L0 = VertexStart + (PointIndex - StartPoint) * 2;
+                    const int32 R0 = L0 + 1;
+                    const int32 L1 = L0 + 2;
+                    const int32 R1 = L0 + 3;
+                    Triangles.Add(L0);
+                    Triangles.Add(L1);
+                    Triangles.Add(R0);
+                    Triangles.Add(R0);
+                    Triangles.Add(L1);
+                    Triangles.Add(R1);
                 }
-
-                const FVector2D Side(-Direction.Y, Direction.X);
-                const float LeftX = Center.X + Side.X * HalfWidth;
-                const float LeftY = Center.Y + Side.Y * HalfWidth;
-                const float RightX = Center.X - Side.X * HalfWidth;
-                const float RightY = Center.Y - Side.Y * HalfWidth;
-
-                // Sample both edges independently on dry land. A wide ribbon
-                // otherwise cuts into hills when its centerline is lower than
-                // the terrain beneath either shoulder. Across water, preserve
-                // the interpolated bridge deck height instead of dipping to water.
-                const float LeftZ = IsWaterAt(LeftX, LeftY)
-                    ? Center.Z : FMath::Max(Center.Z, SampleSurfaceHeight(LeftX, LeftY));
-                const float RightZ = IsWaterAt(RightX, RightY)
-                    ? Center.Z : FMath::Max(Center.Z, SampleSurfaceHeight(RightX, RightY));
-
-                const FVector Left(LeftX * VoxelSize, LeftY * VoxelSize, LeftZ * VoxelSize);
-                const FVector Right(RightX * VoxelSize, RightY * VoxelSize, RightZ * VoxelSize);
-
-                if (PointIndex > 0)
-                {
-                    DistanceAlongRoad += FVector2D(
-                        Center.X - Prev.X, Center.Y - Prev.Y).Size();
-                }
-                const float V = DistanceAlongRoad / 8.0f;
-
-                Vertices.Add(Left);
-                Vertices.Add(Right);
-                Normals.Add(FVector::UpVector);
-                Normals.Add(FVector::UpVector);
-                UVs.Add(FVector2D(0.0f, V));
-                UVs.Add(FVector2D(1.0f, V));
-                VertexColors.Add(Tint);
-                VertexColors.Add(Tint);
-                const FVector Tangent(Direction.X, Direction.Y, 0.0f);
-                Tangents.Add(FProcMeshTangent(Tangent, false));
-                Tangents.Add(FProcMeshTangent(Tangent, false));
-            }
-
-            for (int32 PointIndex = 0; PointIndex < Centerline.Num() - 1; ++PointIndex)
-            {
-                const int32 L0 = VertexStart + PointIndex * 2;
-                const int32 R0 = L0 + 1;
-                const int32 L1 = L0 + 2;
-                const int32 R1 = L0 + 3;
-                // UE procedural meshes use the opposite front-face winding
-                // from this ribbon's original order. Reverse each triangle so
-                // the visible front faces point upward from the road surface.
-                Triangles.Add(L0);
-                Triangles.Add(L1);
-                Triangles.Add(R0);
-                Triangles.Add(R0);
-                Triangles.Add(L1);
-                Triangles.Add(R1);
             }
         }
 
@@ -1192,17 +1222,22 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
             SectionIndex, Vertices.Num(), Triangles.Num());
     };
 
-    // Sections stay separate to allow future per-road materials and LOD rules.
+    // Dry roads are not emitted as a floating ribbon. Only water crossings
+    // get mesh sections; their width follows the same road class as the terrain.
     BuildRoadTypeSection(EVoxelRWGRoadType::Main, 0, RWGRoadWidthMainBlocks,
         FLinearColor(0.12f, 0.12f, 0.12f, 1.0f));
     BuildRoadTypeSection(EVoxelRWGRoadType::Connector, 1, RWGRoadWidthConnectorBlocks,
         FLinearColor(0.20f, 0.19f, 0.17f, 1.0f));
-    BuildRoadTypeSection(EVoxelRWGRoadType::Local, 2, RWGRoadWidthLocalBlocks,
+    BuildRoadTypeSection(EVoxelRWGRoadType::Rural, 2, RWGRoadWidthRuralBlocks,
+        FLinearColor(0.30f, 0.22f, 0.14f, 1.0f));
+    BuildRoadTypeSection(EVoxelRWGRoadType::Local, 3, RWGRoadWidthLocalBlocks,
         FLinearColor(0.28f, 0.26f, 0.22f, 1.0f));
 
-    UE_LOG(LogTemp, Display, TEXT("RWG road surface built: %d road paths, grid widths main=%.1f connector=%.1f local=%.1f blocks; collision %s."),
+    UE_LOG(LogTemp, Display,
+        TEXT("RWG road/bridge mesh built: %d road paths; terrain widths main=%.1f connector=%.1f rural=%.1f driveway=%.1f blocks; bridge collision %s."),
         Planner.GetRoads().Num(),
-        RWGRoadWidthMainBlocks, RWGRoadWidthConnectorBlocks, RWGRoadWidthLocalBlocks,
+        RWGRoadWidthMainBlocks, RWGRoadWidthConnectorBlocks, RWGRoadWidthRuralBlocks,
+        RWGRoadWidthLocalBlocks,
         bEnableRWGRoadCollision ? TEXT("enabled") : TEXT("disabled"));
 }
 
