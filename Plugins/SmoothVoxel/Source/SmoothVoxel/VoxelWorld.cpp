@@ -908,6 +908,9 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
         float WidthBlocks = RWGRoadWidthLocalBlocks;
         uint8 RoadSurfaceBlock = uint8(EVoxelBlock::Dirt);
         uint8 RoadPriority = 1;
+        const bool bRoadClassUsesCustomMaterial =
+            Road.Type == EVoxelRWGRoadType::Main ||
+            Road.Type == EVoxelRWGRoadType::Connector;
         if (Road.Type == EVoxelRWGRoadType::Main)
         {
             WidthBlocks = RWGRoadWidthMainBlocks;
@@ -1044,6 +1047,7 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                     Stamp.FillBlock = uint8(EVoxelBlock::Dirt);
                     Stamp.Priority = Priority;
                     Stamp.bRoadSurface = bRoadSurface;
+                    Stamp.bUseRoadMaterial = bRoadSurface && bRoadClassUsesCustomMaterial;
 
                     const FIntPoint Key(BlockX, BlockY);
                     FVoxelRWGRoadStamp* Existing = NewStamps->Find(Key);
@@ -1063,6 +1067,7 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                         {
                             Existing->SurfaceBlock = Stamp.SurfaceBlock;
                             Existing->Priority = Stamp.Priority;
+                            Existing->bUseRoadMaterial = Stamp.bUseRoadMaterial;
                         }
                     }
                     else if (!Existing->bRoadSurface)
