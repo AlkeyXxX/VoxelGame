@@ -294,7 +294,22 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	const float RootSize = static_cast<float>(SelectionSettings.CellsPerAxis) *
 		static_cast<float>(1 << SelectionSettings.MaxLod) *
 		SelectionSettings.BaseVoxelSize;
-	SelectionSettings.WorldOrigin = RootWorldCenter - FVector(RootSize * 0.5f);
+
+	// Slide a finite octree window along a grid snapped in half-root-size
+	// increments. Its 50% overlap keeps already-built chunks alive while new
+	// terrain is generated. Nodes use absolute world-lattice coordinates, so
+	// overlapping chunks remain anchored and are reused instead of teleported.
+	const float RootShift = RootSize * 0.5f;
+	const FVector RootCenter = RootWorldCenter + FVector(
+		static_cast<float>(FMath::RoundToInt((CameraLocation.X - RootWorldCenter.X) / RootShift)) * RootShift,
+		static_cast<float>(FMath::RoundToInt((CameraLocation.Y - RootWorldCenter.Y) / RootShift)) * RootShift,
+		static_cast<float>(FMath::RoundToInt((CameraLocation.Z - RootWorldCenter.Z) / RootShift)) * RootShift);
+	const FVector RootOrigin = RootCenter - FVector(RootSize * 0.5f);
+	SelectionSettings.WorldOrigin = FVector::ZeroVector;
+	SelectionSettings.RootOriginCells = FIntVector(
+		FMath::RoundToInt(RootOrigin.X / SelectionSettings.BaseVoxelSize),
+		FMath::RoundToInt(RootOrigin.Y / SelectionSettings.BaseVoxelSize),
+		FMath::RoundToInt(RootOrigin.Z / SelectionSettings.BaseVoxelSize));
 
 	TArray<FSVoxelOctreeNode> Leaves;
 	if (!FSVoxelOctreeSelector::BuildBalancedLeaves(CameraLocation, SelectionSettings, Leaves))
@@ -360,7 +375,8 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 
 	TArray<uint8> FaceMasks;
 	if (!FSVoxelOctreeSelector::BuildTransitionFaceMasks(
-		Leaves, SelectionSettings.CellsPerAxis, SelectionSettings.MaxLod, FaceMasks))
+		Leaves, SelectionSettings.CellsPerAxis, SelectionSettings.MaxLod,
+		FaceMasks, SelectionSettings.RootOriginCells))
 	{
 		bSelectionFailed = true;
 		UE_LOG(LogTemp, Warning, TEXT("SmoothVoxelOctreeWorld: transition mask generation failed; keeping current terrain."));
