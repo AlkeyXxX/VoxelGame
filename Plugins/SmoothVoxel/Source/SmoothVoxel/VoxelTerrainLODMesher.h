@@ -12,6 +12,7 @@ struct FVoxelTerrainLODBuildInput
     int32 WorldSizeY = 0;
     int32 ChunkSize = 32;
     float VoxelSize = 100.0f;
+    float UVScalePerBlock = 0.5f;
 
     int32 BeachWidth = 2;
     int32 SeaLevel = 10;
