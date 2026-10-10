@@ -78,4 +78,69 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelFlatInterfaceTest,
+	"SmoothVoxel.Transvoxel.FlatCoarseFineInterface",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelFlatInterfaceTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings CoarseSettings;
+	CoarseSettings.ChunkWorldOrigin = FVector::ZeroVector;
+	CoarseSettings.BaseHeight = 75.0f;
+	CoarseSettings.HeightAmplitude = 0.0f;
+	CoarseSettings.DetailAmplitude = 0.0f;
+	CoarseSettings.BottomDepth = 2000.0f;
+	CoarseSettings.bEnableCaves = false;
+	CoarseSettings.IsoLevel = 0.0f;
+
+	FSVoxelMeshData CoarseMesh;
+	FSVoxelTransvoxelMesher::Generate(
+		CoarseSettings, 4, 200.0f, SVoxelTransitionFace_PositiveX, CoarseMesh);
+
+	FSVoxelGenerationSettings FineSettings = CoarseSettings;
+	FineSettings.ChunkWorldOrigin = FVector(800.0f, 0.0f, 0.0f);
+
+	FSVoxelMeshData FineMesh;
+	FSVoxelTransvoxelMesher::Generate(
+		FineSettings, 4, 100.0f, 0, FineMesh);
+
+	TSet<int32> CoarseSeamY;
+	TSet<int32> FineSeamY;
+
+	for (const FVector& Vertex : CoarseMesh.Vertices)
+	{
+		if (FMath::IsNearlyEqual(Vertex.X, 800.0f, 0.01f) &&
+			FMath::IsNearlyEqual(Vertex.Z, 75.0f, 0.01f) &&
+			Vertex.Y >= -0.01f && Vertex.Y <= 400.01f)
+		{
+			CoarseSeamY.Add(FMath::RoundToInt(Vertex.Y));
+		}
+	}
+
+	for (const FVector& Vertex : FineMesh.Vertices)
+	{
+		if (FMath::IsNearlyZero(Vertex.X, 0.01f) &&
+			FMath::IsNearlyEqual(Vertex.Z, 75.0f, 0.01f) &&
+			Vertex.Y >= -0.01f && Vertex.Y <= 400.01f)
+		{
+			FineSeamY.Add(FMath::RoundToInt(Vertex.Y));
+		}
+	}
+
+	int32 SharedSeamSamples = 0;
+	for (const int32 Y : CoarseSeamY)
+	{
+		if (FineSeamY.Contains(Y))
+		{
+			++SharedSeamSamples;
+		}
+	}
+
+	TestTrue(
+		TEXT("Coarse transition and fine mesh must share seam vertices on a flat plane"),
+		SharedSeamSamples >= 3);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
