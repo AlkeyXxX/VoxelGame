@@ -296,17 +296,18 @@ namespace
                             SeaLevel,
                             BeachWidth);
 
-                    if (RoadStamp && RoadStamp->SurfaceZ != INDEX_NONE)
+                    if (RoadStamp && RoadStamp->SurfaceZ >= 0.0f)
                     {
-                        if (WorldZ > RoadStamp->SurfaceZ && WorldZ <= EffectiveHeight)
+                        const int32 RoadSurfaceBlockZ = FMath::RoundToInt(RoadStamp->SurfaceZ);
+                        if (WorldZ > RoadSurfaceBlockZ && WorldZ <= EffectiveHeight)
                         {
                             Block = uint8(EVoxelBlock::Air); // cut high ground
                         }
-                        else if (WorldZ == RoadStamp->SurfaceZ)
+                        else if (WorldZ == RoadSurfaceBlockZ)
                         {
                             Block = RoadStamp->SurfaceBlock;
                         }
-                        else if (WorldZ > EffectiveHeight && WorldZ < RoadStamp->SurfaceZ)
+                        else if (WorldZ > EffectiveHeight && WorldZ < RoadSurfaceBlockZ)
                         {
                             Block = RoadStamp->FillBlock; // fill a low road bed
                         }
@@ -345,6 +346,7 @@ void FVoxelMarchingCubesDataSnapshot::Build(
 {
     OutData.Init(ChunkSize);
     OutData.VoxelSize = VoxelSize;
+    OutData.UVScalePerBlock = UVScalePerBlock;
     OutData.CancellationToken = CancellationToken;
 
     if (ChunkSize <= 0)
@@ -443,7 +445,7 @@ void FVoxelMarchingCubesDataSnapshot::Build(
             // the same sampled Z and would otherwise win the old 3x3 tie-break.
             if (RoadStamp &&
                 RoadStamp->bRoadSurface &&
-                RoadStamp->SurfaceZ != INDEX_NONE)
+                RoadStamp->SurfaceZ >= 0.0f)
             {
                 OutData.TerrainSurfaceBlocks[SurfaceColumnIndex] =
                     RoadStamp->SurfaceBlock;
@@ -504,17 +506,18 @@ void FVoxelMarchingCubesDataSnapshot::Build(
                             SeaLevel,
                             BeachWidth);
 
-                        if (RoadStamp && RoadStamp->SurfaceZ != INDEX_NONE)
+                        if (RoadStamp && RoadStamp->SurfaceZ >= 0.0f)
                         {
-                            if (WorldZ > RoadStamp->SurfaceZ && WorldZ <= EffectiveHeight)
+                            const int32 RoadSurfaceBlockZ = FMath::RoundToInt(RoadStamp->SurfaceZ);
+                            if (WorldZ > RoadSurfaceBlockZ && WorldZ <= EffectiveHeight)
                             {
                                 Block = uint8(EVoxelBlock::Air);
                             }
-                            else if (WorldZ == RoadStamp->SurfaceZ)
+                            else if (WorldZ == RoadSurfaceBlockZ)
                             {
                                 Block = RoadStamp->SurfaceBlock;
                             }
-                            else if (WorldZ > EffectiveHeight && WorldZ < RoadStamp->SurfaceZ)
+                            else if (WorldZ > EffectiveHeight && WorldZ < RoadSurfaceBlockZ)
                             {
                                 Block = RoadStamp->FillBlock;
                             }
@@ -782,6 +785,56 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
             continue;
         }
 
+        // Smooth the continuous ground profile along each road by a weighted
+        // ~32-block window. Stop averaging at water/dry transitions so bridge
+        // approaches are not pulled toward a riverbed.
+        TArray<FVector> StampedRoadPoints = Road.Points;
+        TArray<float> RawProfileHeights;
+        TArray<uint8> ProfileWaterFlags;
+        RawProfileHeights.SetNumZeroed(Road.Points.Num());
+        ProfileWaterFlags.SetNumZeroed(Road.Points.Num());
+
+        for (int32 PointIndex = 0; PointIndex < Road.Points.Num(); ++PointIndex)
+        {
+            const FVector& Point = Road.Points[PointIndex];
+            const int32 PX = FMath::Clamp(FMath::RoundToInt(Point.X), 0, SafeWorldBlocksX - 1);
+            const int32 PY = FMath::Clamp(FMath::RoundToInt(Point.Y), 0, SafeWorldBlocksY - 1);
+            const float NativeHeight = WorldGenerator.GetSurfaceHeightFloat(PX, PY);
+            const FVoxelWaterColumn PointWater =
+                WorldGenerator.GetWaterColumn(PX, PY, NativeHeight);
+            const bool bWater = PointWater.WaterSurfaceBlockZ != INDEX_NONE;
+            ProfileWaterFlags[PointIndex] = bWater ? 1 : 0;
+            RawProfileHeights[PointIndex] = bWater
+                ? Point.Z - 0.8f
+                : PointWater.EffectiveSurfaceHeight;
+        }
+
+        TArray<float> SmoothedProfileHeights;
+        SmoothedProfileHeights.SetNumZeroed(Road.Points.Num());
+        constexpr int32 ProfileSmoothRadius = 4;
+        for (int32 PointIndex = 0; PointIndex < Road.Points.Num(); ++PointIndex)
+        {
+            float WeightedHeight = 0.0f;
+            float TotalWeight = 0.0f;
+            for (int32 Offset = -ProfileSmoothRadius; Offset <= ProfileSmoothRadius; ++Offset)
+            {
+                const int32 SampleIndex = PointIndex + Offset;
+                if (!RawProfileHeights.IsValidIndex(SampleIndex) ||
+                    ProfileWaterFlags[SampleIndex] != ProfileWaterFlags[PointIndex])
+                {
+                    continue;
+                }
+
+                const float Weight = float(ProfileSmoothRadius + 1 - FMath::Abs(Offset));
+                WeightedHeight += RawProfileHeights[SampleIndex] * Weight;
+                TotalWeight += Weight;
+            }
+            SmoothedProfileHeights[PointIndex] = TotalWeight > 0.0f
+                ? WeightedHeight / TotalWeight
+                : RawProfileHeights[PointIndex];
+            StampedRoadPoints[PointIndex].Z = SmoothedProfileHeights[PointIndex] + 0.8f;
+        }
+
         float WidthBlocks = RWGRoadWidthLocalBlocks;
         uint8 RoadSurfaceBlock = uint8(EVoxelBlock::Dirt);
         uint8 RoadPriority = 1;
@@ -807,10 +860,10 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
         const float HalfWidth = FMath::Max(0.5f, WidthBlocks * 0.5f);
         const float StampHalfWidth = HalfWidth + ShoulderWidthBlocks;
 
-        for (int32 SegmentIndex = 1; SegmentIndex < Road.Points.Num(); ++SegmentIndex)
+        for (int32 SegmentIndex = 1; SegmentIndex < StampedRoadPoints.Num(); ++SegmentIndex)
         {
-            const FVector& A = Road.Points[SegmentIndex - 1];
-            const FVector& B = Road.Points[SegmentIndex];
+            const FVector& A = StampedRoadPoints[SegmentIndex - 1];
+            const FVector& B = StampedRoadPoints[SegmentIndex];
             const FVector2D Delta(B.X - A.X, B.Y - A.Y);
             const float SegmentLength = Delta.Size();
             if (SegmentLength <= SMALL_NUMBER)
@@ -827,9 +880,9 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                 const float T = static_cast<float>(Step) / static_cast<float>(Steps);
                 const float CenterX = FMath::Lerp(A.X, B.X, T);
                 const float CenterY = FMath::Lerp(A.Y, B.Y, T);
-                // The A* cost field samples heights every 32 blocks, so its
-                // interpolated profile can be below unseen full-resolution hills.
-                // Keep grading constrained to a small cut/fill around native land.
+                // The route's continuous height profile is smoothed before
+                // this point. Allow controlled terrain cuts/fills without rounding
+                // each sample to a block; that removes the washboard effect.
                 float CenterSurfaceZ = FMath::Lerp(A.Z, B.Z, T) - 0.8f;
                 const int32 CenterBlockX = FMath::Clamp(
                     FMath::RoundToInt(CenterX), 0, SafeWorldBlocksX - 1);
@@ -841,12 +894,12 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                     CenterBlockX, CenterBlockY, CenterNativeHeight);
                 if (CenterWater.WaterSurfaceBlockZ == INDEX_NONE)
                 {
-                    constexpr float MaxCutBlocks = 2.0f;
-                    constexpr float MaxFillBlocks = 1.0f;
+                    constexpr float MaxCutBlocks = 4.0f;
+                    constexpr float MaxFillBlocks = 2.0f;
                     CenterSurfaceZ = FMath::Clamp(
                         CenterSurfaceZ,
-                        static_cast<float>(CenterWater.EffectiveTerrainHeight) - MaxCutBlocks,
-                        static_cast<float>(CenterWater.EffectiveTerrainHeight) + MaxFillBlocks);
+                        CenterWater.EffectiveSurfaceHeight - MaxCutBlocks,
+                        CenterWater.EffectiveSurfaceHeight + MaxFillBlocks);
                 }
 
                 for (float Lateral = -StampHalfWidth;
@@ -875,33 +928,28 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                         continue;
                     }
 
-                    const int32 NativeSurfaceZ = Water.EffectiveTerrainHeight;
+                    const int32 NativeSurfaceBlockZ = Water.EffectiveTerrainHeight;
+                    const float NativeSurfaceZ = Water.EffectiveSurfaceHeight;
                     const bool bRoadSurface = FMath::Abs(Lateral) <= HalfWidth + 0.25f;
                     const float ShoulderAlpha = FMath::Clamp(
                         (FMath::Abs(Lateral) - HalfWidth) / ShoulderWidthBlocks,
                         0.0f, 1.0f);
 
-                    // Clamp every stamped column, not just the centerline. On
-                    // cross-slopes the edge of a wide road can otherwise remain
-                    // several blocks underground even when its center is visible.
-                    constexpr float MaxColumnCutBlocks = 2.0f;
-                    constexpr float MaxColumnFillBlocks = 1.0f;
-                    const float ColumnRoadSurfaceZ = FMath::Clamp(
-                        CenterSurfaceZ,
-                        static_cast<float>(NativeSurfaceZ) - MaxColumnCutBlocks,
-                        static_cast<float>(NativeSurfaceZ) + MaxColumnFillBlocks);
+                    // Keep the lane on its continuous center profile. Only the
+                    // shoulders blend back into unmodified land, avoiding a
+                    // per-column copy of high-frequency terrain noise.
                     const float StampedHeight = bRoadSurface
-                        ? ColumnRoadSurfaceZ
-                        : FMath::Lerp(ColumnRoadSurfaceZ, static_cast<float>(NativeSurfaceZ), ShoulderAlpha);
-                    const int32 SurfaceZ = FMath::Clamp(
-                        FMath::RoundToInt(StampedHeight), 1, SafeWorldBlocksZ - 2);
+                        ? CenterSurfaceZ
+                        : FMath::Lerp(CenterSurfaceZ, NativeSurfaceZ, ShoulderAlpha);
+                    const float SurfaceZ = FMath::Clamp(
+                        StampedHeight, 1.0f, static_cast<float>(SafeWorldBlocksZ - 2));
 
                     uint8 SurfaceBlock = RoadSurfaceBlock;
                     uint8 Priority = RoadPriority;
                     if (!bRoadSurface)
                     {
                         const EVoxelBiome Biome = WorldGenerator.GetBiome(
-                            BlockX, BlockY, NativeSurfaceZ);
+                            BlockX, BlockY, NativeSurfaceBlockZ);
                         const EVoxelLandform Landform = WorldGenerator.GetLandform(BlockX, BlockY);
                         if (Biome == EVoxelBiome::Snow)
                         {
@@ -939,8 +987,8 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                     }
                     else if (bRoadSurface && Existing->bRoadSurface)
                     {
-                        Existing->SurfaceZ = FMath::RoundToInt(
-                            (static_cast<float>(Existing->SurfaceZ) + static_cast<float>(Stamp.SurfaceZ)) * 0.5f);
+                        Existing->SurfaceZ =
+                            (Existing->SurfaceZ + Stamp.SurfaceZ) * 0.5f;
                         if (Stamp.Priority > Existing->Priority)
                         {
                             Existing->SurfaceBlock = Stamp.SurfaceBlock;
@@ -963,8 +1011,8 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
 
     RWGRoadSurfaceStamps = NewStamps;
 
-    TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe> NewLODHeights =
-        MakeShared<TMap<FIntPoint, int32>, ESPMode::ThreadSafe>();
+    TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe> NewLODHeights =
+        MakeShared<TMap<FIntPoint, float>, ESPMode::ThreadSafe>();
     for (const TPair<FIntPoint, FVoxelRWGRoadStamp>& Pair : *NewStamps)
     {
         NewLODHeights->Add(Pair.Key, Pair.Value.SurfaceZ);
@@ -1038,9 +1086,12 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
             if (const FVoxelRWGRoadStamp* Stamp =
                 RWGRoadSurfaceStamps->Find(FIntPoint(BlockX, BlockY)))
             {
-                // The MC boundary is roughly one block above the stamped
-                // surface layer; the bridge must meet that visible surface.
-                return static_cast<float>(Stamp->SurfaceZ) + 1.12f;
+                // The continuous MC boundary sits roughly one block above
+                // the stamped top block; bridge ends meet that surface.
+                if (Stamp->SurfaceZ >= 0.0f)
+                {
+                    return Stamp->SurfaceZ + 1.12f;
+                }
             }
         }
 
@@ -1203,14 +1254,15 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                         DistanceAlongRoad += FVector2D(
                             Center.X - Prev.X, Center.Y - Prev.Y).Size();
                     }
-                    const float V = DistanceAlongRoad / 8.0f;
+                    const float V = DistanceAlongRoad * TerrainUVScalePerBlock;
+                    const float UAcrossRoad = WidthBlocks * TerrainUVScalePerBlock;
 
                     Vertices.Add(Left);
                     Vertices.Add(Right);
                     Normals.Add(FVector::UpVector);
                     Normals.Add(FVector::UpVector);
                     UVs.Add(FVector2D(0.0f, V));
-                    UVs.Add(FVector2D(1.0f, V));
+                    UVs.Add(FVector2D(UAcrossRoad, V));
                     VertexColors.Add(Tint);
                     VertexColors.Add(Tint);
                     const FVector Tangent(Direction.X, Direction.Y, 0.0f);
@@ -1309,6 +1361,7 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
     {
         if (Pair.Value)
         {
+            Pair.Value->SetRoadMaterial(RWGRoadMaterial);
             GenerateChunkBlocksAsync(Pair.Value);
         }
     }
@@ -1685,6 +1738,9 @@ AVoxelChunk* AVoxelWorld::CreateChunk(
 
     Chunk->SetWaterMaterial(
         WaterMaterial);
+
+    Chunk->SetRoadMaterial(
+        RWGRoadMaterial);
 
 
     Chunks.Add(
@@ -2558,6 +2614,7 @@ void AVoxelWorld::CaptureMarchingCubesDataSnapshot(
     OutSnapshot.SeaLevel = SeaLevel;
     OutSnapshot.BeachWidth = BeachWidth;
     OutSnapshot.VoxelSize = VoxelSize;
+    OutSnapshot.UVScalePerBlock = TerrainUVScalePerBlock;
     OutSnapshot.CancellationToken.Reset();
     OutSnapshot.ChunkModifications.Reset();
 
@@ -3726,9 +3783,9 @@ void AVoxelWorld::ApplyDebugFlySettings(bool bEnable)
         }
 
         Movement->SetMovementMode(MOVE_Flying);
-        Movement->MaxFlySpeed = bDebugFlyBoost ? 9000.0f : 3000.0f;
-        Movement->MaxAcceleration = 12000.0f;
-        Movement->BrakingDecelerationFlying = 12000.0f;
+        Movement->MaxFlySpeed = bDebugFlyBoost ? DebugFlyBoostSpeed : DebugFlySpeed;
+        Movement->MaxAcceleration = DebugFlyAcceleration;
+        Movement->BrakingDecelerationFlying = DebugFlyAcceleration;
         Movement->GravityScale = 0.0f;
 
     }
