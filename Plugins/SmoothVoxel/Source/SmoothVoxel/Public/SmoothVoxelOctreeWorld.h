@@ -205,4 +205,5 @@ private:
 	bool bHasCompletedSelection = false;
 	bool bForceUpdate = true;
 	bool bApplyingSelection = false;
+	bool bSelectionFailed = false;
 };

@@ -17,13 +17,18 @@ The rewrite lives beside the current world and does not replace the legacy
    separate CPU mesh for one chunk.
 4. Unreal automation tests cover table validity, repeated density sampling,
    octree balance and determinism, face masks, and a flat-terrain fixture.
+5. An opt-in actor pair now drives the new path: an octree world manager plus
+   async chunk actors, bounded parallel builds, height-envelope culling, and
+   deferred retirement of old chunks until the requested set is ready.
 
 ## Important current limitations
 
-The new mesher and octree selector are not yet attached to a terrain manager
-that streams chunks as the player moves. They have not been compiled or run in
-UE4.27 in this environment, so the automation tests are added but **not
-verified in Unreal Editor yet**. No claim is made that all seams, collision
+The new mesher and octree selector are now attached to a separate, opt-in
+terrain manager that follows a pawn or a configured actor and streams chunks
+as the view moves. It uses an async build limit, rejects stale build results,
+and keeps old chunks until the requested set is ready. It has not been compiled
+or run in UE4.27 in this environment, so the automation tests are added but
+**not verified in Unreal Editor yet**. No claim is made that all seams, collision
 contacts, edge/corner junctions, material boundaries or real-world performance
 are already correct. The legacy gameplay path remains unchanged as a fallback.
 
@@ -48,9 +53,6 @@ transition faces meet.
 
 ## Next milestones
 
-5. Add a dedicated octree terrain actor / manager with async mesh generation,
-   cancellation or stale-result rejection, safe replacement, and collision
-   updates; do not change `AVoxelWorld` yet.
 6. Validate all six face orientations and combined edge/corner transitions,
    normals, winding, degenerates, deterministic rebuilds, collision and LOD
    changes in Unreal Editor.

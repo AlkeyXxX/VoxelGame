@@ -261,12 +261,13 @@ void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 		!bHasCompletedSelection ||
 		FVector::DistSquared(CameraLocation, LastCompletedCameraLocation) >=
 			FMath::Square(FMath::Max(1.0f, UpdateDistance));
+	const bool bIntervalElapsed =
+		TimeSinceSelection >= FMath::Max(0.05f, UpdateIntervalSeconds);
 
-	if (bForceUpdate ||
-		(!bHasCompletedSelection) ||
-		(TimeSinceSelection >= FMath::Max(0.05f, UpdateIntervalSeconds) && bCameraMoved))
+	if (bForceUpdate || (bIntervalElapsed && (bSelectionFailed || !bHasCompletedSelection || bCameraMoved)))
 	{
 		RebuildForCamera(CameraLocation);
+		bForceUpdate = false;
 		TimeSinceSelection = 0.0f;
 	}
 
@@ -295,8 +296,60 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	TArray<FSVoxelOctreeNode> Leaves;
 	if (!FSVoxelOctreeSelector::BuildBalancedLeaves(CameraLocation, SelectionSettings, Leaves))
 	{
+		bSelectionFailed = true;
 		UE_LOG(LogTemp, Warning,
 			TEXT("SmoothVoxelOctreeWorld: octree selection failed (leaf cap may be too small); keeping current terrain."));
+		return;
+	}
+
+	// Remove leaves that cannot contain an isosurface. The noise amplitudes
+	// define a conservative terrain-height envelope. When caves are enabled,
+	// only the air-above-terrain test is safe because cave carving can extend
+	// into otherwise solid columns.
+	const float HeightSafetyMargin = SelectionSettings.BaseVoxelSize * 2.0f;
+	const float MinSurfaceHeight = BaseHeight -
+		FMath::Abs(HeightAmplitude) - FMath::Abs(DetailAmplitude);
+	const float MaxSurfaceHeight = BaseHeight +
+		FMath::Abs(HeightAmplitude) + FMath::Abs(DetailAmplitude);
+	Leaves.RemoveAll([&](const FSVoxelOctreeNode& Node)
+	{
+		const FVector NodeOrigin = SelectionSettings.WorldOrigin +
+			FVector(Node.OriginCells.X, Node.OriginCells.Y, Node.OriginCells.Z) *
+				SelectionSettings.BaseVoxelSize;
+		const float NodeMaxZ = NodeOrigin.Z +
+			Node.GetWorldSize(SelectionSettings.CellsPerAxis, SelectionSettings.BaseVoxelSize);
+
+		if (NodeOrigin.Z > MaxSurfaceHeight + HeightSafetyMargin)
+		{
+			return true;
+		}
+		if (!bEnableCaves && NodeMaxZ < MinSurfaceHeight - HeightSafetyMargin)
+		{
+			return true;
+		}
+		return false;
+	});
+
+	if (Leaves.Num() == 0)
+	{
+		for (TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
+		{
+			if (IsValid(Pair.Value))
+			{
+				Pair.Value->Destroy();
+			}
+		}
+		ActiveChunks.Reset();
+		DesiredNodes.Reset();
+		DesiredFaceMasks.Reset();
+		DesiredChunkOrigins.Reset();
+		DesiredVoxelSizes.Reset();
+		DesiredCollisionFlags.Reset();
+		bApplyingSelection = false;
+		bSelectionFailed = false;
+		bHasCompletedSelection = true;
+		SelectionCameraLocation = CameraLocation;
+		LastCompletedCameraLocation = CameraLocation;
 		return;
 	}
 
@@ -304,6 +357,7 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	if (!FSVoxelOctreeSelector::BuildTransitionFaceMasks(
 		Leaves, SelectionSettings.CellsPerAxis, SelectionSettings.MaxLod, FaceMasks))
 	{
+		bSelectionFailed = true;
 		UE_LOG(LogTemp, Warning, TEXT("SmoothVoxelOctreeWorld: transition mask generation failed; keeping current terrain."));
 		return;
 	}
@@ -389,6 +443,7 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	DesiredCellsPerAxis = SelectionSettings.CellsPerAxis;
 	SelectionCameraLocation = CameraLocation;
 	bApplyingSelection = true;
+	bSelectionFailed = false;
 	bForceUpdate = false;
 }
 
