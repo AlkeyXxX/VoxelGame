@@ -363,6 +363,10 @@ void FVoxelMarchingCubesDataSnapshot::Build(
         uint8(EVoxelBlock::Air),
         Side * Side);
 
+    OutData.TerrainRoadMaterialMask.Init(
+        0,
+        Side * Side);
+
     const int32 WorldBlocksX = WorldSizeX * ChunkSize;
     const int32 WorldBlocksY = WorldSizeY * ChunkSize;
     const int32 WorldBlocksZ = WorldSizeZ * ChunkSize;
@@ -508,17 +512,20 @@ void FVoxelMarchingCubesDataSnapshot::Build(
             OutData.TerrainSurfaceHeights[SurfaceColumnIndex] =
                 LocalSurfaceHeight;
 
-            // Pass the exact road surface block to the MC material picker.
-            // This keeps road Stone/Dirt visible when neighboring Grass shares
-            // the same sampled Z and would otherwise win the old 3x3 tie-break.
+            // Always preserve the actual stamped block type for the MC vertex
+            // color picker (including Dirt roads). Only the separate road mask
+            // routes paved-road triangles into the custom PBR material section.
             if (RoadStamp &&
                 RoadStamp->bRoadSurface &&
-                RoadStamp->bUseRoadMaterial &&
                 !bRoadSurfaceEditedAway &&
                 RoadStamp->SurfaceZ >= 0.0f)
             {
                 OutData.TerrainSurfaceBlocks[SurfaceColumnIndex] =
                     RoadStamp->SurfaceBlock;
+                if (RoadStamp->bUseRoadMaterial)
+                {
+                    OutData.TerrainRoadMaterialMask[SurfaceColumnIndex] = 1;
+                }
             }
 
             const int32 SourceChunkX =
