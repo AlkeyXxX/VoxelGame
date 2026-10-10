@@ -367,6 +367,44 @@ void FVoxelMarchingCubesDataSnapshot::Build(
     const int32 WorldBlocksY = WorldSizeY * ChunkSize;
     const int32 WorldBlocksZ = WorldSizeZ * ChunkSize;
 
+    // Query a player-modified voxel from the immutable save-delta snapshot.
+    // Road surface overrides must respect these edits, otherwise the road
+    // height/material keeps reappearing over a hole after mining.
+    const auto FindModifiedBlock = [this, WorldBlocksX, WorldBlocksY, WorldBlocksZ](
+        int32 WorldX, int32 WorldY, int32 WorldZ, uint8& OutBlock) -> bool
+    {
+        if (WorldX < 0 || WorldX >= WorldBlocksX ||
+            WorldY < 0 || WorldY >= WorldBlocksY ||
+            WorldZ < 0 || WorldZ >= WorldBlocksZ)
+        {
+            return false;
+        }
+
+        const FIntVector ChunkCoord(
+            WorldX / ChunkSize,
+            WorldY / ChunkSize,
+            WorldZ / ChunkSize);
+        const TMap<int32, uint8>* Mods = ChunkModifications.Find(ChunkCoord);
+        if (!Mods)
+        {
+            return false;
+        }
+
+        const int32 LocalX = WorldX % ChunkSize;
+        const int32 LocalY = WorldY % ChunkSize;
+        const int32 LocalZ = WorldZ % ChunkSize;
+        const int32 LocalIndex =
+            LocalX + LocalY * ChunkSize + LocalZ * ChunkSize * ChunkSize;
+        const uint8* ModifiedBlock = Mods->Find(LocalIndex);
+        if (!ModifiedBlock)
+        {
+            return false;
+        }
+
+        OutBlock = *ModifiedBlock;
+        return true;
+    };
+
     /*
      * All work below uses only immutable value data. Surface height,
      * biome, and landform are computed once per XY column rather than once
@@ -426,12 +464,41 @@ void FVoxelMarchingCubesDataSnapshot::Build(
             }
 
             const FVoxelRWGRoadStamp* RoadStamp = nullptr;
+            bool bRoadSurfaceEditedAway = false;
+            int32 DugRoadSurfaceLayers = 0;
             if (bValidColumn && WaterSurfaceBlockZ == INDEX_NONE && RoadStamps.IsValid())
             {
                 RoadStamp = RoadStamps->Find(FIntPoint(WorldX, WorldY));
+                if (RoadStamp && RoadStamp->SurfaceZ >= 0.0f && RoadStamp->bRoadSurface)
+                {
+                    const int32 RoadSurfaceBlockZ = FMath::RoundToInt(RoadStamp->SurfaceZ);
+                    uint8 ModifiedTopBlock = uint8(EVoxelBlock::Air);
+                    if (FindModifiedBlock(WorldX, WorldY, RoadSurfaceBlockZ, ModifiedTopBlock))
+                    {
+                        bRoadSurfaceEditedAway = ModifiedTopBlock != RoadStamp->SurfaceBlock;
+                        if (ModifiedTopBlock == uint8(EVoxelBlock::Air))
+                        {
+                            // Count contiguous excavated layers from the old road top
+                            // downward. The smooth surface follows the newly exposed
+                            // dirt/sand instead of keeping the original road height.
+                            for (int32 Z = RoadSurfaceBlockZ; Z >= 0; --Z)
+                            {
+                                uint8 ModifiedBlock = uint8(EVoxelBlock::Air);
+                                if (!FindModifiedBlock(WorldX, WorldY, Z, ModifiedBlock) ||
+                                    ModifiedBlock != uint8(EVoxelBlock::Air))
+                                {
+                                    break;
+                                }
+                                ++DugRoadSurfaceLayers;
+                            }
+                        }
+                    }
+                }
+
                 if (RoadStamp && RoadStamp->SurfaceZ >= 0.0f)
                 {
-                    LocalSurfaceHeight = static_cast<float>(RoadStamp->SurfaceZ) -
+                    LocalSurfaceHeight = RoadStamp->SurfaceZ -
+                        static_cast<float>(DugRoadSurfaceLayers) -
                         static_cast<float>(ChunkCoord.Z * ChunkSize);
                 }
             }
@@ -446,6 +513,8 @@ void FVoxelMarchingCubesDataSnapshot::Build(
             // the same sampled Z and would otherwise win the old 3x3 tie-break.
             if (RoadStamp &&
                 RoadStamp->bRoadSurface &&
+                RoadStamp->bUseRoadMaterial &&
+                !bRoadSurfaceEditedAway &&
                 RoadStamp->SurfaceZ >= 0.0f)
             {
                 OutData.TerrainSurfaceBlocks[SurfaceColumnIndex] =
