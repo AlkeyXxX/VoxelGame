@@ -186,6 +186,70 @@ bool FSmoothVoxelOctreeBalanceTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelOctreeStreamingWindowOverlapTest,
+	"SmoothVoxel.Octree.StreamingWindowKeepsWorldAlignedChunks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelOctreeStreamingWindowOverlapTest::RunTest(const FString& Parameters)
+{
+	FSVoxelOctreeSelectionSettings OldWindow;
+	OldWindow.CellsPerAxis = 8;
+	OldWindow.BaseVoxelSize = 100.0f;
+	OldWindow.MaxLod = 4;
+	OldWindow.SplitDistanceMultiplier = 0.8f;
+	OldWindow.MaxLeafCount = 4096;
+	OldWindow.WorldOrigin = FVector::ZeroVector;
+	OldWindow.RootOriginCells = FIntVector(-64, -64, -64);
+
+	FSVoxelOctreeSelectionSettings ShiftedWindow = OldWindow;
+	// For an 8-cell, LOD-4 root this is a half-root shift on X. The overlap
+	// [0,64] stays aligned at LOD 0..3 and should keep the same absolute keys.
+	ShiftedWindow.RootOriginCells = FIntVector(0, -64, -64);
+
+	TArray<FSVoxelOctreeNode> OldLeaves;
+	TArray<FSVoxelOctreeNode> ShiftedLeaves;
+	const FVector Camera(0.0f, 0.0f, 0.0f);
+	TestTrue(TEXT("Initial streaming window should select leaves"),
+		FSVoxelOctreeSelector::BuildBalancedLeaves(Camera, OldWindow, OldLeaves));
+	TestTrue(TEXT("Shifted streaming window should select leaves"),
+		FSVoxelOctreeSelector::BuildBalancedLeaves(Camera, ShiftedWindow, ShiftedLeaves));
+
+	TSet<FSVoxelOctreeNode> ShiftedSet;
+	for (const FSVoxelOctreeNode& Node : ShiftedLeaves)
+	{
+		ShiftedSet.Add(Node);
+	}
+
+	int32 SharedOverlapLeaves = 0;
+	for (const FSVoxelOctreeNode& Node : OldLeaves)
+	{
+		const int32 Span = Node.GetSpanInBaseCells(OldWindow.CellsPerAxis);
+		const bool bInsideOverlap =
+			Node.OriginCells.X >= 0 && Node.OriginCells.X + Span <= 64 &&
+			Node.OriginCells.Y >= -64 && Node.OriginCells.Y + Span <= 64 &&
+			Node.OriginCells.Z >= -64 && Node.OriginCells.Z + Span <= 64;
+		if (bInsideOverlap && ShiftedSet.Contains(Node))
+		{
+			++SharedOverlapLeaves;
+		}
+	}
+
+	TestTrue(TEXT("At least one overlapping world-space leaf should retain its absolute node key"),
+		SharedOverlapLeaves > 0);
+
+	TArray<uint8> OldMasks;
+	TArray<uint8> ShiftedMasks;
+	TestTrue(TEXT("Initial window transition masks should succeed"),
+		FSVoxelOctreeSelector::BuildTransitionFaceMasks(
+			OldLeaves, OldWindow.CellsPerAxis, OldWindow.MaxLod, OldMasks, OldWindow.RootOriginCells));
+	TestTrue(TEXT("Shifted window transition masks should succeed"),
+		FSVoxelOctreeSelector::BuildTransitionFaceMasks(
+			ShiftedLeaves, ShiftedWindow.CellsPerAxis, ShiftedWindow.MaxLod, ShiftedMasks, ShiftedWindow.RootOriginCells));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelDensityDeterminismTest,
 	"SmoothVoxel.Density.DeterministicSampling",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
