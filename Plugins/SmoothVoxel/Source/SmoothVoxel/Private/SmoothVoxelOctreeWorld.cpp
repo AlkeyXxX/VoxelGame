@@ -295,15 +295,15 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 		static_cast<float>(1 << SelectionSettings.MaxLod) *
 		SelectionSettings.BaseVoxelSize;
 
-	// Slide a finite octree window along a grid snapped in half-root-size
-	// increments. Its 50% overlap keeps already-built chunks alive while new
-	// terrain is generated. Nodes use absolute world-lattice coordinates, so
-	// overlapping chunks remain anchored and are reused instead of teleported.
+	// Slide the finite octree window horizontally in half-root-size increments.
+	// Keep its vertical range anchored to RootWorldCenter so flying upward does
+	// not move the terrain density field outside the active world window. The
+	// 50% XY overlap preserves existing chunks, keyed by absolute lattice cells.
 	const float RootShift = RootSize * 0.5f;
 	const FVector RootCenter = RootWorldCenter + FVector(
 		static_cast<float>(FMath::RoundToInt((CameraLocation.X - RootWorldCenter.X) / RootShift)) * RootShift,
 		static_cast<float>(FMath::RoundToInt((CameraLocation.Y - RootWorldCenter.Y) / RootShift)) * RootShift,
-		static_cast<float>(FMath::RoundToInt((CameraLocation.Z - RootWorldCenter.Z) / RootShift)) * RootShift);
+		0.0f);
 	const FVector RootOrigin = RootCenter - FVector(RootSize * 0.5f);
 	SelectionSettings.WorldOrigin = FVector::ZeroVector;
 	SelectionSettings.RootOriginCells = FIntVector(
