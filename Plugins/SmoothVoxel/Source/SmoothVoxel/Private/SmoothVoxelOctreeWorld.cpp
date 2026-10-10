@@ -347,6 +347,8 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 		DesiredCollisionFlags.Reset();
 		bApplyingSelection = false;
 		bSelectionFailed = false;
+		bForceUpdate = false;
+		TimeSinceSelection = 0.0f;
 		bHasCompletedSelection = true;
 		SelectionCameraLocation = CameraLocation;
 		LastCompletedCameraLocation = CameraLocation;
