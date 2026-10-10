@@ -381,6 +381,16 @@ float FSVoxelGenerator::Density(
 }
 
 
+float FSVoxelGenerator::SampleDensity(
+    float WorldX,
+    float WorldY,
+    float WorldZ,
+    const FSVoxelGenerationSettings& Settings)
+{
+    return Density(WorldX, WorldY, WorldZ, Settings);
+}
+
+
 // ============================================================
 // INTERPOLATION
 // ============================================================

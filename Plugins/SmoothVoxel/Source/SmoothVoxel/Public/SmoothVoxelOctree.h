@@ -1,0 +1,99 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+/**
+ * A leaf in a spatial octree used by the smooth-terrain LOD selector.
+ *
+ * OriginCells is expressed on the LOD-0 sample lattice, not in Unreal units.
+ * A node at Lod L spans CellsPerAxis * (1 << L) cells on each axis.
+ *
+ * The selector deliberately does not create meshes. In particular, selecting
+ * a balanced hierarchy is not enough to make mixed-resolution surfaces crack
+ * free; the renderer must also build the corresponding transition cells.
+ */
+struct FSVoxelOctreeNode
+{
+	FIntVector OriginCells = FIntVector::ZeroValue;
+	int32 Lod = 0;
+
+	FSVoxelOctreeNode() = default;
+
+	FSVoxelOctreeNode(const FIntVector& InOriginCells, int32 InLod)
+		: OriginCells(InOriginCells)
+		, Lod(InLod)
+	{
+	}
+
+	int32 GetSpanInBaseCells(int32 CellsPerAxis) const
+	{
+		return CellsPerAxis * (1 << Lod);
+	}
+
+	FVector GetWorldOrigin(const FVector& WorldOrigin, float BaseVoxelSize) const
+	{
+		return WorldOrigin + FVector(OriginCells) * BaseVoxelSize;
+	}
+
+	float GetWorldSize(int32 CellsPerAxis, float BaseVoxelSize) const
+	{
+		return static_cast<float>(GetSpanInBaseCells(CellsPerAxis)) * BaseVoxelSize;
+	}
+
+	friend bool operator==(const FSVoxelOctreeNode& A, const FSVoxelOctreeNode& B)
+	{
+		return A.OriginCells == B.OriginCells && A.Lod == B.Lod;
+	}
+
+	friend bool operator!=(const FSVoxelOctreeNode& A, const FSVoxelOctreeNode& B)
+	{
+		return !(A == B);
+	}
+};
+
+FORCEINLINE uint32 GetTypeHash(const FSVoxelOctreeNode& Node)
+{
+	return HashCombine(::GetTypeHash(Node.OriginCells), ::GetTypeHash(Node.Lod));
+}
+
+struct FSVoxelOctreeSelectionSettings
+{
+	/** Number of sampled cells across a rendered chunk at LOD 0. */
+	int32 CellsPerAxis = 32;
+
+	/** Size of a single LOD-0 cell in Unreal units (UE centimetres by default). */
+	float BaseVoxelSize = 100.0f;
+
+	/** Root cube LOD. At 7 and 32 cells, the root spans 4096 metres at 1 m/cell. */
+	int32 MaxLod = 7;
+
+	/** Camera-to-node distance threshold, measured in node side lengths. */
+	float SplitDistanceMultiplier = 0.75f;
+
+	/** Hard safety cap for the number of selected leaves. */
+	int32 MaxLeafCount = 8192;
+
+	/** World-space lower corner of the root cube. */
+	FVector WorldOrigin = FVector::ZeroVector;
+};
+
+/**
+ * Builds a view-dependent octree leaf set and enforces a 2:1 neighbour rule.
+ *
+ * This is a pure CPU spatial selector. It intentionally does not spawn actors
+ * or modify the existing block-based AVoxelWorld. A mixed-LOD renderer must
+ * consume the returned leaves only after transition-cell meshing is connected.
+ */
+class SMOOTHVOXEL_API FSVoxelOctreeSelector
+{
+public:
+	/**
+	 * Returns false when input is invalid or the safety cap prevents balancing.
+	 * On failure OutLeaves is cleared, so callers cannot accidentally render a
+	 * partially balanced hierarchy.
+	 */
+	static bool BuildBalancedLeaves(
+		const FVector& CameraWorldLocation,
+		const FSVoxelOctreeSelectionSettings& Settings,
+		TArray<FSVoxelOctreeNode>& OutLeaves);
+};

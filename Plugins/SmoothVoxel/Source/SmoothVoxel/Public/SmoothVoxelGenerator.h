@@ -42,6 +42,16 @@ class FSVoxelGenerator
 {
 public:
 
+	/** Sample the same deterministic signed density field used by mesh generation.
+	 * Positive values represent solid terrain; negative values represent air.
+	 * Coordinates are world-space Unreal units (centimetres by default).
+	 */
+	static float SampleDensity(
+		float WorldX,
+		float WorldY,
+		float WorldZ,
+		const FSVoxelGenerationSettings& Settings);
+
 	static void Generate(
 		const FSVoxelGenerationSettings& Settings,
 		FSVoxelMeshData& OutMesh);
