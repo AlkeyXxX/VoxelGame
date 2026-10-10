@@ -50,6 +50,7 @@ struct FVoxelMarchingCubesDataSnapshot
     int32 SeaLevel = 0;
     int32 BeachWidth = 0;
     float VoxelSize = 100.0f;
+    float UVScalePerBlock = 0.5f;
 
     TMap<FIntVector, TMap<int32, uint8>> ChunkModifications;
     TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> RoadStamps;
