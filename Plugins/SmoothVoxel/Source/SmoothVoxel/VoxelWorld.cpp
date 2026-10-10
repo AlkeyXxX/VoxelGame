@@ -1215,8 +1215,17 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
             {
                 const FVector& A = Road.Points[SegmentIndex - 1];
                 const FVector& B = Road.Points[SegmentIndex];
-                const float SegmentLength = FVector2D(B.X - A.X, B.Y - A.Y).Size();
-                const int32 Steps = FMath::Clamp(FMath::CeilToInt(SegmentLength / 8.0f), 1, 2048);
+                const FVector2D SegmentDelta(B.X - A.X, B.Y - A.Y);
+                const float SegmentLength = SegmentDelta.Size();
+                // Sample at two-block intervals so bridge ends don't lag behind
+                // the actual shoreline by 3-4 blocks on a wide road.
+                const int32 Steps = FMath::Clamp(FMath::CeilToInt(SegmentLength / 2.0f), 1, 2048);
+                FVector2D SegmentDirection = SegmentDelta.GetSafeNormal();
+                if (SegmentDirection.IsNearlyZero())
+                {
+                    SegmentDirection = FVector2D(1.0f, 0.0f);
+                }
+                const FVector2D SegmentSide(-SegmentDirection.Y, SegmentDirection.X);
 
                 for (int32 Step = SegmentIndex == 1 ? 0 : 1; Step <= Steps; ++Step)
                 {
@@ -1225,7 +1234,30 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                     const float Y = FMath::Lerp(A.Y, B.Y, T);
                     const float Z = SampleSurfaceHeight(X, Y);
                     Centerline.Emplace(X, Y, Z);
-                    CenterlineWaterFlags.Add(IsWaterAt(X, Y) ? 1 : 0);
+
+                    bool bWaterUnderLane = IsWaterAt(X, Y);
+                    int32 WaterLateralSamples = 0;
+                    if (!bWaterUnderLane)
+                    {
+                        for (float Lateral = -HalfWidth; Lateral <= HalfWidth + KINDA_SMALL_NUMBER; Lateral += 1.5f)
+                        {
+                            if (IsWaterAt(
+                                X + SegmentSide.X * Lateral,
+                                Y + SegmentSide.Y * Lateral))
+                            {
+                                ++WaterLateralSamples;
+                            }
+                        }
+                    }
+
+                    // A single wet sample right at the shoulder is tolerated;
+                    // two wet lane samples means water has intruded far enough
+                    // to require a bridge deck across the affected road width.
+                    if (WaterLateralSamples >= 2)
+                    {
+                        bWaterUnderLane = true;
+                    }
+                    CenterlineWaterFlags.Add(bWaterUnderLane ? 1 : 0);
                 }
             }
 
