@@ -105,27 +105,30 @@ namespace
 
 	bool FindLeafContainingCell(
 		const FIntVector& Cell,
+		const FIntVector& RootOriginCells,
 		int32 RootSpan,
 		int32 CellsPerAxis,
 		int32 MaxLod,
 		const FSVoxelNodeLookup& Lookup,
 		FSVoxelOctreeNode& OutNode)
 	{
-		if (Cell.X < 0 || Cell.Y < 0 || Cell.Z < 0 ||
-			Cell.X >= RootSpan || Cell.Y >= RootSpan || Cell.Z >= RootSpan)
+		const FIntVector RelativeCell = Cell - RootOriginCells;
+		if (RelativeCell.X < 0 || RelativeCell.Y < 0 || RelativeCell.Z < 0 ||
+			RelativeCell.X >= RootSpan || RelativeCell.Y >= RootSpan || RelativeCell.Z >= RootSpan)
 		{
 			return false;
 		}
 
-		// Leaves are aligned to their own span, so checking each LOD from fine
-		// to coarse gives a deterministic point-to-leaf lookup.
+		// Work in root-local cell coordinates, but return nodes keyed by
+		// absolute world-lattice origins. Overlapping stream windows can then
+		// reuse chunks without relocating them to different terrain.
 		for (int32 Lod = 0; Lod <= MaxLod; ++Lod)
 		{
 			const int32 Span = CellsPerAxis * (1 << Lod);
-			const FIntVector Origin(
-				(Cell.X / Span) * Span,
-				(Cell.Y / Span) * Span,
-				(Cell.Z / Span) * Span);
+			const FIntVector Origin = RootOriginCells + FIntVector(
+				(RelativeCell.X / Span) * Span,
+				(RelativeCell.Y / Span) * Span,
+				(RelativeCell.Z / Span) * Span);
 
 			const FSVoxelOctreeNode Candidate(Origin, Lod);
 			if (Lookup.IndexByNode.Contains(Candidate))
@@ -207,6 +210,7 @@ namespace
 					FSVoxelOctreeNode Neighbour;
 					if (FindLeafContainingCell(
 						Probe,
+						Settings.RootOriginCells,
 						RootSpan,
 						Settings.CellsPerAxis,
 						Settings.MaxLod,
@@ -289,7 +293,7 @@ bool FSVoxelOctreeSelector::BuildBalancedLeaves(
 	OutLeaves.Reserve(FMath::Min(Settings.MaxLeafCount, 4096));
 
 	if (!SelectNode(
-		FSVoxelOctreeNode(FIntVector::ZeroValue, Settings.MaxLod),
+		FSVoxelOctreeNode(Settings.RootOriginCells, Settings.MaxLod),
 		CameraWorldLocation,
 		Settings,
 		OutLeaves))
@@ -331,7 +335,8 @@ bool FSVoxelOctreeSelector::BuildTransitionFaceMasks(
 	const TArray<FSVoxelOctreeNode>& Leaves,
 	int32 CellsPerAxis,
 	int32 MaxLod,
-	TArray<uint8>& OutFaceMasks)
+	TArray<uint8>& OutFaceMasks,
+	const FIntVector& RootOriginCells)
 {
 	OutFaceMasks.Reset();
 
@@ -419,6 +424,7 @@ bool FSVoxelOctreeSelector::BuildTransitionFaceMasks(
 					FSVoxelOctreeNode Neighbour;
 					if (FindLeafContainingCell(
 						Probe,
+						RootOriginCells,
 						RootSpan,
 						CellsPerAxis,
 						MaxLod,
