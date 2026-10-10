@@ -745,7 +745,7 @@ private:
     float DebugFlyBoostSpeed = 18000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Debug Fly",
-        meta=(ClampMin="100.0", ClampMax="200000.0"))
+        meta=(AllowPrivateAccess="true", ClampMin="100.0", ClampMax="200000.0"))
     float DebugFlyAcceleration = 24000.0f;
 
     UFUNCTION()
