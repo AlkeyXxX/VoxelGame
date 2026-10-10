@@ -39,6 +39,20 @@ derive correct face masks, keep a consistent world-space density field, retain
 old meshes until replacements finish, and test edges/corners where multiple
 transition faces meet.
 
+## Runtime tuning notes
+
+- Terrain frequency parameters are in inverse centimetres because the density
+  function samples Unreal world coordinates directly. With 100 cm base voxels,
+  the default `NoiseScale=0.0008` and `DetailScale=0.0006` keep the highest FBM
+  octaves sampled more safely; the previous `0.0035` / `0.0050` defaults could
+  alias into sharp spikes. Keep `HeightAmplitude` as a height range control,
+  not as a workaround for undersampled noise.
+- `BaseHeight=900` places the average surface at about Z=900 cm. With
+  `HeightAmplitude=850` and `DetailAmplitude=60`, a test PlayerStart should be
+  placed above roughly Z=2000 cm, with additional clearance for the capsule.
+- Near collision is selected by distance to the chunk bounds rather than only
+  to the chunk centre, and the procedural mesh explicitly blocks query/physics.
+
 ## Coordinate contract
 
 - Unreal positions are in centimetres.
