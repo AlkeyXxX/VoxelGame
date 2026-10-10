@@ -17,17 +17,18 @@ The rewrite lives beside the current world and does not replace the legacy
    separate CPU mesh for one chunk.
 4. Unreal automation tests cover table validity, repeated density sampling,
    octree balance/determinism, face-mask coverage, all six face flags, combined
-   face masks, and a flat coarse/fine seam fixture.
+   face masks, flat/sloped coarse-fine seams, normal continuity and tangent validity.
 5. An opt-in actor pair now drives the new path: an octree world manager plus
    async chunk actors, bounded parallel builds, height-envelope culling, and
    deferred retirement of old chunks until the requested set is ready.
-6. The octree window moves in half-root-size increments around the followed
-   actor. Its 50% overlap preserves world-aligned chunk keys and provides new
-   terrain before old chunks are retired; the previous implementation stopped
-   generating terrain at the fixed root cube boundary.
-7. Vertex-normal sampling scales with LOD, blending to the finer neighbour's
-   sampling distance at transition faces. UVs use dominant-axis projection to
-   reduce texture stretching on steep surfaces.
+6. The octree window slides horizontally in half-root-size increments around
+   the followed actor, with 50% overlap. Its vertical range remains anchored so
+   upward flight does not move terrain out of the active window; absolute chunk
+   keys allow overlapping meshes to be reused.
+7. Vertex-normal sampling scales with LOD and blends to the finer neighbour's
+   sampling distance at transition faces. Stable world-XY UVs prevent per-vertex
+   projection-axis changes, and per-vertex tangents are generated for the chosen
+   UVs to support normal-mapped terrain materials.
 
 ## Important current limitations
 
@@ -35,8 +36,11 @@ The new mesher and octree selector are attached to a separate, opt-in terrain
 manager that follows a pawn or configured actor and streams chunks as the view
 moves. It uses an async build limit, rejects stale build results, and keeps
 old chunks until the requested set is ready. The root is a rolling finite
-window, not an unbounded world at once: it shifts by half its width and keeps
-50% overlap to avoid stopping terrain generation at the original root boundary.
+window, not an unbounded world at once: it shifts horizontally by half its width
+and keeps 50% overlap to avoid stopping terrain generation at the original root
+boundary. Its vertical interval remains anchored to `RootWorldCenter.Z`. The
+default maximum LOD is 6 (up to 64 m between samples with a 1 m base voxel) to
+reduce distant faceting compared with the former 128 m maximum step.
 It has not been compiled or run in UE4.27 in this environment, so automation
 tests are added but **not verified in Unreal Editor yet**. No claim is made that
 all seams, collision contacts, edge/corner junctions, material boundaries or
@@ -67,9 +71,15 @@ winding separately from the stored outward normals.
   high-frequency shading noise on triangles that no longer represent those
   small details. At coarse/fine boundaries it blends to the fine neighbour's
   normal-sampling distance to reduce visible lighting discontinuity.
-- UVs keep world-scale tiling but choose XY/XZ/YZ projection based on the
-  outward normal. This reduces stretching on steep slopes; it is not full
-  triplanar blending, and distant mip-filtered textures can still look softer.
+- UVs use stable world-XY projection at a fixed world scale across cells, LODs
+  and chunk seams. This suits the height-field terrain and avoids skew from
+  switching projection axes at individual vertices. It may stretch on near-
+  vertical cliffs; use a triplanar material for cliffs/caves. Distant textures
+  can still soften naturally because of mip filtering and screen-space limits.
+- Tangents are now calculated from the generated UVs instead of passing an empty
+  tangent array to the procedural mesh component, so normal-map lighting has a
+  defined tangent basis. The UE4.27 editor build and material-specific result
+  still need to be checked locally.
 - `BaseHeight=900` places the average surface at about Z=900 cm. With
   `HeightAmplitude=850` and `DetailAmplitude=60`, a test PlayerStart should be
   placed above roughly Z=2000 cm, with additional clearance for the capsule.
@@ -95,6 +105,8 @@ The player Blueprint still has legacy block-interaction logic that expects an `A
 - `OriginCells` in octree nodes is an absolute LOD-0 cell-lattice coordinate.
 - `RootOriginCells` marks the active rolling window's lower corner; balancing
   and face-neighbour lookup are relative to that root but chunk keys stay absolute.
+- The rolling window recentres in XY only; its Z interval stays fixed around
+  `RootWorldCenter.Z` so vertical flight does not discard the ground surface.
 - Each coarse transition face uses 3x3 high-resolution samples per transition
   cell; the four far-face samples share the corner values but are offset into
   the coarse chunk by half a coarse cell.
