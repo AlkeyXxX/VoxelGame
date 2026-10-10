@@ -53,7 +53,7 @@ namespace
         0.05f, 0.35f, 0.85f, 1.0f);
 
     bool FindRoadSurfaceHeightNear(
-        const TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe>& RoadSurfaceHeights,
+        const TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe>& RoadSurfaceHeights,
         int32 WorldX,
         int32 WorldY,
         int32 SearchRadius,
@@ -101,7 +101,7 @@ namespace
         const FVoxelWorldGenerator& Generator,
         int32 WorldX,
         int32 WorldY,
-        const TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe>& RoadSurfaceHeights,
+        const TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe>& RoadSurfaceHeights,
         int32 RoadSearchRadius)
     {
         const float TerrainHeight =
