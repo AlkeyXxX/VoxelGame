@@ -737,11 +737,11 @@ private:
     float DebugFlyVerticalInput = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Debug Fly",
-        meta=(ClampMin="100.0", ClampMax="100000.0"))
+        meta=(AllowPrivateAccess="true", ClampMin="100.0", ClampMax="100000.0"))
     float DebugFlySpeed = 6000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Debug Fly",
-        meta=(ClampMin="100.0", ClampMax="200000.0"))
+        meta=(AllowPrivateAccess="true", ClampMin="100.0", ClampMax="200000.0"))
     float DebugFlyBoostSpeed = 18000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Debug Fly",
