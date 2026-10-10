@@ -44,15 +44,17 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Flat top normals point out of solid"), Normal.Z > 0.5f);
 	}
 
-	// The generated triangle winding must agree with the outward normals. This
-	// is important for front-face rendering and triangle-mesh collision.
+	// The stored shading normals point outward/upward. Unreal's procedural
+	// mesh front-face convention requires the opposite cross-product direction
+	// for the indices; otherwise the top is culled and one-sided collision can
+	// behave as if the surface were inverted.
 	for (int32 Index = 0; Index + 2 < RegularMesh.Triangles.Num(); Index += 3)
 	{
 		const FVector& A = RegularMesh.Vertices[RegularMesh.Triangles[Index]];
 		const FVector& B = RegularMesh.Vertices[RegularMesh.Triangles[Index + 1]];
 		const FVector& C = RegularMesh.Vertices[RegularMesh.Triangles[Index + 2]];
 		const FVector FaceNormal = FVector::CrossProduct(B - A, C - A);
-		TestTrue(TEXT("Flat terrain triangle winding faces upward"), FaceNormal.Z > 0.0f);
+		TestTrue(TEXT("Flat terrain triangle indices use UE front-face winding"), FaceNormal.Z < 0.0f);
 	}
 
 	const uint8 FaceMasksToTest[] =
