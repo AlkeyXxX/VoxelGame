@@ -968,8 +968,13 @@ void FVoxelMarchingCubesMesher::Build(
                 Output.RoadVertices.Add(Output.Vertices[SourceIndex]);
                 Output.RoadNormals.Add(Output.Normals.IsValidIndex(SourceIndex)
                     ? Output.Normals[SourceIndex] : FVector::UpVector);
-                Output.RoadUV0.Add(Output.UV0.IsValidIndex(SourceIndex)
-                    ? Output.UV0[SourceIndex] : FVector2D::ZeroVector);
+                // Road tiling is independent from the terrain master material.
+                // Positions here are chunk-local centimeters, so convert back to
+                // block space before applying the road-specific repeat density.
+                const FVector& RoadPosition = Output.Vertices[SourceIndex];
+                Output.RoadUV0.Add(FVector2D(
+                    (RoadPosition.X / FMath::Max(Input.VoxelSize, 1.0f)) * Input.RoadUVScalePerBlock,
+                    (RoadPosition.Y / FMath::Max(Input.VoxelSize, 1.0f)) * Input.RoadUVScalePerBlock));
                 // A real road material should show its albedo without being
                 // tinted by the old biome block color.
                 Output.RoadVertexColors.Add(FLinearColor::White);
