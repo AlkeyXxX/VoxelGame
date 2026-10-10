@@ -794,14 +794,19 @@ void FVoxelTerrainLODMesher::Build(
              */
             if (bRenderCell)
             {
-                // Match the upward-facing vertex normals (CCW winding in XY).
+                /*
+                 * UE's ProceduralMesh convention for these world-space XY
+                 * vertices expects the opposite winding from a right-handed
+                 * cross product. Keep front faces visible from above; normals
+                 * are accumulated separately below and point upward.
+                 */
                 Output.Triangles.Add(I00);
-                Output.Triangles.Add(I10);
                 Output.Triangles.Add(I11);
+                Output.Triangles.Add(I10);
 
                 Output.Triangles.Add(I00);
-                Output.Triangles.Add(I11);
                 Output.Triangles.Add(I01);
+                Output.Triangles.Add(I11);
             }
 
             /* Accumulate upward-facing normals for the matching triangle winding. */
@@ -960,12 +965,13 @@ void FVoxelTerrainLODMesher::Build(
             Output.RoadVertexColors.Add(FLinearColor::White);
             Output.RoadVertexColors.Add(FLinearColor::White);
 
+            // Match the visible/front-face winding used by the terrain mesh.
             Output.RoadTriangles.Add(BaseIndex);
+            Output.RoadTriangles.Add(BaseIndex + 3);
             Output.RoadTriangles.Add(BaseIndex + 1);
-            Output.RoadTriangles.Add(BaseIndex + 3);
             Output.RoadTriangles.Add(BaseIndex);
-            Output.RoadTriangles.Add(BaseIndex + 3);
             Output.RoadTriangles.Add(BaseIndex + 2);
+            Output.RoadTriangles.Add(BaseIndex + 3);
         }
     }
 
@@ -1199,14 +1205,14 @@ void FVoxelTerrainLODMesher::Build(
                     WorldX0,
                     WorldY1);
 
-            // Water top uses the same upward-facing winding as terrain.
+            // Match the established terrain front-face winding.
             Output.WaterTriangles.Add(V00);
-            Output.WaterTriangles.Add(V10);
             Output.WaterTriangles.Add(V11);
+            Output.WaterTriangles.Add(V10);
 
             Output.WaterTriangles.Add(V00);
-            Output.WaterTriangles.Add(V11);
             Output.WaterTriangles.Add(V01);
+            Output.WaterTriangles.Add(V11);
         }
     }
 
