@@ -254,24 +254,32 @@ bool FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest::RunTest(const FString& Para
 
 	TSet<FIntPoint> CoarseSeam;
 	TSet<FIntPoint> FineSeam;
+	TMap<FIntPoint, FVector> CoarseSeamNormals;
+	TMap<FIntPoint, FVector> FineSeamNormals;
 
-	for (const FVector& Vertex : CoarseMesh.Vertices)
+	for (int32 Index = 0; Index < CoarseMesh.Vertices.Num(); ++Index)
 	{
+		const FVector& Vertex = CoarseMesh.Vertices[Index];
 		if (FMath::IsNearlyEqual(Vertex.X, 800.0f, 0.01f))
 		{
-			CoarseSeam.Add(FIntPoint(
+			const FIntPoint Key(
 				FMath::RoundToInt(Vertex.Y * 10.0f),
-				FMath::RoundToInt(Vertex.Z * 10.0f)));
+				FMath::RoundToInt(Vertex.Z * 10.0f));
+			CoarseSeam.Add(Key);
+			CoarseSeamNormals.Add(Key, CoarseMesh.Normals[Index]);
 		}
 	}
 
-	for (const FVector& Vertex : FineMesh.Vertices)
+	for (int32 Index = 0; Index < FineMesh.Vertices.Num(); ++Index)
 	{
+		const FVector& Vertex = FineMesh.Vertices[Index];
 		if (FMath::IsNearlyZero(Vertex.X, 0.01f))
 		{
-			FineSeam.Add(FIntPoint(
+			const FIntPoint Key(
 				FMath::RoundToInt(Vertex.Y * 10.0f),
-				FMath::RoundToInt(Vertex.Z * 10.0f)));
+				FMath::RoundToInt(Vertex.Z * 10.0f));
+			FineSeam.Add(Key);
+			FineSeamNormals.Add(Key, FineMesh.Normals[Index]);
 		}
 	}
 
@@ -287,6 +295,17 @@ bool FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest::RunTest(const FString& Para
 	{
 		TestTrue(TEXT("Each fine boundary vertex must exist on the coarse transition mesh"),
 			CoarseSeam.Contains(Point));
+	}
+
+	for (const TPair<FIntPoint, FVector>& Pair : CoarseSeamNormals)
+	{
+		const FVector* FineNormal = FineSeamNormals.Find(Pair.Key);
+		if (FineNormal)
+		{
+			TestTrue(
+				TEXT("LOD-aware normal smoothing must keep shared coarse/fine seam normals aligned"),
+				Pair.Value.Equals(*FineNormal, 0.001f));
+		}
 	}
 
 	return true;
