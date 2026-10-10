@@ -388,14 +388,21 @@ uint8 FVoxelMarchingCubesMesher::GetRepresentativeBlock(
     int32 Z)
 {
     bool bFound = false;
+    bool bBestRoadSurface = false;
     int32 BestZ = TNumericLimits<int32>::Lowest();
     uint8 BestBlock = uint8(EVoxelBlock::Stone);
+    const int32 Side = Input.Size + 2;
+    const bool bHasRoadSurfaceHints =
+        Input.TerrainSurfaceBlocks.Num() == Side * Side &&
+        Input.TerrainSurfaceHeights.Num() == Side * Side;
 
     /*
      * The MC vertex lies on the boundary between air and solid.
      * Search downward from that boundary so the surface material comes
      * from the actual solid layer instead of the air cell above it.
-     * A small X/Y neighborhood also handles sloped surfaces cleanly.
+     * At equal height, explicit road-surface hints beat neighboring grass;
+     * without this tie-breaker, the 3x3 material search painted most roads
+     * as grass even though their voxel columns had been stamped correctly.
      */
     for (int32 DZ = 0; DZ >= -2; --DZ)
     {
@@ -403,28 +410,50 @@ uint8 FVoxelMarchingCubesMesher::GetRepresentativeBlock(
         {
             for (int32 DX = -1; DX <= 1; ++DX)
             {
+                const int32 SampleX = X + DX;
+                const int32 SampleY = Y + DY;
                 const int32 SampleZ = Z + DZ;
 
                 const uint8 Block =
                     GetBlock(
                         Input,
-                        X + DX,
-                        Y + DY,
+                        SampleX,
+                        SampleY,
                         SampleZ);
 
-                if (!IsVoxelSolid(
-                    static_cast<EVoxelBlock>(Block)))
+                if (!IsVoxelSolid(static_cast<EVoxelBlock>(Block)))
                 {
                     continue;
+                }
+
+                bool bRoadSurfaceCandidate = false;
+                if (bHasRoadSurfaceHints &&
+                    SampleX >= -1 && SampleX <= Input.Size &&
+                    SampleY >= -1 && SampleY <= Input.Size)
+                {
+                    const int32 SurfaceIndex =
+                        (SampleX + 1) + (SampleY + 1) * Side;
+                    const uint8 SurfaceHint =
+                        Input.TerrainSurfaceBlocks[SurfaceIndex];
+
+                    bRoadSurfaceCandidate =
+                        SurfaceHint != uint8(EVoxelBlock::Air) &&
+                        Block == SurfaceHint &&
+                        SampleZ == FMath::RoundToInt(
+                            Input.TerrainSurfaceHeights[SurfaceIndex]);
                 }
 
                 if (!bFound ||
                     SampleZ > BestZ ||
                     (SampleZ == BestZ &&
+                     bRoadSurfaceCandidate && !bBestRoadSurface) ||
+                    (SampleZ == BestZ &&
+                     bRoadSurfaceCandidate == bBestRoadSurface &&
                      GetSurfaceMaterialPriority(Block) >
                          GetSurfaceMaterialPriority(BestBlock)))
                 {
                     bFound = true;
+                    bBestRoadSurface = bRoadSurfaceCandidate;
                     BestZ = SampleZ;
                     BestBlock = Block;
                 }
