@@ -510,16 +510,16 @@ void FSVoxelTransvoxelMesher::Generate(
 				}
 
 				FVector CellVertices[12];
-				for (int32 V = 0; V < VertexCount; ++V)
+				for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
 				{
 					int32 A = 0;
 					int32 B = 0;
-					DecodeEdge(transitionVertexData[CaseCode][V], A, B);
+					DecodeEdge(transitionVertexData[CaseCode][VertexIndex], A, B);
 					const float Denominator = Samples[B] - Samples[A];
 					const float T = FMath::IsNearlyZero(Denominator)
 						? 0.5f
 						: FMath::Clamp((Settings.IsoLevel - Samples[A]) / Denominator, 0.0f, 1.0f);
-					CellVertices[V] = FMath::Lerp(SamplePositions[A], SamplePositions[B], T);
+					CellVertices[VertexIndex] = FMath::Lerp(SamplePositions[A], SamplePositions[B], T);
 				}
 
 				AppendCellToMesh(
