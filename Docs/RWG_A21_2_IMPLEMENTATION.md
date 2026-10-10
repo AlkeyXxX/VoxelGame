@@ -61,7 +61,7 @@ F2 builds the road plan, smooths A* corners into short Catmull-Rom segments, fil
 ## Far-terrain LOD overhaul
 
 - The far terrain uses the same Marching Cubes iso-level crossing reconstructed from the same four neighbouring height columns at every tier. Matching grid nodes are deterministic between LOD rings; only horizontal triangulation density changes.
-- Terrain and water triangles now use upward-facing winding consistent with their normals. The far-water plane follows the same approximate top-surface height as the full-resolution terrain, and the nearest LOD water grid uses one-block sampling before coarsening to four blocks at distance.
+- Terrain and water triangles retain Unreal ProceduralMeshComponent's established front-face winding; terrain normals are accumulated upward separately. The far-water plane follows the same approximate top-surface height as the full-resolution terrain, and the nearest LOD water grid uses one-block sampling before coarsening to four blocks at distance.
 - Paved road columns are carried through a separate LOD road-material mask and rendered as a dedicated road-material section, so narrow roads no longer depend on a coarse terrain grid point landing inside the lane.
 - These are code-level corrections; UE 4.27 compilation and in-game LOD transition testing are still required.
 
