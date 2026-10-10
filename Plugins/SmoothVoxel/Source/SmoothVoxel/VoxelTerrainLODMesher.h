@@ -21,7 +21,7 @@ struct FVoxelTerrainLODBuildInput
     int32 SampleStep = 4;
 
     // Active road/shoulder surface heights let far LOD follow the same stamped terrain.
-    TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe> RoadSurfaceHeights;
+    TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe> RoadSurfaceHeights;
 
     int32 InnerRadiusChunks = 8;
     int32 OuterRadiusChunks = 16;
