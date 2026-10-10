@@ -139,7 +139,7 @@ bool FSmoothVoxelOctreeBalanceTest::RunTest(const FString& Parameters)
 	for (const uint8 FaceMask : FaceMasks)
 	{
 		bFoundAtLeastOneTransition |= FaceMask != 0;
-		TestEqual(TEXT("Only the six known face bits are used"), FaceMask & ~0x3Fu, 0);
+		TestTrue(TEXT("Only the six known face bits are used"), (FaceMask & 0xC0u) == 0u);
 	}
 	TestTrue(TEXT("View-dependent hierarchy should expose fine/coarse interfaces"), bFoundAtLeastOneTransition);
 
