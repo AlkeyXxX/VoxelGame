@@ -926,7 +926,7 @@ void FVoxelMarchingCubesMesher::Build(
     // the road material just because they sit beside the road.
     const int32 SurfaceSide = Input.Size + 2;
     const bool bHasRoadSurfaceHints =
-        Input.TerrainSurfaceBlocks.Num() == SurfaceSide * SurfaceSide &&
+        Input.TerrainRoadMaterialMask.Num() == SurfaceSide * SurfaceSide &&
         Input.TerrainSurfaceHeights.Num() == SurfaceSide * SurfaceSide;
     if (bHasRoadSurfaceHints && Output.Triangles.Num() >= 3)
     {
@@ -955,8 +955,8 @@ void FVoxelMarchingCubesMesher::Build(
 
                     const int32 SurfaceIndex =
                         (LocalX + 1) + (LocalY + 1) * SurfaceSide;
-                    if (!Input.TerrainSurfaceBlocks.IsValidIndex(SurfaceIndex) ||
-                        Input.TerrainSurfaceBlocks[SurfaceIndex] == uint8(EVoxelBlock::Air))
+                    if (!Input.TerrainRoadMaterialMask.IsValidIndex(SurfaceIndex) ||
+                        Input.TerrainRoadMaterialMask[SurfaceIndex] == 0)
                     {
                         continue;
                     }
