@@ -38,10 +38,11 @@ namespace
 	}
 
 	FVector SampleOutwardNormal(
-		const FVector& WorldPosition,
-		const FSVoxelGenerationSettings& Settings)
+			const FVector& WorldPosition,
+		const FSVoxelGenerationSettings& Settings,
+		float SampleStep)
 	{
-		const float H = 5.0f;
+		const float H = FMath::Max(5.0f, SampleStep);
 		const float Dx =
 			FSVoxelGenerator::SampleDensity(WorldPosition.X + H, WorldPosition.Y, WorldPosition.Z, Settings) -
 			FSVoxelGenerator::SampleDensity(WorldPosition.X - H, WorldPosition.Y, WorldPosition.Z, Settings);
@@ -170,6 +171,59 @@ namespace
 			RawPosition, TransitionFaceMask, FaceBit, ChunkSize, CoarseStep * 0.5f);
 	}
 
+	float ComputeNormalSampleStep(
+		const FVector& LocalPosition,
+		const FSVoxelGenerationSettings& Settings,
+		uint8 TransitionFaceMask,
+		float ChunkSize)
+	{
+		const float CoarseNormalStep = FMath::Max(5.0f, Settings.VoxelSize * 0.5f);
+		if (TransitionFaceMask == 0)
+		{
+			return CoarseNormalStep;
+		}
+
+		// Share the finer neighbour's normal sampling distance at the seam,
+		// then blend towards the coarse LOD scale over one coarse cell.
+		float DistanceToTransitionFace = TNumericLimits<float>::Max();
+		if (TransitionFaceMask & SVoxelTransitionFace_NegativeX)
+		{
+			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, LocalPosition.X));
+		}
+		if (TransitionFaceMask & SVoxelTransitionFace_PositiveX)
+		{
+			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, ChunkSize - LocalPosition.X));
+		}
+		if (TransitionFaceMask & SVoxelTransitionFace_NegativeY)
+		{
+			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, LocalPosition.Y));
+		}
+		if (TransitionFaceMask & SVoxelTransitionFace_PositiveY)
+		{
+			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, ChunkSize - LocalPosition.Y));
+		}
+		if (TransitionFaceMask & SVoxelTransitionFace_NegativeZ)
+		{
+			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, LocalPosition.Z));
+		}
+		if (TransitionFaceMask & SVoxelTransitionFace_PositiveZ)
+		{
+			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, ChunkSize - LocalPosition.Z));
+		}
+
+		if (DistanceToTransitionFace == TNumericLimits<float>::Max())
+		{
+			return CoarseNormalStep;
+		}
+
+		const float FineNormalStep = FMath::Max(5.0f, Settings.VoxelSize * 0.25f);
+		const float Blend = FMath::Clamp(
+			DistanceToTransitionFace / FMath::Max(1.0f, Settings.VoxelSize),
+			0.0f,
+			1.0f);
+		return FMath::Lerp(FineNormalStep, CoarseNormalStep, Blend);
+	}
+
 	void DecodeEdge(uint16 EdgeCode, int32& OutSampleA, int32& OutSampleB)
 	{
 		// The low byte stores the endpoint indices; the high byte is the
@@ -185,6 +239,8 @@ namespace
 		int32 TriangleCount,
 		bool bFlipWinding,
 		const FSVoxelGenerationSettings& Settings,
+		uint8 TransitionFaceMask,
+		float ChunkSize,
 		FSVoxelMeshData& OutMesh)
 	{
 		if (VertexCount <= 0 || TriangleCount <= 0)
@@ -198,11 +254,37 @@ namespace
 
 		for (int32 I = 0; I < VertexCount; ++I)
 		{
-			const FVector WorldPosition = Settings.ChunkWorldOrigin + CellLocalVertices[I];
-			CellNormals[I] = SampleOutwardNormal(WorldPosition, Settings);
-			OutMesh.Vertices.Add(CellLocalVertices[I]);
+			const FVector LocalPosition = CellLocalVertices[I];
+			const FVector WorldPosition = Settings.ChunkWorldOrigin + LocalPosition;
+			const float NormalSampleStep = ComputeNormalSampleStep(
+				LocalPosition, Settings, TransitionFaceMask, ChunkSize);
+			CellNormals[I] = SampleOutwardNormal(WorldPosition, Settings, NormalSampleStep);
+			OutMesh.Vertices.Add(LocalPosition);
 			OutMesh.Normals.Add(CellNormals[I]);
-			OutMesh.UV0.Add(FVector2D(WorldPosition.X * 0.0005f, WorldPosition.Y * 0.0005f));
+
+			// Dominant-axis projection preserves XY mapping on terrain tops but
+			// projects near-vertical rock surfaces onto their own plane.
+			const FVector AbsNormal = CellNormals[I].GetAbs();
+			FVector2D UV;
+			if (AbsNormal.Z >= AbsNormal.X && AbsNormal.Z >= AbsNormal.Y)
+			{
+				UV = FVector2D(
+					WorldPosition.X,
+					CellNormals[I].Z >= 0.0f ? WorldPosition.Y : -WorldPosition.Y);
+			}
+			else if (AbsNormal.X >= AbsNormal.Y)
+			{
+				UV = FVector2D(
+					CellNormals[I].X >= 0.0f ? WorldPosition.Y : -WorldPosition.Y,
+					WorldPosition.Z);
+			}
+			else
+			{
+				UV = FVector2D(
+					CellNormals[I].Y >= 0.0f ? WorldPosition.X : -WorldPosition.X,
+					WorldPosition.Z);
+			}
+			OutMesh.UV0.Add(UV * 0.0005f);
 		}
 
 		for (int32 I = 0; I < TriangleCount; ++I)
@@ -378,6 +460,7 @@ void FSVoxelTransvoxelMesher::Generate(
 	OutMesh.Normals.Reserve(CellsPerAxis * CellsPerAxis * 6);
 	OutMesh.UV0.Reserve(CellsPerAxis * CellsPerAxis * 6);
 	OutMesh.Triangles.Reserve(CellsPerAxis * CellsPerAxis * 12);
+	const float ChunkSize = static_cast<float>(CellsPerAxis) * VoxelSize;
 
 	// Generate regular cells at the selected LOD. Transition cells are emitted
 	// on coarser faces adjacent to finer leaves, as identified by the octree.
@@ -427,7 +510,6 @@ void FSVoxelTransvoxelMesher::Generate(
 					const float T = FMath::IsNearlyZero(Denominator)
 						? 0.5f
 						: FMath::Clamp((Settings.IsoLevel - Samples[A]) / Denominator, 0.0f, 1.0f);
-					const float ChunkSize = static_cast<float>(CellsPerAxis) * VoxelSize;
 					const FVector PA = AdjustBoundaryCorner(
 						FVector(
 							static_cast<float>(X + RegularCornerOffsets[A][0]) * VoxelSize,
@@ -445,7 +527,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					false, Settings, OutMesh);
+					false, Settings, TransitionFaceMask, ChunkSize, OutMesh);
 			}
 		}
 	}
@@ -536,7 +618,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					bTableFlip, Settings, OutMesh);
+					bTableFlip, Settings, TransitionFaceMask, ChunkSize, OutMesh);
 			}
 		}
 	}
