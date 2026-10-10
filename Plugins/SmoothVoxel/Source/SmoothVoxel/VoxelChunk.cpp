@@ -81,6 +81,11 @@ void AVoxelChunk::InitializeChunk(
     {
         Mesh->SetMaterial(1, WaterMaterial);
     }
+
+    if (RoadMaterial)
+    {
+        Mesh->SetMaterial(2, RoadMaterial);
+    }
 }
 
 
@@ -131,6 +136,17 @@ void AVoxelChunk::SetWaterMaterial(
     if (Mesh)
     {
         Mesh->SetMaterial(1, WaterMaterial);
+    }
+}
+
+void AVoxelChunk::SetRoadMaterial(
+    UMaterialInterface* InMaterial)
+{
+    RoadMaterial = InMaterial;
+
+    if (Mesh)
+    {
+        Mesh->SetMaterial(2, RoadMaterial ? RoadMaterial : Material);
     }
 }
 
@@ -701,76 +717,43 @@ void AVoxelChunk::ApplyMesh(
     uint32 Version,
     bool bEnableCollision)
 {
-    /*
-     * Если пока строился этот mesh,
-     * блок был изменён ещё раз,
-     * результат устарел.
-     */
-    if (Version != MeshGenerationVersion)
+    if (Version != MeshGenerationVersion || !Mesh)
     {
         return;
     }
 
+    // Slots: 0 = ordinary terrain, 1 = water, 2 = terrain-integrated roads.
+    Mesh->ClearAllMeshSections();
 
-    if (!Mesh)
-    {
-        return;
-    }
-
-
-    /*
-     * Полностью удаляем старую секцию.
-     */
-    Mesh->ClearMeshSection(0);
-    Mesh->ClearMeshSection(1);
-
-
-    /*
-     * Если чанк полностью пустой,
-     * оставляем его без geometry.
-     */
     if (Output.IsEmpty())
     {
         return;
     }
 
-
-    TArray<FLinearColor> VertexColors;
     TArray<FProcMeshTangent> Tangents;
 
-
-    /*
-     * Tangents здесь не нужны —
-     * Unreal сможет работать с normals.
-     */
-    Mesh->CreateMeshSection_LinearColor(
-        0,
-
-        Output.Vertices,
-        Output.Triangles,
-        Output.Normals,
-        Output.UV0,
-
-        TArray<FVector2D>(),
-        TArray<FVector2D>(),
-        TArray<FVector2D>(),
-
-        Output.VertexColors,
-
-        Tangents,
-
-        bEnableCollision);
-
-
-    if (Material)
+    if (Output.Vertices.Num() > 0 && Output.Triangles.Num() > 0)
     {
-        Mesh->SetMaterial(
+        Mesh->CreateMeshSection_LinearColor(
             0,
-            Material);
+            Output.Vertices,
+            Output.Triangles,
+            Output.Normals,
+            Output.UV0,
+            TArray<FVector2D>(),
+            TArray<FVector2D>(),
+            TArray<FVector2D>(),
+            Output.VertexColors,
+            Tangents,
+            bEnableCollision);
+
+        if (Material)
+        {
+            Mesh->SetMaterial(0, Material);
+        }
     }
 
-    if (Output.WaterVertices.Num() > 0 &&
-        Output.WaterTriangles.Num() > 0)
+    if (Output.WaterVertices.Num() > 0 && Output.WaterTriangles.Num() > 0)
     {
         Mesh->CreateMeshSection_LinearColor(
             1,
@@ -787,14 +770,32 @@ void AVoxelChunk::ApplyMesh(
 
         if (WaterMaterial)
         {
-            Mesh->SetMaterial(
-                1,
-                WaterMaterial);
+            Mesh->SetMaterial(1, WaterMaterial);
+        }
+    }
+
+    if (Output.RoadVertices.Num() > 0 && Output.RoadTriangles.Num() > 0)
+    {
+        Mesh->CreateMeshSection_LinearColor(
+            2,
+            Output.RoadVertices,
+            Output.RoadTriangles,
+            Output.RoadNormals,
+            Output.RoadUV0,
+            TArray<FVector2D>(),
+            TArray<FVector2D>(),
+            TArray<FVector2D>(),
+            Output.RoadVertexColors,
+            Tangents,
+            bEnableCollision);
+
+        UMaterialInterface* EffectiveRoadMaterial = RoadMaterial ? RoadMaterial : Material;
+        if (EffectiveRoadMaterial)
+        {
+            Mesh->SetMaterial(2, EffectiveRoadMaterial);
         }
     }
 }
-
-
 
 void AVoxelChunk::CopyXMinusStructure(TArray<uint8>& OutData) const
 {
