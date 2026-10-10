@@ -4125,6 +4125,27 @@ void AVoxelWorld::UpdateFarLOD(
         RWGRoadLODMaterialMask;
     const float LODRoadUVScalePerBlock = RWGRoadUVScalePerBlock;
 
+    /*
+     * Refresh the material slots on every update, not just when components
+     * are first created. This avoids a null/old road material persisting on
+     * far LOD components created before the RWG material was assigned.
+     */
+    UMaterialInterface* EffectiveFarRoadMaterial =
+        RWGRoadMaterial ? RWGRoadMaterial : Material;
+    UProceduralMeshComponent* FarMeshesForMaterials[] =
+    {
+        FarLOD1Mesh, FarLOD2Mesh, FarLOD3Mesh, FarLOD4Mesh
+    };
+    for (UProceduralMeshComponent* FarMesh : FarMeshesForMaterials)
+    {
+        if (FarMesh)
+        {
+            FarMesh->SetMaterial(0, Material);
+            FarMesh->SetMaterial(1, WaterMaterial);
+            FarMesh->SetMaterial(2, EffectiveFarRoadMaterial);
+        }
+    }
+
     const int32 LODWorldSizeX =
         WorldSizeX;
 
@@ -4291,9 +4312,10 @@ void AVoxelWorld::UpdateFarLOD(
      */
     /*
      * Keep mountain silhouettes and the broad terrain profile faithful at
-     * distance. Each ring uses a sampling step that doubles outward; the
-     * water surface has its own finer grid in FVoxelTerrainLODMesher.
-     * Exact shared generator heights keep borders aligned between rings.
+     * distance. Sampling is 1 / 2 / 4 / 4 blocks for LOD1-4: the farthest
+     * ring stays twice as detailed as the old step-8 mesh, and LOD3/4 share
+     * aligned vertices so they do not need a vertical transition morph.
+     * Water uses its own grid, capped at four blocks.
      */
     ScheduleLOD(
         FarLOD1Mesh,
@@ -4315,7 +4337,7 @@ void AVoxelWorld::UpdateFarLOD(
 
     ScheduleLOD(
         FarLOD4Mesh,
-        8,
+        4,
         LOD3Radius + 1,
         LOD4Radius);
 }

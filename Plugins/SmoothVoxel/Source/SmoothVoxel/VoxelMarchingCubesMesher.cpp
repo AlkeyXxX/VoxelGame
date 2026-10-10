@@ -961,8 +961,16 @@ void FVoxelMarchingCubesMesher::Build(
                         continue;
                     }
 
-                    const float RoadHeight = Input.TerrainSurfaceHeights[SurfaceIndex];
-                    if (FMath::Abs(BlockPosition.Z - RoadHeight) <= 0.85f)
+                    /*
+                     * TerrainSurfaceHeights stores the top block's base Z,
+                     * while the MC iso-surface is at the air/solid crossing
+                     * about one block above it. Comparing against the raw
+                     * block Z painted road material on trench walls/undersides
+                     * and left the actual road top in the terrain section.
+                     */
+                    const float RoadTopZ =
+                        Input.TerrainSurfaceHeights[SurfaceIndex] + 1.0f;
+                    if (FMath::Abs(BlockPosition.Z - RoadTopZ) <= 0.85f)
                     {
                         return true;
                     }

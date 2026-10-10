@@ -52,8 +52,8 @@ namespace
     const FLinearColor WaterColor(
         0.05f, 0.35f, 0.85f, 1.0f);
 
-    // Keep road influence identical at shared coordinates in every ring.
-    constexpr int32 LODRoadHeightSearchRadius = 4;
+    // Only exact stamped columns override terrain height, matching the full chunks.
+    constexpr int32 LODRoadHeightSearchRadius = 0;
     constexpr float MCSurfaceOffsetBlocks = 1.02f;
 
     bool FindRoadSurfaceHeightNear(
@@ -519,17 +519,17 @@ void FVoxelTerrainLODMesher::Build(
     }
 
     /*
-     * Morph each LOD's outer border onto the next coarser triangulation.
-     * The generator heights at shared grid nodes are already identical,
-     * but a fine edge contains extra vertices that would otherwise sit off
-     * the coarse edge and leave cracks. Within a narrow transition band,
-     * blend toward the coarse grid's exact piecewise-linear surface.
+     * Morph each finer LOD's outer border onto the next coarser triangulation.
+     * LOD1 (step 1) morphs to LOD2 (step 2), and LOD2 (step 2) morphs to
+     * LOD3 (step 4). LOD3 and LOD4 share step 4 and globally aligned grid
+     * points, so they meet directly without height pulling.
      *
      * The coarse interpolation uses the same I00-I11 diagonal as the mesh
      * below. The source heights are immutable here so processing order
      * cannot influence neighboring vertices.
      */
-    if (Input.SampleStep < 8 &&
+    // LOD3 and LOD4 both use step 4, so their aligned shared edge needs no extra morph.
+    if (Input.SampleStep < 4 &&
         CountX > 2 &&
         CountY > 2)
     {
