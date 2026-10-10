@@ -42,12 +42,16 @@ public:
 
 	bool IsConfiguredFor(
 		const FSVoxelOctreeNode& Node,
+		int32 InCellsPerAxis,
+		const FVector& ChunkOrigin,
 		uint8 TransitionFaceMask,
 		float VoxelSize,
 		bool bCreateCollision) const;
 
 	bool IsReadyFor(
 		const FSVoxelOctreeNode& Node,
+		int32 InCellsPerAxis,
+		const FVector& ChunkOrigin,
 		uint8 TransitionFaceMask,
 		float VoxelSize,
 		bool bCreateCollision) const;
@@ -190,6 +194,10 @@ private:
 	TMap<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*> ActiveChunks;
 	TSet<FSVoxelOctreeNode> DesiredNodes;
 	TMap<FSVoxelOctreeNode, uint8> DesiredFaceMasks;
+	TMap<FSVoxelOctreeNode, FVector> DesiredChunkOrigins;
+	TMap<FSVoxelOctreeNode, float> DesiredVoxelSizes;
+	TMap<FSVoxelOctreeNode, bool> DesiredCollisionFlags;
+	int32 DesiredCellsPerAxis = 32;
 
 	FVector SelectionCameraLocation = FVector::ZeroVector;
 	FVector LastCompletedCameraLocation = FVector::ZeroVector;

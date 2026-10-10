@@ -55,12 +55,16 @@ void ASmoothVoxelTransvoxelChunk::QueueBuild(
 
 bool ASmoothVoxelTransvoxelChunk::IsConfiguredFor(
 	const FSVoxelOctreeNode& Node,
+	int32 InCellsPerAxis,
+	const FVector& ChunkOrigin,
 	uint8 TransitionFaceMask,
 	float VoxelSize,
 	bool bCreateCollision) const
 {
 	return bHasNode &&
 		RequestedNode == Node &&
+		RequestedCellsPerAxis == InCellsPerAxis &&
+		GetActorLocation().Equals(ChunkOrigin, KINDA_SMALL_NUMBER) &&
 		RequestedFaceMask == TransitionFaceMask &&
 		FMath::IsNearlyEqual(RequestedVoxelSize, VoxelSize) &&
 		bRequestedCollision == bCreateCollision;
@@ -68,11 +72,14 @@ bool ASmoothVoxelTransvoxelChunk::IsConfiguredFor(
 
 bool ASmoothVoxelTransvoxelChunk::IsReadyFor(
 	const FSVoxelOctreeNode& Node,
+	int32 InCellsPerAxis,
+	const FVector& ChunkOrigin,
 	uint8 TransitionFaceMask,
 	float VoxelSize,
 	bool bCreateCollision) const
 {
-	return IsConfiguredFor(Node, TransitionFaceMask, VoxelSize, bCreateCollision) &&
+	return IsConfiguredFor(
+		Node, InCellsPerAxis, ChunkOrigin, TransitionFaceMask, VoxelSize, bCreateCollision) &&
 		!bBuildQueued &&
 		!bBuildInProgress &&
 		!bBuildFailed &&
@@ -303,8 +310,14 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 
 	TSet<FSVoxelOctreeNode> NewDesiredNodes;
 	TMap<FSVoxelOctreeNode, uint8> NewDesiredMasks;
+	TMap<FSVoxelOctreeNode, FVector> NewDesiredOrigins;
+	TMap<FSVoxelOctreeNode, float> NewDesiredVoxelSizes;
+	TMap<FSVoxelOctreeNode, bool> NewDesiredCollision;
 	NewDesiredNodes.Reserve(Leaves.Num());
 	NewDesiredMasks.Reserve(Leaves.Num());
+	NewDesiredOrigins.Reserve(Leaves.Num());
+	NewDesiredVoxelSizes.Reserve(Leaves.Num());
+	NewDesiredCollision.Reserve(Leaves.Num());
 
 	const float CollisionRadiusSq = FMath::Square(FMath::Max(0.0f, CollisionRadius));
 	const bool bForceBuild = bForceUpdate;
@@ -347,7 +360,8 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 			Chunk->SetTerrainMaterial(TerrainMaterial);
 		}
 
-		if (bForceBuild || !Chunk->IsConfiguredFor(Node, FaceMask, VoxelSize, bCollision))
+		if (bForceBuild || !Chunk->IsConfiguredFor(
+			Node, SelectionSettings.CellsPerAxis, ChunkOrigin, FaceMask, VoxelSize, bCollision))
 		{
 			const FSVoxelGenerationSettings GeneratorSettings =
 				MakeGenerationSettings(ChunkOrigin, VoxelSize);
@@ -362,10 +376,17 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 
 		NewDesiredNodes.Add(Node);
 		NewDesiredMasks.Add(Node, FaceMask);
+		NewDesiredOrigins.Add(Node, ChunkOrigin);
+		NewDesiredVoxelSizes.Add(Node, VoxelSize);
+		NewDesiredCollision.Add(Node, bCollision);
 	}
 
 	DesiredNodes = MoveTemp(NewDesiredNodes);
 	DesiredFaceMasks = MoveTemp(NewDesiredMasks);
+	DesiredChunkOrigins = MoveTemp(NewDesiredOrigins);
+	DesiredVoxelSizes = MoveTemp(NewDesiredVoxelSizes);
+	DesiredCollisionFlags = MoveTemp(NewDesiredCollision);
+	DesiredCellsPerAxis = SelectionSettings.CellsPerAxis;
 	SelectionCameraLocation = CameraLocation;
 	bApplyingSelection = true;
 	bForceUpdate = false;
@@ -437,9 +458,12 @@ bool ASmoothVoxelOctreeWorld::AreDesiredChunksReady() const
 			return false;
 		}
 
-		const float VoxelSize = FMath::Max(1.0f, BaseVoxelSize) * static_cast<float>(1 << Node.Lod);
-		const bool bCollision = Chunk->GetRequestedCollision();
-		if (!Chunk->IsReadyFor(Node, *FaceMask, VoxelSize, bCollision))
+		const FVector* ChunkOrigin = DesiredChunkOrigins.Find(Node);
+		const float* VoxelSize = DesiredVoxelSizes.Find(Node);
+		const bool* bCollision = DesiredCollisionFlags.Find(Node);
+		if (!ChunkOrigin || !VoxelSize || !bCollision ||
+			!Chunk->IsReadyFor(
+				Node, DesiredCellsPerAxis, *ChunkOrigin, *FaceMask, *VoxelSize, *bCollision))
 		{
 			return false;
 		}
