@@ -784,8 +784,8 @@ void FVoxelMarchingCubesMesher::Build(
 
                         Output.UV0.Add(
                             FVector2D(
-                                Position.X * 0.05f,
-                                Position.Y * 0.05f));
+                                Position.X * Input.UVScalePerBlock,
+                                Position.Y * Input.UVScalePerBlock));
 
                         Output.VertexColors.Add(
                             GetBlockColor(
@@ -917,5 +917,69 @@ void FVoxelMarchingCubesMesher::Build(
                 }
             }
         }
+    }
+
+    // Route road-surface triangles to a separate material section. They remain
+    // part of the same Marching Cubes geometry and share the exact surface
+    // positions/normals, but can now sample a real PBR road material.
+    const int32 SurfaceSide = Input.Size + 2;
+    const bool bHasRoadSurfaceHints =
+        Input.TerrainSurfaceBlocks.Num() == SurfaceSide * SurfaceSide &&
+        Input.TerrainSurfaceHeights.Num() == SurfaceSide * SurfaceSide;
+    if (bHasRoadSurfaceHints && Output.Triangles.Num() >= 3)
+    {
+        TArray<int32> TerrainTriangles;
+        TerrainTriangles.Reserve(Output.Triangles.Num());
+
+        for (int32 TriangleOffset = 0;
+             TriangleOffset + 2 < Output.Triangles.Num();
+             TriangleOffset += 3)
+        {
+            const int32 I0 = Output.Triangles[TriangleOffset];
+            const int32 I1 = Output.Triangles[TriangleOffset + 1];
+            const int32 I2 = Output.Triangles[TriangleOffset + 2];
+
+            const FVector TriangleCenter =
+                (Output.Vertices[I0] + Output.Vertices[I1] + Output.Vertices[I2]) /
+                (3.0f * FMath::Max(Input.VoxelSize, 1.0f));
+
+            const int32 LocalX = FMath::Clamp(
+                FMath::RoundToInt(TriangleCenter.X), -1, Input.Size);
+            const int32 LocalY = FMath::Clamp(
+                FMath::RoundToInt(TriangleCenter.Y), -1, Input.Size);
+            const int32 SurfaceIndex =
+                (LocalX + 1) + (LocalY + 1) * SurfaceSide;
+            const bool bRoadSurface =
+                Input.TerrainSurfaceBlocks.IsValidIndex(SurfaceIndex) &&
+                Input.TerrainSurfaceBlocks[SurfaceIndex] != uint8(EVoxelBlock::Air);
+
+            if (!bRoadSurface)
+            {
+                TerrainTriangles.Add(I0);
+                TerrainTriangles.Add(I1);
+                TerrainTriangles.Add(I2);
+                continue;
+            }
+
+            const int32 RoadStart = Output.RoadVertices.Num();
+            const int32 SourceIndices[3] = { I0, I1, I2 };
+            for (const int32 SourceIndex : SourceIndices)
+            {
+                Output.RoadVertices.Add(Output.Vertices[SourceIndex]);
+                Output.RoadNormals.Add(Output.Normals.IsValidIndex(SourceIndex)
+                    ? Output.Normals[SourceIndex] : FVector::UpVector);
+                Output.RoadUV0.Add(Output.UV0.IsValidIndex(SourceIndex)
+                    ? Output.UV0[SourceIndex] : FVector2D::ZeroVector);
+                // A real road material should show its albedo without being
+                // tinted by the old biome block color.
+                Output.RoadVertexColors.Add(FLinearColor::White);
+            }
+
+            Output.RoadTriangles.Add(RoadStart);
+            Output.RoadTriangles.Add(RoadStart + 1);
+            Output.RoadTriangles.Add(RoadStart + 2);
+        }
+
+        Output.Triangles = MoveTemp(TerrainTriangles);
     }
 }
