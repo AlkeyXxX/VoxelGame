@@ -347,6 +347,7 @@ void FVoxelMarchingCubesDataSnapshot::Build(
     OutData.Init(ChunkSize);
     OutData.VoxelSize = VoxelSize;
     OutData.UVScalePerBlock = UVScalePerBlock;
+    OutData.RoadUVScalePerBlock = RoadUVScalePerBlock;
     OutData.CancellationToken = CancellationToken;
 
     if (ChunkSize <= 0)
@@ -1254,8 +1255,8 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
                         DistanceAlongRoad += FVector2D(
                             Center.X - Prev.X, Center.Y - Prev.Y).Size();
                     }
-                    const float V = DistanceAlongRoad * TerrainUVScalePerBlock;
-                    const float UAcrossRoad = WidthBlocks * TerrainUVScalePerBlock;
+                    const float V = DistanceAlongRoad * RWGRoadUVScalePerBlock;
+                    const float UAcrossRoad = WidthBlocks * RWGRoadUVScalePerBlock;
 
                     Vertices.Add(Left);
                     Vertices.Add(Right);
@@ -2615,6 +2616,7 @@ void AVoxelWorld::CaptureMarchingCubesDataSnapshot(
     OutSnapshot.BeachWidth = BeachWidth;
     OutSnapshot.VoxelSize = VoxelSize;
     OutSnapshot.UVScalePerBlock = TerrainUVScalePerBlock;
+    OutSnapshot.RoadUVScalePerBlock = RWGRoadUVScalePerBlock;
     OutSnapshot.CancellationToken.Reset();
     OutSnapshot.ChunkModifications.Reset();
 
