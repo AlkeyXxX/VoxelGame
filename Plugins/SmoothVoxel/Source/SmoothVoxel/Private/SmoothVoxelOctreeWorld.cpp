@@ -173,7 +173,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			TArray<FVector2D>(),
 			TArray<FVector2D>(),
 			TArray<FLinearColor>(),
-			TArray<FProcMeshTangent>(),
+			Data.Tangents,
 			bCreateCollision);
 	}
 
