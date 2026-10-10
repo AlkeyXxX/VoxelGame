@@ -220,4 +220,76 @@ bool FSmoothVoxelTransvoxelSlopedFacesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest,
+	"SmoothVoxel.Transvoxel.SlopedCoarseFineSeam",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest::RunTest(const FString& Parameters)
+{
+	// A sloped height field makes the paired transition samples differ if the
+	// four half-resolution values are incorrectly resampled at their offset
+	// positions. On the outer boundary, the coarse transition contour must
+	// match the fine chunk's regular-mesh contour.
+	FSVoxelGenerationSettings CoarseSettings;
+	CoarseSettings.ChunkWorldOrigin = FVector::ZeroVector;
+	CoarseSettings.BaseHeight = 200.0f;
+	CoarseSettings.HeightAmplitude = 120.0f;
+	CoarseSettings.DetailAmplitude = 30.0f;
+	CoarseSettings.NoiseScale = 0.0008f;
+	CoarseSettings.DetailScale = 0.0006f;
+	CoarseSettings.BottomDepth = 2000.0f;
+	CoarseSettings.bEnableCaves = false;
+	CoarseSettings.IsoLevel = 0.0f;
+
+	FSVoxelMeshData CoarseMesh;
+	FSVoxelTransvoxelMesher::Generate(
+		CoarseSettings, 4, 200.0f, SVoxelTransitionFace_PositiveX, CoarseMesh);
+
+	FSVoxelGenerationSettings FineSettings = CoarseSettings;
+	FineSettings.ChunkWorldOrigin = FVector(800.0f, 0.0f, 0.0f);
+
+	FSVoxelMeshData FineMesh;
+	FSVoxelTransvoxelMesher::Generate(FineSettings, 8, 100.0f, 0, FineMesh);
+
+	TSet<FIntPoint> CoarseSeam;
+	TSet<FIntPoint> FineSeam;
+
+	for (const FVector& Vertex : CoarseMesh.Vertices)
+	{
+		if (FMath::IsNearlyEqual(Vertex.X, 800.0f, 0.01f))
+		{
+			CoarseSeam.Add(FIntPoint(
+				FMath::RoundToInt(Vertex.Y * 10.0f),
+				FMath::RoundToInt(Vertex.Z * 10.0f)));
+		}
+	}
+
+	for (const FVector& Vertex : FineMesh.Vertices)
+	{
+		if (FMath::IsNearlyZero(Vertex.X, 0.01f))
+		{
+			FineSeam.Add(FIntPoint(
+				FMath::RoundToInt(Vertex.Y * 10.0f),
+				FMath::RoundToInt(Vertex.Z * 10.0f)));
+		}
+	}
+
+	TestTrue(TEXT("Sloped interface must contain a nonempty contour on the shared face"),
+		CoarseSeam.Num() >= 3 && FineSeam.Num() >= 3);
+
+	for (const FIntPoint& Point : CoarseSeam)
+	{
+		TestTrue(TEXT("Each coarse transition boundary vertex must exist on the fine mesh"),
+			FineSeam.Contains(Point));
+	}
+	for (const FIntPoint& Point : FineSeam)
+	{
+		TestTrue(TEXT("Each fine boundary vertex must exist on the coarse transition mesh"),
+			CoarseSeam.Contains(Point));
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
