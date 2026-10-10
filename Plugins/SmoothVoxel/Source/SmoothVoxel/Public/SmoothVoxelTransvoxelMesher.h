@@ -5,11 +5,12 @@
 #include "SmoothVoxelTypes.h"
 
 /**
- * Candidate regular/transition cell mesher for the separate smooth terrain path.
+ * Experimental regular/transition cell mesher for the separate smooth terrain path.
  *
- * This backend uses an independently derived 0BSD Transvoxel-style cell table
- * set. It is intentionally separate from the existing classic-MC prototype
- * until visual, seam, collision and performance qualification is complete.
+ * This backend uses Eric Lengyel's official Transvoxel lookup tables under the MIT
+ * license. The tables are kept in a separate translation-unit include with the
+ * upstream copyright notice and license. Runtime integration still needs seam,
+ * collision, and performance qualification.
  */
 class SMOOTHVOXEL_API FSVoxelTransvoxelMesher
 {
@@ -24,6 +25,9 @@ public:
 	 *
 	 * Output vertices are local to Settings.ChunkWorldOrigin.
 	 */
+	/** Exhaustively sanity-checks all 256 regular and 512 transition table cases. */
+	static bool ValidateLookupTables();
+
 	static void Generate(
 		const FSVoxelGenerationSettings& Settings,
 		int32 CellsPerAxis,

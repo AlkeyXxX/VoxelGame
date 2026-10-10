@@ -1,61 +1,59 @@
 # Smooth voxel terrain LOD rewrite (UE 4.27)
 
-## Scope of this first milestone
+## Scope
 
-The new code lives beside the existing block-based world and does not change
-its generation, block editing, biome selection, roads, or SaveGame behaviour.
+The rewrite lives beside the current world and does not replace the legacy
+`AVoxelWorld` generator, block editing, roads, biome rules, or SaveGame path.
 
-The repository already contains a CPU Marching Cubes prototype in
-Plugins/SmoothVoxel/Source/SmoothVoxel. The legacy AVoxelWorld path still uses
-block-face meshing, and the repository did not contain a connected octree
-streamer or a Transvoxel transition-mesh implementation.
+## Implemented milestones
 
-The first two milestones add a public scalar-density sampling entry point, an
-independent view-dependent octree leaf selector with a 2:1 neighbour rule, a
-transition-face mask builder, and a candidate regular/transition cell mesher.
-The mesher emits a mesh for one chunk from the shared world-space density field.
+1. `FSVoxelGenerator::SampleDensity` exposes the existing signed scalar field
+   in world coordinates, giving all LODs one source of terrain shape.
+2. `FSVoxelOctreeSelector` selects view-dependent leaves, enforces 2:1
+   neighbour balance, obeys a leaf budget, and builds per-leaf transition-face
+   masks.
+3. `FSVoxelTransvoxelMesher` uses Eric Lengyel's official regular and
+   transition lookup tables, under the included MIT license, and emits a
+   separate CPU mesh for one chunk.
+4. Unreal automation tests cover table validity, repeated density sampling,
+   octree balance and determinism, face masks, and a flat-terrain fixture.
 
-## Important limit
+## Important current limitations
 
-The selector does not build or draw transition meshes. A 2:1-balanced octree
-by itself does not close cracks between surfaces sampled at different
-resolutions. Do not switch the current world to mixed-LOD rendering until the
-transition-cell mesher is implemented and the six face orientations, edges,
-corners, winding, normals and deterministic rebuilds have passed tests.
+The new mesher and octree selector are not yet attached to a terrain manager
+that streams chunks as the player moves. They have not been compiled or run in
+UE4.27 in this environment, so the automation tests are added but **not
+verified in Unreal Editor yet**. No claim is made that all seams, collision
+contacts, edge/corner junctions, material boundaries or real-world performance
+are already correct. The legacy gameplay path remains unchanged as a fallback.
+
+The transition table encodes topology for a 2:1 resolution change. A balanced
+octree does not by itself make a crack-free surface; the runtime manager must
+derive correct face masks, keep a consistent world-space density field, retain
+old meshes until replacements finish, and test edges/corners where multiple
+transition faces meet.
 
 ## Coordinate contract
 
 - Unreal positions are in centimetres.
-- LOD-0 cell size is BaseVoxelSize.
-- A node at LOD L has a side length of CellsPerAxis * (1 << L) base cells.
-- Node origins are integer coordinates on the LOD-0 sample lattice.
-- All LODs must sample the same signed density function at the same world
-  coordinates. Positive density means solid; negative density means air.
-- The current prototype density function represents a procedural heightfield
-  plus optional noise-carved caves. Roads, water, biome attributes and player
-  edits still need to be moved into the shared world-data contract before this
-  can replace the existing gameplay path.
+- The density function returns positive values for solid and negative for air.
+- `CellsPerAxis` is the number of regular cells across a chunk.
+- `VoxelSize` is the world-space step at that chunk's LOD.
+- `OriginCells` in octree nodes is on the LOD-0 cell lattice.
+- Each coarse transition face uses 3x3 high-resolution samples per transition
+  cell; the four far-face samples share the corner values but are offset into
+  the coarse chunk by half a coarse cell.
+- Roads, water, biomes and player edits still need a shared density/attribute
+  contract before the new path can replace the old one.
 
-## First-pass acceptance tests
+## Next milestones
 
-1. BuildBalancedLeaves returns an empty result on invalid settings or when its
-   node budget prevents required 2:1 balancing.
-2. Every selected leaf lies on the root-aligned cell lattice.
-3. For every pair of leaves that share a face, their LOD difference is at most 1.
-4. Identical camera position and settings produce an identical leaf set.
-5. A follow-up renderer tests all six transition-face orientations and edge /
-   corner junctions against a shared density function.
-6. Unreal Editor validation verifies collision, biome/material output, edits,
-   save/load, streaming replacement, roads and world-scale performance.
-
-## Planned stages
-
-1. Shared density query and balanced octree selection (implemented).
-2. Candidate transition-cell mesher and exhaustive table-case automation tests (implemented, not run in UE4.27 here).
-3. Octree-driven chunk streaming with asynchronous generation, stale-result
-   rejection and safe mesh replacement.
-4. Visualize and validate all six transition faces, edges/corners, winding,
-   normals and collision in Unreal Editor.
-5. Integrate road/water/biome/edit data; keep the old world path as a fallback
-   until end-to-end validation passes.
-6. Benchmark 4 x 4 km first, then increase the configured bounds to 8 x 8 km.
+5. Add a dedicated octree terrain actor / manager with async mesh generation,
+   cancellation or stale-result rejection, safe replacement, and collision
+   updates; do not change `AVoxelWorld` yet.
+6. Validate all six face orientations and combined edge/corner transitions,
+   normals, winding, degenerates, deterministic rebuilds, collision and LOD
+   changes in Unreal Editor.
+7. Integrate roads/water/biome/material/edit persistence into the shared field.
+8. Benchmark 4 x 4 km first; only expand toward 8 x 8 km after chunk streaming,
+   memory use and frame-time have been measured.
