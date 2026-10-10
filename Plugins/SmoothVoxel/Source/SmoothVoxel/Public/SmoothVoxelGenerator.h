@@ -16,11 +16,11 @@ struct FSVoxelGenerationSettings
 	float BaseHeight = 900.0f;
 	float HeightAmplitude = 850.0f;
 
-	// IMPORTANT:
-	// At VoxelSize=100, do not use very high-frequency detail.
-	float NoiseScale = 0.0035f;
+	// Frequencies are in inverse centimetres. These defaults are sampled
+	// on a 100 cm grid; substantially higher values alias into sharp spikes.
+	float NoiseScale = 0.0008f;
 
-	float DetailScale = 0.0050f;
+	float DetailScale = 0.0006f;
 	float DetailAmplitude = 60.0f;
 
 	// Solid bottom
