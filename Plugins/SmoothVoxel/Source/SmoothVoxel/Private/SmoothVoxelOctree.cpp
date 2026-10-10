@@ -164,55 +164,61 @@ namespace
 			const int32 Span = Node.GetSpanInBaseCells(Settings.CellsPerAxis);
 
 			for (const FIntVector& Direction : Directions)
+		{
+			const int32 TangentOffsets[2] = { Span / 4, (Span * 3) / 4 };
+
+			// At the boundary between two octree levels a face can overlap
+			// several leaves. Probe all four quadrants; a single centre probe
+			// can miss an unbalanced neighbour near a face edge.
+			for (int32 UIndex = 0; UIndex < 2; ++UIndex)
 			{
-				// Probe the centre cell immediately across the given face.
-				FIntVector Probe = Node.OriginCells + FIntVector(
-					Span / 2,
-					Span / 2,
-					Span / 2);
+				for (int32 VIndex = 0; VIndex < 2; ++VIndex)
+				{
+					FIntVector Probe = Node.OriginCells + FIntVector(
+						Span / 2,
+						Span / 2,
+						Span / 2);
 
-				if (Direction.X < 0)
-				{
-					Probe.X = Node.OriginCells.X - 1;
-				}
-				else if (Direction.X > 0)
-				{
-					Probe.X = Node.OriginCells.X + Span;
-				}
-				else if (Direction.Y < 0)
-				{
-					Probe.Y = Node.OriginCells.Y - 1;
-				}
-				else if (Direction.Y > 0)
-				{
-					Probe.Y = Node.OriginCells.Y + Span;
-				}
-				else if (Direction.Z < 0)
-				{
-					Probe.Z = Node.OriginCells.Z - 1;
-				}
-				else
-				{
-					Probe.Z = Node.OriginCells.Z + Span;
-				}
+					if (Direction.X != 0)
+					{
+						Probe.Y = Node.OriginCells.Y + TangentOffsets[UIndex];
+						Probe.Z = Node.OriginCells.Z + TangentOffsets[VIndex];
+						Probe.X = Direction.X < 0
+							? Node.OriginCells.X - 1
+							: Node.OriginCells.X + Span;
+					}
+					else if (Direction.Y != 0)
+					{
+						Probe.X = Node.OriginCells.X + TangentOffsets[UIndex];
+						Probe.Z = Node.OriginCells.Z + TangentOffsets[VIndex];
+						Probe.Y = Direction.Y < 0
+							? Node.OriginCells.Y - 1
+							: Node.OriginCells.Y + Span;
+					}
+					else
+					{
+						Probe.X = Node.OriginCells.X + TangentOffsets[UIndex];
+						Probe.Y = Node.OriginCells.Y + TangentOffsets[VIndex];
+						Probe.Z = Direction.Z < 0
+							? Node.OriginCells.Z - 1
+							: Node.OriginCells.Z + Span;
+					}
 
-				FSVoxelOctreeNode Neighbour;
-				if (!FindLeafContainingCell(
-					Probe,
-					RootSpan,
-					Settings.CellsPerAxis,
-					Settings.MaxLod,
-					Lookup,
-					Neighbour))
-				{
-					continue;
-				}
-
-				if (Neighbour.Lod > Node.Lod + 1)
-				{
-					OutSplitSet.Add(Neighbour);
+					FSVoxelOctreeNode Neighbour;
+					if (FindLeafContainingCell(
+						Probe,
+						RootSpan,
+						Settings.CellsPerAxis,
+						Settings.MaxLod,
+						Lookup,
+						Neighbour) &&
+						Neighbour.Lod > Node.Lod + 1)
+					{
+						OutSplitSet.Add(Neighbour);
+					}
 				}
 			}
+		}
 		}
 
 		return true;
