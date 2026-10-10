@@ -63,7 +63,9 @@ winding separately from the stored outward normals.
 
 ## Transvoxel transition sample correctness
 
-Each of the 13 transition samples must evaluate the shared density field at its own world-space position. The four samples on the inward coarse layer are not interchangeable with the four corners on the boundary plane. Reusing the boundary values can distort the transition surface and contribute to patches or dark seams. The mesher now evaluates all 13 positions. A sloped-terrain automation test exercises the six transition directions and combined face masks; it still needs to be run in UE4.27.
+The official Transvoxel table requires paired scalar values to match across the two parallel faces of a transition cell: samples 0/9, 2/10, 6/11, and 8/12 have identical density values even though the latter four positions are offset into the coarse chunk by half a coarse cell. The mesher samples the nine full-resolution face values and copies those four paired corner values, as described in Eric Lengyel's Figure 4.16 and implementation notes. Resampling the inward points at their spatially offset coordinates violates the lookup table's assumptions and can create LOD-scaled patches, corner holes, and dark seams.
+
+Regression tests cover sloped density fields and a coarse/fine shared-face contour. These automation tests still need to be run in UE4.27.
 
 ## Legacy player Blueprint warning
 
