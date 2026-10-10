@@ -66,7 +66,7 @@ namespace
 
         SearchRadius = FMath::Clamp(SearchRadius, 0, 8);
         int32 BestDistanceSquared = MAX_int32;
-        int32 BestHeight = INDEX_NONE;
+        float BestHeight = -1.0f;
 
         for (int32 DY = -SearchRadius; DY <= SearchRadius; ++DY)
         {
@@ -79,7 +79,7 @@ namespace
                     continue;
                 }
 
-                if (const int32* Height =
+                if (const float* Height =
                     RoadSurfaceHeights->Find(FIntPoint(WorldX + DX, WorldY + DY)))
                 {
                     BestDistanceSquared = DistanceSquared;
@@ -88,12 +88,12 @@ namespace
             }
         }
 
-        if (BestHeight == INDEX_NONE)
+        if (BestHeight < 0.0f)
         {
             return false;
         }
 
-        OutHeight = static_cast<float>(BestHeight);
+        OutHeight = BestHeight;
         return true;
     }
 
