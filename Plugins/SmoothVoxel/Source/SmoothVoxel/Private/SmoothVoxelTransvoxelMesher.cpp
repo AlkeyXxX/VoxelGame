@@ -233,7 +233,12 @@ namespace
 			}
 
 			const FVector ExpectedNormal = (CellNormals[A] + CellNormals[B] + CellNormals[C]).GetSafeNormal();
-			if (FVector::DotProduct(FaceNormal, ExpectedNormal) < 0.0f)
+
+			// Unreal's front-face convention for procedural triangles is opposite
+			// to the conventional cross-product direction. Keep the supplied
+			// shading normals pointing outward, but wind the indices for UE's
+			// front-face culling and one-sided triangle-mesh collision.
+			if (FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f)
 			{
 				Swap(B, C);
 			}
