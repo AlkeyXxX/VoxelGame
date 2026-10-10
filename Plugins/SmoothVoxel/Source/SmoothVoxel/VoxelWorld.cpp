@@ -865,9 +865,19 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                     const float ShoulderAlpha = FMath::Clamp(
                         (FMath::Abs(Lateral) - HalfWidth) / ShoulderWidthBlocks,
                         0.0f, 1.0f);
+
+                    // Clamp every stamped column, not just the centerline. On
+                    // cross-slopes the edge of a wide road can otherwise remain
+                    // several blocks underground even when its center is visible.
+                    constexpr float MaxColumnCutBlocks = 2.0f;
+                    constexpr float MaxColumnFillBlocks = 1.0f;
+                    const float ColumnRoadSurfaceZ = FMath::Clamp(
+                        CenterSurfaceZ,
+                        static_cast<float>(NativeSurfaceZ) - MaxColumnCutBlocks,
+                        static_cast<float>(NativeSurfaceZ) + MaxColumnFillBlocks);
                     const float StampedHeight = bRoadSurface
-                        ? CenterSurfaceZ
-                        : FMath::Lerp(CenterSurfaceZ, static_cast<float>(NativeSurfaceZ), ShoulderAlpha);
+                        ? ColumnRoadSurfaceZ
+                        : FMath::Lerp(ColumnRoadSurfaceZ, static_cast<float>(NativeSurfaceZ), ShoulderAlpha);
                     const int32 SurfaceZ = FMath::Clamp(
                         FMath::RoundToInt(StampedHeight), 1, SafeWorldBlocksZ - 2);
 
@@ -1399,6 +1409,11 @@ bool AVoxelWorld::GenerateRWGLayoutAndExport()
                 {
                     Color = FColor(255, 150, 35);
                     Thickness = 6.0f;
+                }
+                else if (Road.Type == EVoxelRWGRoadType::Rural)
+                {
+                    Color = FColor(145, 100, 55);
+                    Thickness = 3.5f;
                 }
                 else if (Road.Type == EVoxelRWGRoadType::Local)
                 {
