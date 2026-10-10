@@ -478,17 +478,24 @@ void FSVoxelTransvoxelMesher::Generate(
 						FaceBit, TransitionFaceMask, U, V, CellsPerAxis, VoxelSize, I);
 				}
 
-				// Sample every point at its actual world-space location. Samples
-				// 9..12 lie one fine-grid step inside the coarse chunk; reusing the
-				// boundary corner densities here gives values that do not correspond
-				// to their positions and can create stepped patches, dark seams,
-				// and incorrect transition triangles on sloped terrain.
-				for (int32 I = 0; I < 13; ++I)
+				for (int32 I = 0; I < 9; ++I)
 				{
 					const FVector WorldPosition = Settings.ChunkWorldOrigin + SamplePositions[I];
 					Samples[I] = FSVoxelGenerator::SampleDensity(
 						WorldPosition.X, WorldPosition.Y, WorldPosition.Z, Settings);
 				}
+
+				// Transvoxel requires corresponding full-resolution and half-resolution
+				// corner samples to have identical scalar values (official Figure 4.16):
+				// 0==9, 2==10, 6==11, 8==12. The latter four points are spatially
+				// offset to form the transition cell, but their values are copied from
+				// the boundary corners by design. Sampling the field again at those
+				// offset positions breaks the table's assumptions, producing LOD-scaled
+				// patches, corner holes, and dark seams.
+				Samples[9] = Samples[0];
+				Samples[10] = Samples[2];
+				Samples[11] = Samples[6];
+				Samples[12] = Samples[8];
 
 				for (int32 Bit = 0; Bit < 9; ++Bit)
 				{
