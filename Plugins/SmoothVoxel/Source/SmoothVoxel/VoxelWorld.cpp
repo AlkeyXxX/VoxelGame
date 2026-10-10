@@ -1095,11 +1095,18 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
 
     TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe> NewLODHeights =
         MakeShared<TMap<FIntPoint, float>, ESPMode::ThreadSafe>();
+    TSharedPtr<TMap<FIntPoint, uint8>, ESPMode::ThreadSafe> NewLODMaterialMask =
+        MakeShared<TMap<FIntPoint, uint8>, ESPMode::ThreadSafe>();
     for (const TPair<FIntPoint, FVoxelRWGRoadStamp>& Pair : *NewStamps)
     {
         NewLODHeights->Add(Pair.Key, Pair.Value.SurfaceZ);
+        if (Pair.Value.bUseRoadMaterial)
+        {
+            NewLODMaterialMask->Add(Pair.Key, 1);
+        }
     }
     RWGRoadLODHeights = NewLODHeights;
+    RWGRoadLODMaterialMask = NewLODMaterialMask;
 
     UE_LOG(LogTemp, Display, TEXT("RWG terrain stamps built: %d XY columns (LOD heights=%d); dry road surface and shoulder cut/fill."),
         RWGRoadSurfaceStamps.IsValid() ? RWGRoadSurfaceStamps->Num() : 0,
@@ -1683,6 +1690,7 @@ void AVoxelWorld::GenerateWorld()
     // A full world regeneration clears the previous road plan and its terrain edits.
     RWGRoadSurfaceStamps.Reset();
     RWGRoadLODHeights.Reset();
+    RWGRoadLODMaterialMask.Reset();
     ClearRWGRoadSurface();
 
     /*
@@ -3296,6 +3304,7 @@ void AVoxelWorld::ProcessPendingMeshUploads()
 
             Mesh->ClearMeshSection(0);
             Mesh->ClearMeshSection(1);
+            Mesh->ClearMeshSection(2);
 
             if (Pending.Output.Vertices.Num() > 0 &&
                 Pending.Output.Triangles.Num() > 0)
@@ -3327,6 +3336,23 @@ void AVoxelWorld::ProcessPendingMeshUploads()
                     TArray<FVector2D>(),
                     TArray<FVector2D>(),
                     Pending.Output.WaterVertexColors,
+                    TArray<FProcMeshTangent>(),
+                    false);
+            }
+
+            if (Pending.Output.RoadVertices.Num() > 0 &&
+                Pending.Output.RoadTriangles.Num() > 0)
+            {
+                Mesh->CreateMeshSection_LinearColor(
+                    2,
+                    Pending.Output.RoadVertices,
+                    Pending.Output.RoadTriangles,
+                    Pending.Output.RoadNormals,
+                    Pending.Output.RoadUV0,
+                    TArray<FVector2D>(),
+                    TArray<FVector2D>(),
+                    TArray<FVector2D>(),
+                    Pending.Output.RoadVertexColors,
                     TArray<FProcMeshTangent>(),
                     false);
             }
@@ -3969,7 +3995,8 @@ namespace
         AVoxelWorld* Owner,
         const TCHAR* Name,
         UMaterialInterface* Material,
-        UMaterialInterface* WaterMaterial)
+        UMaterialInterface* WaterMaterial,
+        UMaterialInterface* RoadMaterial)
     {
         if (!Owner)
         {
@@ -4003,6 +4030,7 @@ namespace
 
         Mesh->SetMaterial(0, Material);
         Mesh->SetMaterial(1, WaterMaterial);
+        Mesh->SetMaterial(2, RoadMaterial ? RoadMaterial : Material);
 
         Mesh->RegisterComponent();
 
@@ -4044,7 +4072,8 @@ void AVoxelWorld::UpdateFarLOD(
                 this,
                 TEXT("FarLOD1"),
                 Material,
-                WaterMaterial);
+                WaterMaterial,
+                RWGRoadMaterial);
     }
 
     if (!FarLOD2Mesh)
@@ -4054,7 +4083,8 @@ void AVoxelWorld::UpdateFarLOD(
                 this,
                 TEXT("FarLOD2"),
                 Material,
-                WaterMaterial);
+                WaterMaterial,
+                RWGRoadMaterial);
     }
 
     if (!FarLOD3Mesh)
@@ -4064,7 +4094,8 @@ void AVoxelWorld::UpdateFarLOD(
                 this,
                 TEXT("FarLOD3"),
                 Material,
-                WaterMaterial);
+                WaterMaterial,
+                RWGRoadMaterial);
     }
 
     if (!FarLOD4Mesh)
@@ -4074,7 +4105,8 @@ void AVoxelWorld::UpdateFarLOD(
                 this,
                 TEXT("FarLOD4"),
                 Material,
-                WaterMaterial);
+                WaterMaterial,
+                RWGRoadMaterial);
     }
 
     if (!FarLOD1Mesh ||
@@ -4089,6 +4121,9 @@ void AVoxelWorld::UpdateFarLOD(
         WorldGenerator;
     const TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe> RoadLODHeightsCopy =
         RWGRoadLODHeights;
+    const TSharedPtr<TMap<FIntPoint, uint8>, ESPMode::ThreadSafe> RoadLODMaterialMaskCopy =
+        RWGRoadLODMaterialMask;
+    const float LODRoadUVScalePerBlock = RWGRoadUVScalePerBlock;
 
     const int32 LODWorldSizeX =
         WorldSizeX;
@@ -4127,6 +4162,8 @@ void AVoxelWorld::UpdateFarLOD(
             WeakWorld,
             GeneratorCopy,
             RoadLODHeightsCopy,
+            RoadLODMaterialMaskCopy,
+            LODRoadUVScalePerBlock,
             CenterChunk,
             LODWorldSizeX,
             LODWorldSizeY,
@@ -4154,6 +4191,12 @@ void AVoxelWorld::UpdateFarLOD(
                 GeneratorCopy;
             BuildInput.RoadSurfaceHeights =
                 RoadLODHeightsCopy;
+
+            BuildInput.RoadMaterialMask =
+                RoadLODMaterialMaskCopy;
+
+            BuildInput.RoadUVScalePerBlock =
+                LODRoadUVScalePerBlock;
 
             BuildInput.WorldSizeX =
                 LODWorldSizeX;

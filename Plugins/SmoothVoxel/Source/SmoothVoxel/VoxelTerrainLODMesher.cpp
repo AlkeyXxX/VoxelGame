@@ -52,6 +52,10 @@ namespace
     const FLinearColor WaterColor(
         0.05f, 0.35f, 0.85f, 1.0f);
 
+    // Keep road influence identical at shared coordinates in every ring.
+    constexpr int32 LODRoadHeightSearchRadius = 4;
+    constexpr float MCSurfaceOffsetBlocks = 1.02f;
+
     bool FindRoadSurfaceHeightNear(
         const TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe>& RoadSurfaceHeights,
         int32 WorldX,
@@ -188,7 +192,8 @@ namespace
     float GetMCSurfaceHeightFromColumns(
         const float ColumnHeights[4])
     {
-        constexpr float LODIsoLevel = 0.49f;
+        // Match the full-resolution Marching Cubes iso level exactly.
+        constexpr float LODIsoLevel = 0.5f;
 
         float MinHeight = ColumnHeights[0];
         float MaxHeight = ColumnHeights[0];
@@ -418,7 +423,7 @@ void FVoxelTerrainLODMesher::Build(
                     Input.RoadSurfaceHeights,
                     ClampedWorldX,
                     ClampedWorldY,
-                    FMath::Clamp(Input.SampleStep / 2, 0, 2),
+                    LODRoadHeightSearchRadius,
                     RoadHeight))
                 {
                     EffectiveHeight = RoadHeight;
@@ -470,12 +475,9 @@ void FVoxelTerrainLODMesher::Build(
     }
 
     /*
-     * Apply the same vertical density interpolation as the full MC mesh.
-     * LOD1 already contains every block column, so reuse its neighboring
-     * height samples. Coarser tiers query the three adjacent voxel columns
-     * too; this keeps their shared border heights consistent with LOD1 and
-     * with full-resolution chunks. Only the horizontal triangulation is
-     * decimated at the farther tiers.
+     * Reconstruct the vertical MC crossing from the same four neighboring
+     * columns for every tier. Shared XY nodes therefore get identical Z,
+     * including at LOD1/2/3/4 boundaries; only horizontal tessellation differs.
      */
     for (int32 Y = 0; Y < CountY; ++Y)
     {
@@ -484,74 +486,32 @@ void FVoxelTerrainLODMesher::Build(
         {
             return;
         }
+
         for (int32 X = 0; X < CountX; ++X)
         {
-            const int32 Index =
-                GridIndex(X, Y, CountX);
+            const int32 Index = GridIndex(X, Y, CountX);
+            const int32 WorldX = FMath::Clamp(
+                StartBlockX + X * Input.SampleStep, 0, WorldBlocksX - 1);
+            const int32 WorldY = FMath::Clamp(
+                StartBlockY + Y * Input.SampleStep, 0, WorldBlocksY - 1);
+            const int32 PreviousWorldX = FMath::Max(0, WorldX - 1);
+            const int32 PreviousWorldY = FMath::Max(0, WorldY - 1);
 
-            float ColumnHeights[4];
-
-            if (Input.SampleStep == 1)
+            const float ColumnHeights[4] =
             {
-                const int32 PreviousX = FMath::Max(0, X - 1);
-                const int32 PreviousY = FMath::Max(0, Y - 1);
-
-                ColumnHeights[0] =
-                    Heights[GridIndex(PreviousX, PreviousY, CountX)];
-                ColumnHeights[1] =
-                    Heights[GridIndex(X, PreviousY, CountX)];
-                ColumnHeights[2] =
-                    Heights[GridIndex(PreviousX, Y, CountX)];
-                ColumnHeights[3] =
-                    Heights[Index];
-            }
-            else
-            {
-                const int32 WorldX =
-                    FMath::Clamp(
-                        StartBlockX + X * Input.SampleStep,
-                        0,
-                        WorldBlocksX - 1);
-
-                const int32 WorldY =
-                    FMath::Clamp(
-                        StartBlockY + Y * Input.SampleStep,
-                        0,
-                        WorldBlocksY - 1);
-
-                const int32 PreviousWorldX =
-                    FMath::Max(0, WorldX - 1);
-
-                const int32 PreviousWorldY =
-                    FMath::Max(0, WorldY - 1);
-
-                ColumnHeights[0] =
-                    GetEffectiveSurfaceHeight(
-                        Input.Generator,
-                        PreviousWorldX,
-                        PreviousWorldY,
-                        Input.RoadSurfaceHeights,
-                        FMath::Clamp(Input.SampleStep / 2, 0, 2));
-
-                ColumnHeights[1] =
-                    GetEffectiveSurfaceHeight(
-                        Input.Generator,
-                        WorldX,
-                        PreviousWorldY,
-                        Input.RoadSurfaceHeights,
-                        FMath::Clamp(Input.SampleStep / 2, 0, 2));
-
-                ColumnHeights[2] =
-                    GetEffectiveSurfaceHeight(
-                        Input.Generator,
-                        PreviousWorldX,
-                        WorldY,
-                        Input.RoadSurfaceHeights,
-                        FMath::Clamp(Input.SampleStep / 2, 0, 2));
-
-                ColumnHeights[3] =
-                    Heights[Index];
-            }
+                GetEffectiveSurfaceHeight(
+                    Input.Generator, PreviousWorldX, PreviousWorldY,
+                    Input.RoadSurfaceHeights, LODRoadHeightSearchRadius),
+                GetEffectiveSurfaceHeight(
+                    Input.Generator, WorldX, PreviousWorldY,
+                    Input.RoadSurfaceHeights, LODRoadHeightSearchRadius),
+                GetEffectiveSurfaceHeight(
+                    Input.Generator, PreviousWorldX, WorldY,
+                    Input.RoadSurfaceHeights, LODRoadHeightSearchRadius),
+                GetEffectiveSurfaceHeight(
+                    Input.Generator, WorldX, WorldY,
+                    Input.RoadSurfaceHeights, LODRoadHeightSearchRadius)
+            };
 
             SurfaceHeights[Index] =
                 GetMCSurfaceHeightFromColumns(ColumnHeights);
@@ -834,21 +794,17 @@ void FVoxelTerrainLODMesher::Build(
              */
             if (bRenderCell)
             {
+                // Match the upward-facing vertex normals (CCW winding in XY).
                 Output.Triangles.Add(I00);
-                Output.Triangles.Add(I11);
                 Output.Triangles.Add(I10);
+                Output.Triangles.Add(I11);
 
                 Output.Triangles.Add(I00);
-                Output.Triangles.Add(I01);
                 Output.Triangles.Add(I11);
+                Output.Triangles.Add(I01);
             }
 
-            /*
-             * Winding above is intentionally kept stable for the mesh,
-             * but the cross-product order here must produce an upward
-             * lighting normal. The previous order generated -Z on flat
-             * terrain, which made the LOD surface appear almost black.
-             */
+            /* Accumulate upward-facing normals for the matching triangle winding. */
             const FVector N0 =
                 FVector::CrossProduct(
                     Output.Vertices[I10] -
@@ -873,14 +829,140 @@ void FVoxelTerrainLODMesher::Build(
     }
 
     /*
+     * Paved roads must survive decimation. Sampling the road height map only
+     * at terrain-grid vertices made 10-block roads disappear on LOD3/LOD4.
+     * Build a sparse block-grid overlay from stamped paved columns; attribute
+     * each road cell to exactly one LOD ring, like terrain and water.
+     */
+    if (Input.RoadMaterialMask.IsValid() &&
+        Input.RoadSurfaceHeights.IsValid() &&
+        Input.RoadMaterialMask->Num() > 0)
+    {
+        auto GetPavedRoadVertexHeight =
+            [&Input](int32 WorldX, int32 WorldY)
+            {
+                float BaseHeight = 0.0f;
+                if (!FindRoadSurfaceHeightNear(
+                        Input.RoadSurfaceHeights,
+                        WorldX,
+                        WorldY,
+                        1,
+                        BaseHeight))
+                {
+                    const float NativeHeight =
+                        Input.Generator.GetSurfaceHeightFloat(WorldX, WorldY);
+                    const FVoxelWaterColumn WaterColumn =
+                        Input.Generator.GetWaterColumn(
+                            WorldX, WorldY, NativeHeight);
+                    BaseHeight = WaterColumn.EffectiveSurfaceHeight;
+                }
+
+                return (BaseHeight + MCSurfaceOffsetBlocks + 0.035f) *
+                    Input.VoxelSize;
+            };
+
+        for (const TPair<FIntPoint, uint8>& RoadCell : *Input.RoadMaterialMask)
+        {
+            if (Input.CancellationToken.IsValid() &&
+                static_cast<bool>(*Input.CancellationToken))
+            {
+                return;
+            }
+
+            if (RoadCell.Value == 0)
+            {
+                continue;
+            }
+
+            const int32 WorldX = RoadCell.Key.X;
+            const int32 WorldY = RoadCell.Key.Y;
+            if (WorldX < StartBlockX || WorldY < StartBlockY ||
+                WorldX >= EndBlockX || WorldY >= EndBlockY ||
+                WorldX + 1 >= WorldBlocksX || WorldY + 1 >= WorldBlocksY)
+            {
+                continue;
+            }
+
+            const int32 CellChunkX = FMath::Clamp(
+                WorldX / Input.ChunkSize, 0, Input.WorldSizeX - 1);
+            const int32 CellChunkY = FMath::Clamp(
+                WorldY / Input.ChunkSize, 0, Input.WorldSizeY - 1);
+            if (!IsCellInRing(
+                    CellChunkX, CellChunkY, Input.CenterChunk,
+                    Input.InnerRadiusChunks, Input.OuterRadiusChunks))
+            {
+                continue;
+            }
+
+            const int32 BaseIndex = Output.RoadVertices.Num();
+            const FVector P00(
+                static_cast<float>(WorldX) * Input.VoxelSize,
+                static_cast<float>(WorldY) * Input.VoxelSize,
+                GetPavedRoadVertexHeight(WorldX, WorldY));
+            const FVector P10(
+                static_cast<float>(WorldX + 1) * Input.VoxelSize,
+                static_cast<float>(WorldY) * Input.VoxelSize,
+                GetPavedRoadVertexHeight(WorldX + 1, WorldY));
+            const FVector P01(
+                static_cast<float>(WorldX) * Input.VoxelSize,
+                static_cast<float>(WorldY + 1) * Input.VoxelSize,
+                GetPavedRoadVertexHeight(WorldX, WorldY + 1));
+            const FVector P11(
+                static_cast<float>(WorldX + 1) * Input.VoxelSize,
+                static_cast<float>(WorldY + 1) * Input.VoxelSize,
+                GetPavedRoadVertexHeight(WorldX + 1, WorldY + 1));
+
+            const FVector RawNormal =
+                FVector::CrossProduct(P10 - P00, P11 - P00) +
+                FVector::CrossProduct(P11 - P00, P01 - P00);
+            const FVector Normal = RawNormal.GetSafeNormal();
+            const FVector SafeNormal = Normal.IsNearlyZero() ? FVector::UpVector : Normal;
+
+            Output.RoadVertices.Add(P00);
+            Output.RoadVertices.Add(P10);
+            Output.RoadVertices.Add(P01);
+            Output.RoadVertices.Add(P11);
+            Output.RoadNormals.Add(SafeNormal);
+            Output.RoadNormals.Add(SafeNormal);
+            Output.RoadNormals.Add(SafeNormal);
+            Output.RoadNormals.Add(SafeNormal);
+
+            Output.RoadUV0.Add(FVector2D(
+                static_cast<float>(WorldX) * Input.RoadUVScalePerBlock,
+                static_cast<float>(WorldY) * Input.RoadUVScalePerBlock));
+            Output.RoadUV0.Add(FVector2D(
+                static_cast<float>(WorldX + 1) * Input.RoadUVScalePerBlock,
+                static_cast<float>(WorldY) * Input.RoadUVScalePerBlock));
+            Output.RoadUV0.Add(FVector2D(
+                static_cast<float>(WorldX) * Input.RoadUVScalePerBlock,
+                static_cast<float>(WorldY + 1) * Input.RoadUVScalePerBlock));
+            Output.RoadUV0.Add(FVector2D(
+                static_cast<float>(WorldX + 1) * Input.RoadUVScalePerBlock,
+                static_cast<float>(WorldY + 1) * Input.RoadUVScalePerBlock));
+            Output.RoadVertexColors.Add(FLinearColor::White);
+            Output.RoadVertexColors.Add(FLinearColor::White);
+            Output.RoadVertexColors.Add(FLinearColor::White);
+            Output.RoadVertexColors.Add(FLinearColor::White);
+
+            Output.RoadTriangles.Add(BaseIndex);
+            Output.RoadTriangles.Add(BaseIndex + 1);
+            Output.RoadTriangles.Add(BaseIndex + 3);
+            Output.RoadTriangles.Add(BaseIndex);
+            Output.RoadTriangles.Add(BaseIndex + 3);
+            Output.RoadTriangles.Add(BaseIndex + 2);
+        }
+    }
+
+    /*
      * Water is meshed on its own finer grid instead of borrowing terrain
      * LOD vertices. A narrow river can pass between two widely-spaced
      * terrain samples; using the land grid for water silently removed it
      * from the horizon. Keep water detail capped at four blocks even in
      * the farthest terrain ring.
      */
+    // Preserve shoreline and river detail next to the player, cap only far rings.
     const int32 WaterSampleStep =
-        FMath::Clamp(Input.SampleStep, 2, 4);
+        FMath::Clamp(Input.SampleStep, 1, 4);
 
     const int32 WaterCountX =
         FMath::DivideAndRoundUp(
@@ -953,8 +1035,9 @@ void FVoxelTerrainLODMesher::Build(
         }
     }
 
+    // Match the full-resolution surface crossing (block surface + about one block).
     const float WaterZ =
-        (static_cast<float>(Input.SeaLevel) + 0.95f) *
+        (static_cast<float>(Input.SeaLevel) + MCSurfaceOffsetBlocks) *
         Input.VoxelSize;
 
     auto GetWaterVertexIndex =
@@ -1100,13 +1183,14 @@ void FVoxelTerrainLODMesher::Build(
                     WorldX0,
                     WorldY1);
 
+            // Water top uses the same upward-facing winding as terrain.
             Output.WaterTriangles.Add(V00);
-            Output.WaterTriangles.Add(V11);
             Output.WaterTriangles.Add(V10);
+            Output.WaterTriangles.Add(V11);
 
             Output.WaterTriangles.Add(V00);
-            Output.WaterTriangles.Add(V01);
             Output.WaterTriangles.Add(V11);
+            Output.WaterTriangles.Add(V01);
         }
     }
 

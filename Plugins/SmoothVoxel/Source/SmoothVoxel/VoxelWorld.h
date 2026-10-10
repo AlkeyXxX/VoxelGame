@@ -718,6 +718,7 @@ private:
 
     TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> RWGRoadSurfaceStamps;
     TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe> RWGRoadLODHeights;
+    TSharedPtr<TMap<FIntPoint, uint8>, ESPMode::ThreadSafe> RWGRoadLODMaterialMask;
 
     void BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner);
     void BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner);
