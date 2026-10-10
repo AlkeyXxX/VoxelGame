@@ -84,8 +84,14 @@ struct FSVoxelOctreeSelectionSettings
 	/** Hard safety cap for the number of selected leaves. */
 	int32 MaxLeafCount = 8192;
 
-	/** World-space lower corner of the root cube. */
+	/** World-space location represented by base-lattice cell coordinate (0,0,0). */
 	FVector WorldOrigin = FVector::ZeroVector;
+
+	/** Absolute base-lattice coordinate of this streaming root's lower corner.
+	 * Adjacent root windows differ by aligned half-root shifts so overlapping
+	 * chunks retain identical world-space node keys and can be reused.
+	 */
+	FIntVector RootOriginCells = FIntVector::ZeroValue;
 };
 
 /**
@@ -116,5 +122,6 @@ public:
 		const TArray<FSVoxelOctreeNode>& Leaves,
 		int32 CellsPerAxis,
 		int32 MaxLod,
-		TArray<uint8>& OutFaceMasks);
+		TArray<uint8>& OutFaceMasks,
+		const FIntVector& RootOriginCells = FIntVector::ZeroValue);
 };
