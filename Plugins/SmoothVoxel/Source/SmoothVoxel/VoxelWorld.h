@@ -99,10 +99,9 @@ public:
     void GenerateWorld();
 
     /*
-     * Build a deterministic map-wide settlement/POI/road plan and export it
-     * to Saved/RWG/WorldLayout.csv. Also applies dry road-bed/shoulder stamps,
-     * refreshes loaded chunks and far LOD, and builds the collidable road mesh.
-     * This is an explicit action; it is not run automatically during BeginPlay.
+     * Build a deterministic settlement/POI/road plan and export it to CSV.
+     * Dry roads are stamped into voxel terrain and far LOD; the procedural
+     * road mesh is reserved for bridge decks. This is an explicit F2 action.
      */
     UFUNCTION(BlueprintCallable, Category="Voxel|RWG")
     bool GenerateRWGLayoutAndExport();
@@ -395,6 +394,8 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG", meta=(ClampMin="1.0"))
     float RWGDebugDrawDuration = 60.0f;
 
+    // When enabled, generate the procedural mesh for water-crossing bridge decks.
+    // Dry roads are part of the Marching Cubes terrain, not floating ribbons.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads")
     bool bBuildRWGRoadSurface = true;
 
@@ -408,11 +409,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="20.0"))
     float RWGRoadWidthMainBlocks = 10.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="20.0"))
+    float RWGRoadWidthConnectorBlocks = 10.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="16.0"))
-    float RWGRoadWidthConnectorBlocks = 6.0f;
+    float RWGRoadWidthRuralBlocks = 6.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="12.0"))
-    float RWGRoadWidthLocalBlocks = 3.5f;
+    float RWGRoadWidthLocalBlocks = 3.0f;
 
 
     /*
