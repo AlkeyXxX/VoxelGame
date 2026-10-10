@@ -37,11 +37,17 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Flat terrain should generate triangles"), RegularMesh.Triangles.Num() > 0);
 	TestEqual(TEXT("Every output vertex has a normal"), RegularMesh.Normals.Num(), RegularMesh.Vertices.Num());
 	TestEqual(TEXT("Every output vertex has UVs"), RegularMesh.UV0.Num(), RegularMesh.Vertices.Num());
+	TestEqual(TEXT("Every output vertex has tangents"), RegularMesh.Tangents.Num(), RegularMesh.Vertices.Num());
 
 	for (const FVector& Normal : RegularMesh.Normals)
 	{
 		TestTrue(TEXT("Output normal must be finite"), !Normal.ContainsNaN());
 		TestTrue(TEXT("Flat top normals point out of solid"), Normal.Z > 0.5f);
+	}
+	for (const FProcMeshTangent& Tangent : RegularMesh.Tangents)
+	{
+		TestTrue(TEXT("Output tangent must be finite"), !Tangent.TangentX.ContainsNaN());
+		TestTrue(TEXT("Output tangent must be nonzero"), Tangent.TangentX.SizeSquared() > 0.5f);
 	}
 
 	// The stored shading normals point outward/upward. Unreal's procedural
@@ -76,6 +82,7 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Transition-enabled chunk should generate triangles"), TransitionMesh.Triangles.Num() > 0);
 		TestEqual(TEXT("Transition output normals match vertices"), TransitionMesh.Normals.Num(), TransitionMesh.Vertices.Num());
 		TestEqual(TEXT("Transition output UVs match vertices"), TransitionMesh.UV0.Num(), TransitionMesh.Vertices.Num());
+		TestEqual(TEXT("Transition output tangents match vertices"), TransitionMesh.Tangents.Num(), TransitionMesh.Vertices.Num());
 
 		for (const int32 Index : TransitionMesh.Triangles)
 		{
@@ -85,6 +92,11 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 		for (const FVector& Vertex : TransitionMesh.Vertices)
 		{
 			TestTrue(TEXT("Output vertex must be finite"), !Vertex.ContainsNaN());
+		}
+		for (const FProcMeshTangent& Tangent : TransitionMesh.Tangents)
+		{
+			TestTrue(TEXT("Transition tangent must be finite"), !Tangent.TangentX.ContainsNaN());
+			TestTrue(TEXT("Transition tangent must be nonzero"), Tangent.TangentX.SizeSquared() > 0.5f);
 		}
 	}
 
@@ -196,6 +208,7 @@ bool FSmoothVoxelTransvoxelSlopedFacesTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Sloped terrain with transitions should emit triangles"), Mesh.Triangles.Num() > 0);
 		TestEqual(TEXT("Transition mesh has one normal per vertex"), Mesh.Normals.Num(), Mesh.Vertices.Num());
 		TestEqual(TEXT("Transition mesh has one UV per vertex"), Mesh.UV0.Num(), Mesh.Vertices.Num());
+		TestEqual(TEXT("Transition mesh has one tangent per vertex"), Mesh.Tangents.Num(), Mesh.Vertices.Num());
 
 		for (const FVector& Vertex : Mesh.Vertices)
 		{
