@@ -34,7 +34,7 @@ public:
 		FActorComponentTickFunction* ThisTickFunction) override;
 
 	/** Normal flight speed in Unreal centimetres per second. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug Flight", meta=(ClampMin="0.0", Units="cm/s"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug Flight", meta=(ClampMin="0.0"))
 	float FlightSpeed = 3000.0f;
 
 	/** Flight speed while Left Shift is held, in Unreal centimetres per second. */
