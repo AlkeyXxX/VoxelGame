@@ -178,6 +178,9 @@ public:
     void SetWaterMaterial(
         UMaterialInterface* InMaterial);
 
+    void SetRoadMaterial(
+        UMaterialInterface* InMaterial);
+
 
     UPROPERTY(
         VisibleAnywhere,
@@ -209,6 +212,9 @@ protected:
         BlueprintReadWrite,
         Category="Voxel")
     UMaterialInterface* Material = nullptr;
+
+    UPROPERTY()
+    UMaterialInterface* RoadMaterial = nullptr;
 
     UPROPERTY(
         EditAnywhere,
