@@ -27,7 +27,7 @@ class UProceduralMeshComponent;
  */
 struct FVoxelRWGRoadStamp
 {
-    int32 SurfaceZ = INDEX_NONE;
+    float SurfaceZ = -1.0f;
     uint8 SurfaceBlock = uint8(EVoxelBlock::Dirt);
     uint8 FillBlock = uint8(EVoxelBlock::Dirt);
     uint8 Priority = 0;
@@ -527,6 +527,15 @@ public:
     UMaterialInterface* Material = nullptr;
 
     /*
+     * UV tiling density for the full-resolution terrain. With the default
+     * voxel size of 100 cm, 0.5 means one texture repeat per 2 metres.
+     * Choose materials whose UVs use TextureCoordinate rather than world-aligned mapping.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Rendering",
+        meta=(ClampMin="0.01", ClampMax="4.0"))
+    float TerrainUVScalePerBlock = 0.5f;
+
+    /*
      * Отдельный материал воды.
      */
     UPROPERTY(
@@ -699,7 +708,7 @@ private:
     UProceduralMeshComponent* RWGRoadMesh = nullptr;
 
     TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> RWGRoadSurfaceStamps;
-    TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe> RWGRoadLODHeights;
+    TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe> RWGRoadLODHeights;
 
     void BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner);
     void BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner);
@@ -725,6 +734,18 @@ private:
     bool bDebugFlyMode = false;
     bool bDebugFlyBoost = false;
     float DebugFlyVerticalInput = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Debug Fly",
+        meta=(ClampMin="100.0", ClampMax="100000.0"))
+    float DebugFlySpeed = 6000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Debug Fly",
+        meta=(ClampMin="100.0", ClampMax="200000.0"))
+    float DebugFlyBoostSpeed = 18000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Debug Fly",
+        meta=(ClampMin="100.0", ClampMax="200000.0"))
+    float DebugFlyAcceleration = 24000.0f;
 
     UFUNCTION()
     void ToggleDebugFly();
