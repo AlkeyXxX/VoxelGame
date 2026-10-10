@@ -156,4 +156,68 @@ bool FSmoothVoxelTransvoxelFlatInterfaceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelSlopedFacesTest,
+	"SmoothVoxel.Transvoxel.SlopedTerrainAllFaces",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelSlopedFacesTest::RunTest(const FString& Parameters)
+{
+	// Exercise a non-flat, world-space density field. This catches transition
+	// code that uses a density value from one position for a different sample
+	// position, which a perfectly flat plane cannot reveal.
+	FSVoxelGenerationSettings Settings;
+	Settings.ChunkWorldOrigin = FVector(-400.0f, -400.0f, 0.0f);
+	Settings.BaseHeight = 75.0f;
+	Settings.HeightAmplitude = 300.0f;
+	Settings.DetailAmplitude = 45.0f;
+	Settings.NoiseScale = 0.0012f;
+	Settings.DetailScale = 0.0009f;
+	Settings.bEnableCaves = false;
+	Settings.IsoLevel = 0.0f;
+
+	const uint8 FaceMasks[] =
+	{
+		SVoxelTransitionFace_NegativeX,
+		SVoxelTransitionFace_PositiveX,
+		SVoxelTransitionFace_NegativeY,
+		SVoxelTransitionFace_PositiveY,
+		SVoxelTransitionFace_NegativeZ,
+		SVoxelTransitionFace_PositiveZ,
+		static_cast<uint8>(SVoxelTransitionFace_PositiveX | SVoxelTransitionFace_PositiveY),
+		static_cast<uint8>(SVoxelTransitionFace_PositiveX | SVoxelTransitionFace_PositiveY | SVoxelTransitionFace_PositiveZ)
+	};
+
+	for (const uint8 FaceMask : FaceMasks)
+	{
+		FSVoxelMeshData Mesh;
+		FSVoxelTransvoxelMesher::Generate(Settings, 8, 100.0f, FaceMask, Mesh);
+
+		TestTrue(TEXT("Sloped terrain with transitions should emit triangles"), Mesh.Triangles.Num() > 0);
+		TestEqual(TEXT("Transition mesh has one normal per vertex"), Mesh.Normals.Num(), Mesh.Vertices.Num());
+		TestEqual(TEXT("Transition mesh has one UV per vertex"), Mesh.UV0.Num(), Mesh.Vertices.Num());
+
+		for (const FVector& Vertex : Mesh.Vertices)
+		{
+			TestTrue(TEXT("Transition vertex must be finite"), !Vertex.ContainsNaN());
+		}
+		for (const FVector& Normal : Mesh.Normals)
+		{
+			TestTrue(TEXT("Transition normal must be finite"), !Normal.ContainsNaN());
+		}
+		for (int32 TriangleIndex = 0; TriangleIndex + 2 < Mesh.Triangles.Num(); TriangleIndex += 3)
+		{
+			const int32 AIndex = Mesh.Triangles[TriangleIndex];
+			const int32 BIndex = Mesh.Triangles[TriangleIndex + 1];
+			const int32 CIndex = Mesh.Triangles[TriangleIndex + 2];
+			TestTrue(TEXT("Transition triangle indices must be valid"),
+				AIndex >= 0 && AIndex < Mesh.Vertices.Num() &&
+				BIndex >= 0 && BIndex < Mesh.Vertices.Num() &&
+				CIndex >= 0 && CIndex < Mesh.Vertices.Num());
+		}
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
