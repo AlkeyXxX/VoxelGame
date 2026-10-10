@@ -115,7 +115,7 @@ public:
 	int32 MaxConcurrentBuilds = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="32", ClampMax="8192"))
-	int32 MaxLeafCount = 512;
+	int32 MaxLeafCount = 2048;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="128"))
 	int32 CellsPerAxis = 32;

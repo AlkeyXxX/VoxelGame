@@ -37,6 +37,45 @@ namespace
 		return false;
 	}
 
+	uint8 RequiredCoarseFaceMask(
+		const FSVoxelOctreeNode& A,
+		const FSVoxelOctreeNode& B,
+		int32 CellsPerAxis)
+	{
+		const int32 ASpan = A.GetSpanInBaseCells(CellsPerAxis);
+		const int32 BSpan = B.GetSpanInBaseCells(CellsPerAxis);
+		const int32 AMin[3] = { A.OriginCells.X, A.OriginCells.Y, A.OriginCells.Z };
+		const int32 BMin[3] = { B.OriginCells.X, B.OriginCells.Y, B.OriginCells.Z };
+		const int32 AMax[3] = { AMin[0] + ASpan, AMin[1] + ASpan, AMin[2] + ASpan };
+		const int32 BMax[3] = { BMin[0] + BSpan, BMin[1] + BSpan, BMin[2] + BSpan };
+
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			const int32 U = (Axis + 1) % 3;
+			const int32 V = (Axis + 2) % 3;
+			const bool bOverlapU = FMath::Max(AMin[U], BMin[U]) < FMath::Min(AMax[U], BMax[U]);
+			const bool bOverlapV = FMath::Max(AMin[V], BMin[V]) < FMath::Min(AMax[V], BMax[V]);
+			if (!bOverlapU || !bOverlapV)
+			{
+				continue;
+			}
+
+			if (AMax[Axis] == BMin[Axis])
+			{
+				return Axis == 0 ? SVoxelTransitionFace_PositiveX
+					: Axis == 1 ? SVoxelTransitionFace_PositiveY
+					: SVoxelTransitionFace_PositiveZ;
+			}
+			if (AMin[Axis] == BMax[Axis])
+			{
+				return Axis == 0 ? SVoxelTransitionFace_NegativeX
+					: Axis == 1 ? SVoxelTransitionFace_NegativeY
+					: SVoxelTransitionFace_NegativeZ;
+			}
+		}
+		return 0;
+	}
+
 	bool SameLeafSet(const TArray<FSVoxelOctreeNode>& A, const TArray<FSVoxelOctreeNode>& B)
 	{
 		if (A.Num() != B.Num())
@@ -120,6 +159,19 @@ bool FSmoothVoxelOctreeBalanceTest::RunTest(const FString& Parameters)
 				TestTrue(
 					TEXT("Face neighbours may differ by at most one LOD"),
 					FMath::Abs(First[I].Lod - First[J].Lod) <= 1);
+
+				if (First[I].Lod > First[J].Lod)
+				{
+					const uint8 RequiredMask = RequiredCoarseFaceMask(First[I], First[J], Settings.CellsPerAxis);
+					TestTrue(TEXT("Each coarse/fine interface has a transition face bit"),
+						(FaceMasks[I] & RequiredMask) != 0);
+				}
+				else if (First[J].Lod > First[I].Lod)
+				{
+					const uint8 RequiredMask = RequiredCoarseFaceMask(First[J], First[I], Settings.CellsPerAxis);
+					TestTrue(TEXT("Each coarse/fine interface has a transition face bit"),
+						(FaceMasks[J] & RequiredMask) != 0);
+				}
 			}
 		}
 	}

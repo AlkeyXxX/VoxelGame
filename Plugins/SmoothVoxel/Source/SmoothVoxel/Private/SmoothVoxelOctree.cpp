@@ -370,47 +370,60 @@ bool FSVoxelOctreeSelector::BuildTransitionFaceMasks(
 		for (int32 FaceIndex = 0; FaceIndex < 6; ++FaceIndex)
 		{
 			const FIntVector& Direction = Directions[FaceIndex];
-			FIntVector Probe = Node.OriginCells + FIntVector(
-				Span / 2,
-				Span / 2,
-				Span / 2);
+			const int32 TangentOffsets[2] = { Span / 4, (Span * 3) / 4 };
+			bool bFoundFinerNeighbour = false;
 
-			if (Direction.X < 0)
+			// Under 2:1 balance a coarse face may meet up to four finer leaves.
+			// Probe the centre of each quadrant so a culled empty/solid neighbour
+			// at the face centre cannot hide a transition needed elsewhere.
+			for (int32 UIndex = 0; UIndex < 2 && !bFoundFinerNeighbour; ++UIndex)
 			{
-				Probe.X = Node.OriginCells.X - 1;
-			}
-			else if (Direction.X > 0)
-			{
-				Probe.X = Node.OriginCells.X + Span;
-			}
-			else if (Direction.Y < 0)
-			{
-				Probe.Y = Node.OriginCells.Y - 1;
-			}
-			else if (Direction.Y > 0)
-			{
-				Probe.Y = Node.OriginCells.Y + Span;
-			}
-			else if (Direction.Z < 0)
-			{
-				Probe.Z = Node.OriginCells.Z - 1;
-			}
-			else
-			{
-				Probe.Z = Node.OriginCells.Z + Span;
-			}
+				for (int32 VIndex = 0; VIndex < 2 && !bFoundFinerNeighbour; ++VIndex)
+				{
+					FIntVector Probe = Node.OriginCells + FIntVector(
+						Span / 2,
+						Span / 2,
+						Span / 2);
 
-			FSVoxelOctreeNode Neighbour;
-			if (FindLeafContainingCell(
-				Probe,
-				RootSpan,
-				CellsPerAxis,
-				MaxLod,
-				Lookup,
-				Neighbour) &&
-				Neighbour.Lod < Node.Lod)
-			{
-				Mask |= FaceBits[FaceIndex];
+					if (FMath::Abs(Direction.X) > 0)
+					{
+						Probe.Y = Node.OriginCells.Y + TangentOffsets[UIndex];
+						Probe.Z = Node.OriginCells.Z + TangentOffsets[VIndex];
+						Probe.X = Direction.X < 0
+							? Node.OriginCells.X - 1
+							: Node.OriginCells.X + Span;
+					}
+					else if (FMath::Abs(Direction.Y) > 0)
+					{
+						Probe.X = Node.OriginCells.X + TangentOffsets[UIndex];
+						Probe.Z = Node.OriginCells.Z + TangentOffsets[VIndex];
+						Probe.Y = Direction.Y < 0
+							? Node.OriginCells.Y - 1
+							: Node.OriginCells.Y + Span;
+					}
+					else
+					{
+						Probe.X = Node.OriginCells.X + TangentOffsets[UIndex];
+						Probe.Y = Node.OriginCells.Y + TangentOffsets[VIndex];
+						Probe.Z = Direction.Z < 0
+							? Node.OriginCells.Z - 1
+							: Node.OriginCells.Z + Span;
+					}
+
+					FSVoxelOctreeNode Neighbour;
+					if (FindLeafContainingCell(
+						Probe,
+						RootSpan,
+						CellsPerAxis,
+						MaxLod,
+						Lookup,
+						Neighbour) &&
+						Neighbour.Lod < Node.Lod)
+					{
+						Mask |= FaceBits[FaceIndex];
+						bFoundFinerNeighbour = true;
+					}
+				}
 			}
 		}
 
