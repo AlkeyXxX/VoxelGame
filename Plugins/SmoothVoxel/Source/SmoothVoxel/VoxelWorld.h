@@ -51,6 +51,7 @@ struct FVoxelMarchingCubesDataSnapshot
     int32 BeachWidth = 0;
     float VoxelSize = 100.0f;
     float UVScalePerBlock = 0.5f;
+    float RoadUVScalePerBlock = 0.5f;
 
     TMap<FIntVector, TMap<int32, uint8>> ChunkModifications;
     TSharedPtr<TMap<FIntPoint, FVoxelRWGRoadStamp>, ESPMode::ThreadSafe> RoadStamps;
@@ -406,6 +407,10 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads")
     UMaterialInterface* RWGRoadMaterial = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads",
+        meta=(ClampMin="0.01", ClampMax="4.0"))
+    float RWGRoadUVScalePerBlock = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|RWG|Roads", meta=(ClampMin="1.0", ClampMax="20.0"))
     float RWGRoadWidthMainBlocks = 10.0f;
