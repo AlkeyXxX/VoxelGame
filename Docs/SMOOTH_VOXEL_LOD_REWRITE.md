@@ -82,3 +82,26 @@ winding separately from the stored outward normals.
 6. Integrate roads/water/biome/material/edit persistence into the shared field.
 7. Benchmark 4 x 4 km first; only expand toward 8 x 8 km after chunk streaming,
    memory use and frame-time have been measured.
+
+
+## Optional debug flight controls
+
+The reusable `USmoothVoxelFlightComponent` is available for test builds. After
+compiling the project, add this component to `BP_VoxelPlayer` (or the relevant
+player Character Blueprint) through **Add Component**. It does not change the
+default player until attached.
+
+- Press **F** to toggle flying on/off.
+- Use the Blueprint's existing **WASD** bindings for forward/back/strafe.
+- Hold **Space** to ascend and **Left/Right Ctrl** to descend.
+- Hold **Left Shift** to use the faster flight speed.
+- Configure `FlightSpeed` and `SprintFlightSpeed` in the component's Details.
+  Units are Unreal centimetres per second; defaults are 3000 and 9000.
+- Collision stays enabled. Flight removes gravity but is not a noclip mode.
+- The component displays an on-screen message when flight is toggled.
+
+Manual UE4.27 verification: compile the editor target, add the component to the
+player Blueprint, launch a small terrain test map, confirm the toggle, horizontal
+movement, vertical movement, Shift speed, and restoration of the previous
+movement mode after disabling flight. This has not been compiled or run in
+Unreal Editor in the current environment.
