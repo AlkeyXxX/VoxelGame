@@ -268,29 +268,12 @@ namespace
 			OutMesh.Vertices.Add(LocalPosition);
 			OutMesh.Normals.Add(CellNormals[I]);
 
-			// Dominant-axis projection preserves XY mapping on terrain tops but
-			// projects near-vertical rock surfaces onto their own plane.
-			const FVector AbsNormal = CellNormals[I].GetAbs();
-			FVector2D UV;
-			if (AbsNormal.Z >= AbsNormal.X && AbsNormal.Z >= AbsNormal.Y)
-			{
-				UV = FVector2D(
-					WorldPosition.X,
-					CellNormals[I].Z >= 0.0f ? WorldPosition.Y : -WorldPosition.Y);
-			}
-			else if (AbsNormal.X >= AbsNormal.Y)
-			{
-				UV = FVector2D(
-					CellNormals[I].X >= 0.0f ? WorldPosition.Y : -WorldPosition.Y,
-					WorldPosition.Z);
-			}
-			else
-			{
-				UV = FVector2D(
-					CellNormals[I].Y >= 0.0f ? WorldPosition.X : -WorldPosition.X,
-					WorldPosition.Z);
-			}
-			CellUVs[I] = UV * 0.0005f;
+			// Keep one stable world-XY projection across vertices, cells, LODs,
+			// and chunk boundaries. Switching projection axes per vertex makes
+			// adjacent vertices of a single triangle use incompatible UV spaces,
+			// which visibly skews textures. Steep cliffs/caves should use a
+			// triplanar material rather than per-vertex projection switching.
+			CellUVs[I] = FVector2D(WorldPosition.X, WorldPosition.Y) * 0.0005f;
 			OutMesh.UV0.Add(CellUVs[I]);
 		}
 
