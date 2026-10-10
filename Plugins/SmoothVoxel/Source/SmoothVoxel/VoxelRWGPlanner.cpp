@@ -28,6 +28,60 @@ namespace
         return static_cast<float>(DMax - DMin) + 1.41421356f * DMin;
     }
 
+    // Catmull-Rom interpolation rounds A* grid corners without changing the
+    // broad route. Short resampled segments let voxel stamping and bridge
+    // generation follow a smoother centerline than the 32-block search grid.
+    FVector CatmullRomPoint(
+        const FVector& P0,
+        const FVector& P1,
+        const FVector& P2,
+        const FVector& P3,
+        float T)
+    {
+        const float T2 = T * T;
+        const float T3 = T2 * T;
+        return (P1 * 2.0f +
+            (P2 - P0) * T +
+            (P0 * 2.0f - P1 * 5.0f + P2 * 4.0f - P3) * T2 +
+            (-P0 + P1 * 3.0f - P2 * 3.0f + P3) * T3) * 0.5f;
+    }
+
+    TArray<FVector> SmoothRoadPolyline(const TArray<FVector>& SourcePoints)
+    {
+        TArray<FVector> Result;
+        if (SourcePoints.Num() < 3)
+        {
+            return SourcePoints;
+        }
+
+        constexpr float TargetSpacingBlocks = 4.0f;
+        Result.Reserve(SourcePoints.Num() * 6);
+        Result.Add(SourcePoints[0]);
+
+        for (int32 Segment = 0; Segment < SourcePoints.Num() - 1; ++Segment)
+        {
+            const FVector& P0 = SourcePoints[FMath::Max(0, Segment - 1)];
+            const FVector& P1 = SourcePoints[Segment];
+            const FVector& P2 = SourcePoints[Segment + 1];
+            const FVector& P3 = SourcePoints[FMath::Min(SourcePoints.Num() - 1, Segment + 2)];
+            const float Length = Distance2D(P1, P2);
+            const int32 Steps = FMath::Clamp(
+                FMath::CeilToInt(Length / TargetSpacingBlocks), 1, 2048);
+
+            for (int32 Step = 1; Step <= Steps; ++Step)
+            {
+                const float T = static_cast<float>(Step) / static_cast<float>(Steps);
+                Result.Add(CatmullRomPoint(P0, P1, P2, P3, T));
+            }
+        }
+
+        // Keep entrances and settlement endpoints exactly at their requested
+        // locations even though interior corners are rounded.
+        Result[0] = SourcePoints[0];
+        Result.Last() = SourcePoints.Last();
+        return Result;
+    }
+
     FString CsvNumber(float Value) { return FString::SanitizeFloat(Value); }
 }
 
@@ -763,18 +817,20 @@ bool FVoxelRWGPlanner::BuildRoad(
     }
     if (Road.Points.Num() == 0 || Distance2D(Road.Points.Last(), To) > 1.0f) { Road.Points.Add(To); }
 
-    // Validate the whole local polyline against the exact terrain/water query.
-    // This catches narrow water channels that fall between coarse route-grid
-    // samples and also catches endpoint snaps that would draw a straight chord
-    // across water. Main/connector routes may cross and receive bridge decks.
-    if (!bAllowWaterCrossing)
+    // Replace coarse A* corners with a resampled Catmull-Rom curve.
+    // Preserve the original safe path as fallback if rounding a local driveway
+    // would move it into a narrow water channel.
+    TArray<FVector> RawPoints = Road.Points;
+    Road.Points = SmoothRoadPolyline(RawPoints);
+
+    const auto IsDryPolyline = [this, &Generator](const TArray<FVector>& Points)
     {
-        for (int32 SegmentIndex = 1; SegmentIndex < Road.Points.Num(); ++SegmentIndex)
+        for (int32 SegmentIndex = 1; SegmentIndex < Points.Num(); ++SegmentIndex)
         {
-            const FVector& A = Road.Points[SegmentIndex - 1];
-            const FVector& B = Road.Points[SegmentIndex];
+            const FVector& A = Points[SegmentIndex - 1];
+            const FVector& B = Points[SegmentIndex];
             const float Length = Distance2D(A, B);
-            const int32 Steps = FMath::Clamp(FMath::CeilToInt(Length / 8.0f), 1, 4096);
+            const int32 Steps = FMath::Clamp(FMath::CeilToInt(Length / 4.0f), 1, 4096);
             for (int32 Step = 0; Step <= Steps; ++Step)
             {
                 const float T = static_cast<float>(Step) / static_cast<float>(Steps);
@@ -786,6 +842,16 @@ bool FVoxelRWGPlanner::BuildRoad(
                     return false;
                 }
             }
+        }
+        return true;
+    };
+
+    if (!bAllowWaterCrossing && !IsDryPolyline(Road.Points))
+    {
+        Road.Points = RawPoints;
+        if (!IsDryPolyline(Road.Points))
+        {
+            return false;
         }
     }
 
@@ -827,9 +893,14 @@ void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
 
             const FVoxelRWGSettlement& A = Settlements[BestFrom];
             const FVoxelRWGSettlement& B = Settlements[BestTo];
-            const EVoxelRWGRoadType Type = BestDistance >
-                float(FMath::Min(Settings.WorldBlocksX, Settings.WorldBlocksY)) * 0.27f
-                ? EVoxelRWGRoadType::Main : EVoxelRWGRoadType::Connector;
+            const bool bHighway = BestDistance >
+                float(FMath::Min(Settings.WorldBlocksX, Settings.WorldBlocksY)) * 0.27f;
+            const bool bRuralConnection =
+                A.Type == EVoxelRWGSettlementType::Rural ||
+                B.Type == EVoxelRWGSettlementType::Rural;
+            const EVoxelRWGRoadType Type = bHighway
+                ? EVoxelRWGRoadType::Main
+                : (bRuralConnection ? EVoxelRWGRoadType::Rural : EVoxelRWGRoadType::Connector);
             if (BuildRoad(A.Id, A.Position, B.Id, B.Position, Type, Generator))
             {
                 ConnectedPairs.Add(PairKey(BestFrom, BestTo));
@@ -864,8 +935,13 @@ void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
                 if (ConnectedPairs.Contains(PairKey(A, B))) { continue; }
                 const float D = Distance2D(Settlements[A].Position, Settlements[B].Position);
                 if (D > MaxLoop || Random.FRand() > 0.19f) { continue; }
+                const bool bRuralConnection =
+                    Settlements[A].Type == EVoxelRWGSettlementType::Rural ||
+                    Settlements[B].Type == EVoxelRWGSettlementType::Rural;
+                const EVoxelRWGRoadType LoopType = bRuralConnection
+                    ? EVoxelRWGRoadType::Rural : EVoxelRWGRoadType::Connector;
                 if (BuildRoad(Settlements[A].Id, Settlements[A].Position,
-                    Settlements[B].Id, Settlements[B].Position, EVoxelRWGRoadType::Connector, Generator))
+                    Settlements[B].Id, Settlements[B].Position, LoopType, Generator))
                 {
                     ConnectedPairs.Add(PairKey(A, B));
                     ++Extra;
@@ -1025,6 +1101,7 @@ FString FVoxelRWGPlanner::RoadTypeName(EVoxelRWGRoadType Type)
     {
     case EVoxelRWGRoadType::Main: return TEXT("Main");
     case EVoxelRWGRoadType::Connector: return TEXT("Connector");
+    case EVoxelRWGRoadType::Rural: return TEXT("Rural");
     case EVoxelRWGRoadType::Local: return TEXT("Local");
     default: return TEXT("Connector");
     }
