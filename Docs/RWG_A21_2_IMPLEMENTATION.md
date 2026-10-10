@@ -27,7 +27,7 @@ These are procedural approximations inspired by 7 Days to Die Alpha 21.2, not a 
 
 ## Still not implemented as a complete A21 RWG pipeline
 
-- A21-style street-tile topology, gateway/highway merge, road smoothing and road rasterization into terrain; the current planner has an abstract A* road network only.
+- Full A21-style street-tile topology, gateway/highway merge, authored intersections, and prefab-driven road integration. The current planner uses smoothed A* curves and rasterizes dry road surfaces into the procedural terrain, but it is still not the original tile-based RWG system.
 - District/township generation and density rules equivalent to the original `rwgmixer.xml`.
 - Data-driven POI/prefab registry, placement scoring, rotation and overlap validation.
 - Map-wide export/visual comparison against a reference A21.2 map.
@@ -48,11 +48,11 @@ The planner builds a deterministic macro-cell grid (default 512 voxel blocks per
 
 ## Procedural road surface preview
 
-F2 also builds a `UProceduralMeshComponent` road surface from the planned routes:
+F2 builds the road plan, smooths A* corners into short Catmull-Rom segments, stamps dry road beds into terrain, and creates bridge-deck meshes only over water:
 
-- Main, connector and local roads are separate mesh sections with independent width controls in voxel blocks. Current defaults are 10 blocks for main roads, 6 for connectors, and 3.5 for local/gravel access roads. Mesh collision is enabled by default using async cooking; navigation-mesh registration remains disabled.
-- F2 rasterizes road-bed and shoulder stamps into dry terrain columns. Chunk generation cuts high ground, fills low road beds, and sets a surface block by road class (stone for main roads, dirt for connectors, sand for local access); a three-block shoulder blends back toward native terrain. Stamps are applied to generated block data and Marching Cubes snapshots, and currently loaded chunks are regenerated when F2 is pressed. Future streamed chunks use the same stamp map, and far-LOD rings refresh to follow stamped heights instead of hiding cut roads behind the original terrain silhouette. Water columns are left intact so main/connector routes can cross on the raised bridge deck.
-- The road ribbon and bridge-deck preview generates triangle collision by default, so the player can stand/walk on the surface and cross water spans. Toggle `bEnableRWGRoadCollision` to disable it. Full A21-style road tile topology, bridge supports, detailed intersections, and driveway transitions remain future work.
+- Default road widths are 10 blocks for main highways, 10 for ordinary connectors, 6 for rural dirt roads, and 3 for local POI driveways. Widths are exposed in the `VoxelWorld` Details panel.
+- On dry land, road and shoulder stamps modify generated voxel data and Marching Cubes surface heights. Per-column grading is limited to a small cut/fill around native terrain to avoid road lanes disappearing under cross-slopes. Main/connector surfaces use stone; rural and driveway surfaces use dirt. A three-block shoulder blends toward native terrain. Loaded chunks regenerate after F2, future streamed chunks use the shared stamp map, and far-LOD rings read the same stamped heights.
+- The procedural mesh is reserved for bridge decks across water, with collision enabled by default through async cooking. Toggle `bEnableRWGRoadCollision` to disable bridge collision, or `bBuildRWGRoadSurface` to disable bridge meshes. Water columns remain intact. Full A21-style road tile topology, bridge supports, detailed intersections, and driveway transitions remain future work.
 - In the `VoxelWorld` Details panel, optionally assign `RWGRoadMaterial`; otherwise the mesh uses Unreal's default surface material. Tune `RWGRoadWidthMainBlocks`, `RWGRoadWidthConnectorBlocks`, and `RWGRoadWidthLocalBlocks` as needed. Widths are in voxel blocks: with `VoxelSize=100 cm`, for example, main width 10 is about 10 metres. Turn off `bBuildRWGRoadSurface` to suppress the mesh while keeping the CSV/debug plan.
 
 ## Validation checklist
