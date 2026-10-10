@@ -38,7 +38,7 @@ public:
 	float FlightSpeed = 3000.0f;
 
 	/** Flight speed while Left Shift is held, in Unreal centimetres per second. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug Flight", meta=(ClampMin="0.0", Units="cm/s"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug Flight", meta=(ClampMin="0.0"))
 	float SprintFlightSpeed = 9000.0f;
 
 	/** Toggle debug flight with F. Exposed for testing and Blueprint use. */
