@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "SmoothVoxelGenerator.h"
+#include "SmoothVoxelOctree.h"
 #include "SmoothVoxelTypes.h"
 
 /**
@@ -15,6 +16,9 @@
 class SMOOTHVOXEL_API FSVoxelTransvoxelMesher
 {
 public:
+	/** Exhaustively sanity-checks all 256 regular and 512 transition table cases. */
+	static bool ValidateLookupTables();
+
 	/**
 	 * Builds one chunk from the same world-space density function at any LOD.
 	 *
@@ -25,9 +29,6 @@ public:
 	 *
 	 * Output vertices are local to Settings.ChunkWorldOrigin.
 	 */
-	/** Exhaustively sanity-checks all 256 regular and 512 transition table cases. */
-	static bool ValidateLookupTables();
-
 	static void Generate(
 		const FSVoxelGenerationSettings& Settings,
 		int32 CellsPerAxis,

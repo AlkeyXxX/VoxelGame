@@ -44,16 +44,35 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Flat top normals point out of solid"), Normal.Z > 0.5f);
 	}
 
-	FSVoxelMeshData TransitionMesh;
-	FSVoxelTransvoxelMesher::Generate(
-		Settings, 4, 200.0f, SVoxelTransitionFace_PositiveX, TransitionMesh);
-	TestTrue(TEXT("Transition-enabled chunk should generate triangles"), TransitionMesh.Triangles.Num() > 0);
-	TestEqual(TEXT("Transition output normals match vertices"), TransitionMesh.Normals.Num(), TransitionMesh.Vertices.Num());
-
-	for (const int32 Index : TransitionMesh.Triangles)
+	const uint8 FaceMasksToTest[] =
 	{
-		TestTrue(TEXT("Triangle index is within the vertex buffer"),
-			Index >= 0 && Index < TransitionMesh.Vertices.Num());
+		SVoxelTransitionFace_NegativeX,
+		SVoxelTransitionFace_PositiveX,
+		SVoxelTransitionFace_NegativeY,
+		SVoxelTransitionFace_PositiveY,
+		SVoxelTransitionFace_NegativeZ,
+		SVoxelTransitionFace_PositiveZ,
+		static_cast<uint8>(SVoxelTransitionFace_PositiveX | SVoxelTransitionFace_PositiveY),
+		static_cast<uint8>(SVoxelTransitionFace_PositiveX | SVoxelTransitionFace_PositiveY | SVoxelTransitionFace_PositiveZ)
+	};
+
+	for (const uint8 FaceMask : FaceMasksToTest)
+	{
+		FSVoxelMeshData TransitionMesh;
+		FSVoxelTransvoxelMesher::Generate(Settings, 4, 200.0f, FaceMask, TransitionMesh);
+		TestTrue(TEXT("Transition-enabled chunk should generate triangles"), TransitionMesh.Triangles.Num() > 0);
+		TestEqual(TEXT("Transition output normals match vertices"), TransitionMesh.Normals.Num(), TransitionMesh.Vertices.Num());
+		TestEqual(TEXT("Transition output UVs match vertices"), TransitionMesh.UV0.Num(), TransitionMesh.Vertices.Num());
+
+		for (const int32 Index : TransitionMesh.Triangles)
+		{
+			TestTrue(TEXT("Triangle index is within the vertex buffer"),
+				Index >= 0 && Index < TransitionMesh.Vertices.Num());
+		}
+		for (const FVector& Vertex : TransitionMesh.Vertices)
+		{
+			TestTrue(TEXT("Output vertex must be finite"), !Vertex.ContainsNaN());
+		}
 	}
 
 	return true;
