@@ -6,7 +6,7 @@
 enum class EVoxelRWGSettlementType : uint8 { City, Town, Village, Rural, Industrial };
 enum class EVoxelRWGCellType : uint8 { Wilderness, Rural, Town, City, Industrial };
 enum class EVoxelRWGPOIType : uint8 { Residential, Commercial, Industrial, Farm, Civic, Trader, Utility, Ruin };
-enum class EVoxelRWGRoadType : uint8 { Main, Connector, Local };
+enum class EVoxelRWGRoadType : uint8 { Main, Connector, Rural, Local };
 
 struct FVoxelRWGPlanSettings
 {
