@@ -748,8 +748,8 @@ void FVoxelTerrainLODMesher::Build(
 
             Output.UV0[Index] =
                 FVector2D(
-                    static_cast<float>(WorldX) * 0.05f,
-                    static_cast<float>(WorldY) * 0.05f);
+                    static_cast<float>(WorldX) * Input.UVScalePerBlock,
+                    static_cast<float>(WorldY) * Input.UVScalePerBlock);
         }
     }
 
@@ -989,8 +989,8 @@ void FVoxelTerrainLODMesher::Build(
             Output.WaterVertexColors.Add(WaterColor);
             Output.WaterUV0.Add(
                 FVector2D(
-                    static_cast<float>(WorldX) * 0.05f,
-                    static_cast<float>(WorldY) * 0.05f));
+                    static_cast<float>(WorldX) * Input.UVScalePerBlock,
+                    static_cast<float>(WorldY) * Input.UVScalePerBlock));
 
             return CachedIndex;
         };
