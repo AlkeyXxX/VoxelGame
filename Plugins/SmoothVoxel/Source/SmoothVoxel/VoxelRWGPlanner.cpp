@@ -954,6 +954,68 @@ void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
         }
     }
 
+    // The MST rooted at the stable center village naturally forms a tree,
+    // which can look like spokes radiating out from the map center. Add a sparse
+    // perimeter loop between outer settlements so routes also traverse the
+    // full map instead of ending at a handful of spokes.
+    if (Settlements.Num() >= 6)
+    {
+        const float MinDimension = float(FMath::Min(Settings.WorldBlocksX, Settings.WorldBlocksY));
+        const FVector2D MapCenter(
+            float(Settings.WorldBlocksX) * 0.5f,
+            float(Settings.WorldBlocksY) * 0.5f);
+        const float OuterRadius = MinDimension * 0.20f;
+
+        TArray<int32> OuterSettlementIndices;
+        for (int32 Index = 0; Index < Settlements.Num(); ++Index)
+        {
+            const FVector& Position = Settlements[Index].Position;
+            if (FVector2D(Position.X - MapCenter.X, Position.Y - MapCenter.Y).Size() >= OuterRadius)
+            {
+                OuterSettlementIndices.Add(Index);
+            }
+        }
+
+        OuterSettlementIndices.Sort([this, &MapCenter](int32 A, int32 B)
+        {
+            const FVector& PA = Settlements[A].Position;
+            const FVector& PB = Settlements[B].Position;
+            const float AngleA = FMath::Atan2(PA.Y - MapCenter.Y, PA.X - MapCenter.X);
+            const float AngleB = FMath::Atan2(PB.Y - MapCenter.Y, PB.X - MapCenter.X);
+            if (!FMath::IsNearlyEqual(AngleA, AngleB))
+            {
+                return AngleA < AngleB;
+            }
+            return Settlements[A].Id < Settlements[B].Id;
+        });
+
+        if (OuterSettlementIndices.Num() >= 4)
+        {
+            for (int32 RingIndex = 0; RingIndex < OuterSettlementIndices.Num(); ++RingIndex)
+            {
+                const int32 FromIndex = OuterSettlementIndices[RingIndex];
+                const int32 ToIndex = OuterSettlementIndices[
+                    (RingIndex + 1) % OuterSettlementIndices.Num()];
+                if (FromIndex == ToIndex || ConnectedPairs.Contains(PairKey(FromIndex, ToIndex)))
+                {
+                    continue;
+                }
+
+                const FVoxelRWGSettlement& A = Settlements[FromIndex];
+                const FVoxelRWGSettlement& B = Settlements[ToIndex];
+                const float Distance = Distance2D(A.Position, B.Position);
+                const EVoxelRWGRoadType Type = Distance >= MinDimension * 0.16f
+                    ? EVoxelRWGRoadType::Main
+                    : EVoxelRWGRoadType::Connector;
+
+                if (BuildRoad(A.Id, A.Position, B.Id, B.Position, Type, Generator))
+                {
+                    ConnectedPairs.Add(PairKey(FromIndex, ToIndex));
+                }
+            }
+        }
+    }
+
     // Local POI access must remain on dry land. A nearest street across a
     // narrow lake/river is not a valid entrance: try it, but if it fails the
     // exact water check, fall back to the parent settlement's side of the POI.
