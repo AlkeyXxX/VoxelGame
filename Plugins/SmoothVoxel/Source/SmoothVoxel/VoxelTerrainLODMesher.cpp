@@ -838,27 +838,43 @@ void FVoxelTerrainLODMesher::Build(
         Input.RoadSurfaceHeights.IsValid() &&
         Input.RoadMaterialMask->Num() > 0)
     {
+        /*
+         * The road overlay must lie on the actual simplified triangles, not on
+         * raw generator/stamp heights. Otherwise the overlay can float or get
+         * buried between widely spaced LOD vertices on steep terrain.
+         */
         auto GetPavedRoadVertexHeight =
-            [&Input](int32 WorldX, int32 WorldY)
+            [&SurfaceHeights, &Input, StartBlockX, StartBlockY, CountX, CountY](
+                int32 WorldX, int32 WorldY)
             {
-                float BaseHeight = 0.0f;
-                if (!FindRoadSurfaceHeightNear(
-                        Input.RoadSurfaceHeights,
-                        WorldX,
-                        WorldY,
-                        1,
-                        BaseHeight))
-                {
-                    const float NativeHeight =
-                        Input.Generator.GetSurfaceHeightFloat(WorldX, WorldY);
-                    const FVoxelWaterColumn WaterColumn =
-                        Input.Generator.GetWaterColumn(
-                            WorldX, WorldY, NativeHeight);
-                    BaseHeight = WaterColumn.EffectiveSurfaceHeight;
-                }
+                const float GridX =
+                    static_cast<float>(WorldX - StartBlockX) /
+                    static_cast<float>(Input.SampleStep);
+                const float GridY =
+                    static_cast<float>(WorldY - StartBlockY) /
+                    static_cast<float>(Input.SampleStep);
 
-                return (BaseHeight + MCSurfaceOffsetBlocks + 0.035f) *
-                    Input.VoxelSize;
+                const int32 X0 = FMath::Clamp(
+                    FMath::FloorToInt(GridX), 0, CountX - 2);
+                const int32 Y0 = FMath::Clamp(
+                    FMath::FloorToInt(GridY), 0, CountY - 2);
+                const int32 X1 = X0 + 1;
+                const int32 Y1 = Y0 + 1;
+                const float TX = FMath::Clamp(GridX - X0, 0.0f, 1.0f);
+                const float TY = FMath::Clamp(GridY - Y0, 0.0f, 1.0f);
+
+                const float H00 = SurfaceHeights[GridIndex(X0, Y0, CountX)];
+                const float H10 = SurfaceHeights[GridIndex(X1, Y0, CountX)];
+                const float H01 = SurfaceHeights[GridIndex(X0, Y1, CountX)];
+                const float H11 = SurfaceHeights[GridIndex(X1, Y1, CountX)];
+
+                // Use the exact I00-I11 diagonal used by the terrain LOD mesh.
+                const float SurfaceHeight = TX >= TY
+                    ? H00 * (1.0f - TX) + H10 * (TX - TY) + H11 * TY
+                    : H00 * (1.0f - TY) + H01 * (TY - TX) + H11 * TX;
+
+                // 1.5 cm at the default 100 cm voxel size prevents z-fighting.
+                return (SurfaceHeight + 0.015f) * Input.VoxelSize;
             };
 
         for (const TPair<FIntPoint, uint8>& RoadCell : *Input.RoadMaterialMask)
