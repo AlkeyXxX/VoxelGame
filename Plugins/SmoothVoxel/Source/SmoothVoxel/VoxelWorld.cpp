@@ -428,7 +428,7 @@ void FVoxelMarchingCubesDataSnapshot::Build(
             if (bValidColumn && WaterSurfaceBlockZ == INDEX_NONE && RoadStamps.IsValid())
             {
                 RoadStamp = RoadStamps->Find(FIntPoint(WorldX, WorldY));
-                if (RoadStamp && RoadStamp->SurfaceZ != INDEX_NONE)
+                if (RoadStamp && RoadStamp->SurfaceZ >= 0.0f)
                 {
                     LocalSurfaceHeight = static_cast<float>(RoadStamp->SurfaceZ) -
                         static_cast<float>(ChunkCoord.Z * ChunkSize);
@@ -3963,7 +3963,7 @@ void AVoxelWorld::UpdateFarLOD(
 
     const FVoxelWorldGenerator GeneratorCopy =
         WorldGenerator;
-    const TSharedPtr<TMap<FIntPoint, int32>, ESPMode::ThreadSafe> RoadLODHeightsCopy =
+    const TSharedPtr<TMap<FIntPoint, float>, ESPMode::ThreadSafe> RoadLODHeightsCopy =
         RWGRoadLODHeights;
 
     const int32 LODWorldSizeX =
