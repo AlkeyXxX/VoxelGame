@@ -2,6 +2,17 @@
 
 #include "CoreMinimal.h"
 
+/** Bit flags identifying a coarse chunk face that needs Transvoxel transition cells. */
+enum ESVoxelTransitionFaceMask : uint8
+{
+	SVoxelTransitionFace_NegativeX = 1 << 0,
+	SVoxelTransitionFace_PositiveX = 1 << 1,
+	SVoxelTransitionFace_NegativeY = 1 << 2,
+	SVoxelTransitionFace_PositiveY = 1 << 3,
+	SVoxelTransitionFace_NegativeZ = 1 << 4,
+	SVoxelTransitionFace_PositiveZ = 1 << 5
+};
+
 /**
  * A leaf in a spatial octree used by the smooth-terrain LOD selector.
  *
