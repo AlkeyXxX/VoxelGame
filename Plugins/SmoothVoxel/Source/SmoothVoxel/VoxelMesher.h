@@ -94,6 +94,14 @@ struct FVoxelMeshBuildOutput
 	TArray<FVector2D> UV0;
 	TArray<FLinearColor> VertexColors;
 
+    // Marching Cubes triangles whose surface lies on a stamped road.
+    // These use a dedicated material slot but remain part of the terrain mesh.
+    TArray<FVector> RoadVertices;
+    TArray<int32> RoadTriangles;
+    TArray<FVector> RoadNormals;
+    TArray<FVector2D> RoadUV0;
+    TArray<FLinearColor> RoadVertexColors;
+
 	TArray<FVector> WaterVertices;
 	TArray<int32> WaterTriangles;
 	TArray<FVector> WaterNormals;
@@ -102,8 +110,10 @@ struct FVoxelMeshBuildOutput
 
 	bool IsEmpty() const
 	{
-		return (Vertices.Num() == 0 || Triangles.Num() == 0) &&
-			(WaterVertices.Num() == 0 || WaterTriangles.Num() == 0);
+        const bool bMainEmpty = Vertices.Num() == 0 || Triangles.Num() == 0;
+        const bool bRoadEmpty = RoadVertices.Num() == 0 || RoadTriangles.Num() == 0;
+        const bool bWaterEmpty = WaterVertices.Num() == 0 || WaterTriangles.Num() == 0;
+        return (bMainEmpty && bRoadEmpty) && bWaterEmpty;
 	}
 };
 
