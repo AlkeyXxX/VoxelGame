@@ -868,8 +868,8 @@ void AVoxelWorld::BuildRWGRoadTerrainStamps(const FVoxelRWGPlanner& Planner)
                     const FVoxelWaterColumn Water =
                         WorldGenerator.GetWaterColumn(BlockX, BlockY, NativeHeight);
 
-                    // Leave water columns intact. The main/connector road ribbon
-                    // provides a raised, collidable bridge deck across these spans.
+                    // Leave water columns intact. A separate raised bridge-deck
+                    // mesh spans the water while the road itself stays terrain-integrated.
                     if (Water.WaterSurfaceBlockZ != INDEX_NONE)
                     {
                         continue;
