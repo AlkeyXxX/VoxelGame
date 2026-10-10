@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "SmoothVoxelTransvoxelMesher.h"
 #include "TransvoxelCore/transvoxel.h"
+#include "TransvoxelCore/transvoxel_tables.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelTransvoxelCellTableTest,

@@ -10,9 +10,10 @@ Plugins/SmoothVoxel/Source/SmoothVoxel. The legacy AVoxelWorld path still uses
 block-face meshing, and the repository did not contain a connected octree
 streamer or a Transvoxel transition-mesh implementation.
 
-This milestone adds a public scalar-density sampling entry point and an
-independent view-dependent octree leaf selector. The selector balances adjacent
-leaf sizes to a maximum one-LOD difference and has a hard leaf-count limit.
+The first two milestones add a public scalar-density sampling entry point, an
+independent view-dependent octree leaf selector with a 2:1 neighbour rule, a
+transition-face mask builder, and a candidate regular/transition cell mesher.
+The mesher emits a mesh for one chunk from the shared world-space density field.
 
 ## Important limit
 
@@ -49,10 +50,12 @@ corners, winding, normals and deterministic rebuilds have passed tests.
 
 ## Planned stages
 
-1. Shared density query and balanced octree selection (this commit).
-2. Transition-cell mesher and seam test fixtures.
+1. Shared density query and balanced octree selection (implemented).
+2. Candidate transition-cell mesher and exhaustive table-case automation tests (implemented, not run in UE4.27 here).
 3. Octree-driven chunk streaming with asynchronous generation, stale-result
    rejection and safe mesh replacement.
-4. Integrate road/water/biome/edit data; keep the old world path as a fallback
+4. Visualize and validate all six transition faces, edges/corners, winding,
+   normals and collision in Unreal Editor.
+5. Integrate road/water/biome/edit data; keep the old world path as a fallback
    until end-to-end validation passes.
-5. Benchmark 4 x 4 km first, then increase the configured bounds to 8 x 8 km.
+6. Benchmark 4 x 4 km first, then increase the configured bounds to 8 x 8 km.

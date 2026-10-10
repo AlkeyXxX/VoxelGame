@@ -107,4 +107,14 @@ public:
 		const FVector& CameraWorldLocation,
 		const FSVoxelOctreeSelectionSettings& Settings,
 		TArray<FSVoxelOctreeNode>& OutLeaves);
+
+	/** Build one six-bit transition-face mask per leaf. A bit is set only on a
+	 * coarser leaf face adjacent to a finer neighbour. Leaves must come from a
+	 * valid balanced selection produced by BuildBalancedLeaves.
+	 */
+	static bool BuildTransitionFaceMasks(
+		const TArray<FSVoxelOctreeNode>& Leaves,
+		int32 CellsPerAxis,
+		int32 MaxLod,
+		TArray<uint8>& OutFaceMasks);
 };

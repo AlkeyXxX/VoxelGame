@@ -319,3 +319,103 @@ bool FSVoxelOctreeSelector::BuildBalancedLeaves(
 	OutLeaves.Reset();
 	return false;
 }
+
+
+bool FSVoxelOctreeSelector::BuildTransitionFaceMasks(
+	const TArray<FSVoxelOctreeNode>& Leaves,
+	int32 CellsPerAxis,
+	int32 MaxLod,
+	TArray<uint8>& OutFaceMasks)
+{
+	OutFaceMasks.Reset();
+
+	if (Leaves.Num() == 0 || CellsPerAxis <= 0)
+	{
+		return false;
+	}
+
+	MaxLod = FMath::Clamp(MaxLod, 0, 10);
+	const int32 RootSpan = CellsPerAxis * (1 << MaxLod);
+
+	TArray<FSVoxelOctreeNode> OrderedLeaves = Leaves;
+	FSVoxelNodeLookup Lookup;
+	BuildLookup(OrderedLeaves, Lookup);
+
+	const FIntVector Directions[6] =
+	{
+		FIntVector(-1, 0, 0),
+		FIntVector(1, 0, 0),
+		FIntVector(0, -1, 0),
+		FIntVector(0, 1, 0),
+		FIntVector(0, 0, -1),
+		FIntVector(0, 0, 1)
+	};
+	const uint8 FaceBits[6] =
+	{
+		SVoxelTransitionFace_NegativeX,
+		SVoxelTransitionFace_PositiveX,
+		SVoxelTransitionFace_NegativeY,
+		SVoxelTransitionFace_PositiveY,
+		SVoxelTransitionFace_NegativeZ,
+		SVoxelTransitionFace_PositiveZ
+	};
+
+	OutFaceMasks.Reserve(Leaves.Num());
+
+	for (const FSVoxelOctreeNode& Node : Leaves)
+	{
+		uint8 Mask = 0;
+		const int32 Span = Node.GetSpanInBaseCells(CellsPerAxis);
+
+		for (int32 FaceIndex = 0; FaceIndex < 6; ++FaceIndex)
+		{
+			const FIntVector& Direction = Directions[FaceIndex];
+			FIntVector Probe = Node.OriginCells + FIntVector(
+				Span / 2,
+				Span / 2,
+				Span / 2);
+
+			if (Direction.X < 0)
+			{
+				Probe.X = Node.OriginCells.X - 1;
+			}
+			else if (Direction.X > 0)
+			{
+				Probe.X = Node.OriginCells.X + Span;
+			}
+			else if (Direction.Y < 0)
+			{
+				Probe.Y = Node.OriginCells.Y - 1;
+			}
+			else if (Direction.Y > 0)
+			{
+				Probe.Y = Node.OriginCells.Y + Span;
+			}
+			else if (Direction.Z < 0)
+			{
+				Probe.Z = Node.OriginCells.Z - 1;
+			}
+			else
+			{
+				Probe.Z = Node.OriginCells.Z + Span;
+			}
+
+			FSVoxelOctreeNode Neighbour;
+			if (FindLeafContainingCell(
+				Probe,
+				RootSpan,
+				CellsPerAxis,
+				MaxLod,
+				Lookup,
+				Neighbour) &&
+				Neighbour.Lod < Node.Lod)
+			{
+				Mask |= FaceBits[FaceIndex];
+			}
+		}
+
+		OutFaceMasks.Add(Mask);
+	}
+
+	return OutFaceMasks.Num() == Leaves.Num();
+}

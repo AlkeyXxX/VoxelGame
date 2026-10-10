@@ -87,6 +87,23 @@ bool FSmoothVoxelOctreeBalanceTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Selection must stay under the leaf cap"), First.Num() <= Settings.MaxLeafCount);
 	TestTrue(TEXT("Selection should not be empty"), First.Num() > 0);
 
+	TArray<uint8> FaceMasks;
+	TestTrue(TEXT("Transition masks should be generated for all leaves"),
+		FSVoxelOctreeSelector::BuildTransitionFaceMasks(
+			First,
+			Settings.CellsPerAxis,
+			Settings.MaxLod,
+			FaceMasks));
+	TestEqual(TEXT("One transition mask is returned per leaf"), FaceMasks.Num(), First.Num());
+
+	bool bFoundAtLeastOneTransition = false;
+	for (const uint8 FaceMask : FaceMasks)
+	{
+		bFoundAtLeastOneTransition |= FaceMask != 0;
+		TestEqual(TEXT("Only the six known face bits are used"), FaceMask & ~0x3Fu, 0);
+	}
+	TestTrue(TEXT("View-dependent hierarchy should expose fine/coarse interfaces"), bFoundAtLeastOneTransition);
+
 	TSet<FSVoxelOctreeNode> UniqueLeaves;
 	for (const FSVoxelOctreeNode& Node : First)
 	{
