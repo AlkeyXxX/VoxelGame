@@ -919,15 +919,58 @@ void FVoxelMarchingCubesMesher::Build(
         }
     }
 
-    // Route road-surface triangles to a separate material section. They remain
-    // part of the same Marching Cubes geometry and share the exact surface
-    // positions/normals, but can now sample a real PBR road material.
+    // Route road-top triangles to a dedicated section. A single centroid
+    // lookup left a wide fringe of triangles in the biome-color section;
+    // classify the centroid and all vertices using a 3x3 hint neighborhood.
+    // A height test prevents side-walls and excavated holes from inheriting
+    // the road material just because they sit beside the road.
     const int32 SurfaceSide = Input.Size + 2;
     const bool bHasRoadSurfaceHints =
         Input.TerrainSurfaceBlocks.Num() == SurfaceSide * SurfaceSide &&
         Input.TerrainSurfaceHeights.Num() == SurfaceSide * SurfaceSide;
     if (bHasRoadSurfaceHints && Output.Triangles.Num() >= 3)
     {
+        const float SafeVoxelSize = FMath::Max(Input.VoxelSize, 1.0f);
+        const auto IsRoadTopSample = [&Input, SurfaceSide](const FVector& BlockPosition) -> bool
+        {
+            const int32 CenterX = FMath::RoundToInt(BlockPosition.X);
+            const int32 CenterY = FMath::RoundToInt(BlockPosition.Y);
+
+            for (int32 DY = -1; DY <= 1; ++DY)
+            {
+                for (int32 DX = -1; DX <= 1; ++DX)
+                {
+                    if (DX * DX + DY * DY > 2)
+                    {
+                        continue;
+                    }
+
+                    const int32 LocalX = CenterX + DX;
+                    const int32 LocalY = CenterY + DY;
+                    if (LocalX < -1 || LocalX > Input.Size ||
+                        LocalY < -1 || LocalY > Input.Size)
+                    {
+                        continue;
+                    }
+
+                    const int32 SurfaceIndex =
+                        (LocalX + 1) + (LocalY + 1) * SurfaceSide;
+                    if (!Input.TerrainSurfaceBlocks.IsValidIndex(SurfaceIndex) ||
+                        Input.TerrainSurfaceBlocks[SurfaceIndex] == uint8(EVoxelBlock::Air))
+                    {
+                        continue;
+                    }
+
+                    const float RoadHeight = Input.TerrainSurfaceHeights[SurfaceIndex];
+                    if (FMath::Abs(BlockPosition.Z - RoadHeight) <= 0.85f)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
         TArray<int32> TerrainTriangles;
         TerrainTriangles.Reserve(Output.Triangles.Num());
 
@@ -939,19 +982,16 @@ void FVoxelMarchingCubesMesher::Build(
             const int32 I1 = Output.Triangles[TriangleOffset + 1];
             const int32 I2 = Output.Triangles[TriangleOffset + 2];
 
-            const FVector TriangleCenter =
-                (Output.Vertices[I0] + Output.Vertices[I1] + Output.Vertices[I2]) /
-                (3.0f * FMath::Max(Input.VoxelSize, 1.0f));
-
-            const int32 LocalX = FMath::Clamp(
-                FMath::RoundToInt(TriangleCenter.X), -1, Input.Size);
-            const int32 LocalY = FMath::Clamp(
-                FMath::RoundToInt(TriangleCenter.Y), -1, Input.Size);
-            const int32 SurfaceIndex =
-                (LocalX + 1) + (LocalY + 1) * SurfaceSide;
-            const bool bRoadSurface =
-                Input.TerrainSurfaceBlocks.IsValidIndex(SurfaceIndex) &&
-                Input.TerrainSurfaceBlocks[SurfaceIndex] != uint8(EVoxelBlock::Air);
+            const FVector P0 = Output.Vertices[I0] / SafeVoxelSize;
+            const FVector P1 = Output.Vertices[I1] / SafeVoxelSize;
+            const FVector P2 = Output.Vertices[I2] / SafeVoxelSize;
+            const FVector CenterBlocks = (P0 + P1 + P2) / 3.0f;
+            const int32 RoadSamples =
+                (IsRoadTopSample(CenterBlocks) ? 1 : 0) +
+                (IsRoadTopSample(P0) ? 1 : 0) +
+                (IsRoadTopSample(P1) ? 1 : 0) +
+                (IsRoadTopSample(P2) ? 1 : 0);
+            const bool bRoadSurface = RoadSamples >= 2;
 
             if (!bRoadSurface)
             {
@@ -968,15 +1008,11 @@ void FVoxelMarchingCubesMesher::Build(
                 Output.RoadVertices.Add(Output.Vertices[SourceIndex]);
                 Output.RoadNormals.Add(Output.Normals.IsValidIndex(SourceIndex)
                     ? Output.Normals[SourceIndex] : FVector::UpVector);
-                // Road tiling is independent from the terrain master material.
-                // Positions here are chunk-local centimeters, so convert back to
-                // block space before applying the road-specific repeat density.
+
                 const FVector& RoadPosition = Output.Vertices[SourceIndex];
                 Output.RoadUV0.Add(FVector2D(
-                    (RoadPosition.X / FMath::Max(Input.VoxelSize, 1.0f)) * Input.RoadUVScalePerBlock,
-                    (RoadPosition.Y / FMath::Max(Input.VoxelSize, 1.0f)) * Input.RoadUVScalePerBlock));
-                // A real road material should show its albedo without being
-                // tinted by the old biome block color.
+                    (RoadPosition.X / SafeVoxelSize) * Input.RoadUVScalePerBlock,
+                    (RoadPosition.Y / SafeVoxelSize) * Input.RoadUVScalePerBlock));
                 Output.RoadVertexColors.Add(FLinearColor::White);
             }
 
