@@ -22,6 +22,13 @@ struct FVoxelMarchingCubesBuildInput
      */
     TArray<float> TerrainSurfaceHeights;
 
+    /*
+     * Optional per-column material hint for stamped road surfaces. Air means
+     * "no override"; the mesher uses this only to break surface-material ties
+     * in favour of the actual road block rather than neighboring grass.
+     */
+    TArray<uint8> TerrainSurfaceBlocks;
+
     TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancellationToken;
 
     void Init(int32 InSize)
@@ -33,8 +40,9 @@ struct FVoxelMarchingCubesBuildInput
         Blocks.SetNumZeroed(
             Side * Side * Side);
 
-        // Only generated world snapshots provide this optional smooth field.
+        // Only generated world snapshots provide these optional surface hints.
         TerrainSurfaceHeights.Reset();
+        TerrainSurfaceBlocks.Reset();
     }
 };
 
