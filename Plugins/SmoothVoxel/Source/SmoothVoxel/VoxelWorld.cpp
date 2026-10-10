@@ -1405,7 +1405,16 @@ void AVoxelWorld::BuildRWGRoadSurface(const FVoxelRWGPlanner& Planner)
             RWGRoadMesh->CreateMeshSection_LinearColor(
                 SectionIndex, Vertices, Triangles, Normals, UVs,
                 VertexColors, Tangents, bEnableRWGRoadCollision);
-            RWGRoadMesh->SetMaterial(SectionIndex, EffectiveRoadMaterial);
+            // Only paved highways/connectors use the dedicated road material.
+            // Dirt-road bridge strips use the terrain material when available,
+            // so RWGRoadMaterial never leaks onto rural roads.
+            const bool bPavedRoad =
+                RoadType == EVoxelRWGRoadType::Main ||
+                RoadType == EVoxelRWGRoadType::Connector;
+            UMaterialInterface* SectionMaterial = bPavedRoad
+                ? EffectiveRoadMaterial
+                : (Material ? Material : UMaterial::GetDefaultMaterial(MD_Surface));
+            RWGRoadMesh->SetMaterial(SectionIndex, SectionMaterial);
         }
 
         UE_LOG(LogTemp, Display,
