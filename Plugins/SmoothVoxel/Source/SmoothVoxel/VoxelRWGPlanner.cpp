@@ -897,7 +897,9 @@ void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
                 float(FMath::Min(Settings.WorldBlocksX, Settings.WorldBlocksY)) * 0.27f;
             const bool bRuralConnection =
                 A.Type == EVoxelRWGSettlementType::Rural ||
-                B.Type == EVoxelRWGSettlementType::Rural;
+                A.Type == EVoxelRWGSettlementType::Village ||
+                B.Type == EVoxelRWGSettlementType::Rural ||
+                B.Type == EVoxelRWGSettlementType::Village;
             const EVoxelRWGRoadType Type = bHighway
                 ? EVoxelRWGRoadType::Main
                 : (bRuralConnection ? EVoxelRWGRoadType::Rural : EVoxelRWGRoadType::Connector);
@@ -937,7 +939,9 @@ void FVoxelRWGPlanner::BuildRoadNetwork(const FVoxelWorldGenerator& Generator)
                 if (D > MaxLoop || Random.FRand() > 0.19f) { continue; }
                 const bool bRuralConnection =
                     Settlements[A].Type == EVoxelRWGSettlementType::Rural ||
-                    Settlements[B].Type == EVoxelRWGSettlementType::Rural;
+                    Settlements[A].Type == EVoxelRWGSettlementType::Village ||
+                    Settlements[B].Type == EVoxelRWGSettlementType::Rural ||
+                    Settlements[B].Type == EVoxelRWGSettlementType::Village;
                 const EVoxelRWGRoadType LoopType = bRuralConnection
                     ? EVoxelRWGRoadType::Rural : EVoxelRWGRoadType::Connector;
                 if (BuildRoad(Settlements[A].Id, Settlements[A].Position,
