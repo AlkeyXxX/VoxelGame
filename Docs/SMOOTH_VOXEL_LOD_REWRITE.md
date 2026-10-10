@@ -61,6 +61,14 @@ winding separately from the stored outward normals.
 - Near collision is selected by distance to the chunk bounds rather than only
   to the chunk centre, and the procedural mesh explicitly blocks query/physics.
 
+## Transvoxel transition sample correctness
+
+Each of the 13 transition samples must evaluate the shared density field at its own world-space position. The four samples on the inward coarse layer are not interchangeable with the four corners on the boundary plane. Reusing the boundary values can distort the transition surface and contribute to patches or dark seams. The mesher now evaluates all 13 positions. A sloped-terrain automation test exercises the six transition directions and combined face masks; it still needs to be run in UE4.27.
+
+## Legacy player Blueprint warning
+
+The player Blueprint still has legacy block-interaction logic that expects an `AVoxelWorld` reference. The opt-in `ASmoothVoxelOctreeWorld` is a different class and does not populate that variable. In a test map using only the smooth manager, guard the existing block-interaction call with an `IsValid` check or disable that legacy interaction in the debug player Blueprint. This warning is separate from mesh topology.
+
 ## Coordinate contract
 
 - Unreal positions are in centimetres.
