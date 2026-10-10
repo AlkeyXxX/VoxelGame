@@ -251,7 +251,20 @@ void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 		LaunchQueuedBuilds(CameraLocation);
 		if (AreDesiredChunksReady())
 		{
+			// Commit this LOD selection atomically: retire the previous chunks
+			// first, then reveal newly built chunks. New child meshes stay hidden
+			// during async generation so they cannot z-fight with old coarse parents.
 			RetireUndesiredChunks();
+			for (const FSVoxelOctreeNode& Node : DesiredNodes)
+			{
+				if (ASmoothVoxelTransvoxelChunk* Chunk = ActiveChunks.FindRef(Node))
+				{
+					if (IsValid(Chunk))
+					{
+						Chunk->SetActorHiddenInGame(false);
+					}
+				}
+			}
 			bApplyingSelection = false;
 			bHasCompletedSelection = true;
 			LastCompletedCameraLocation = SelectionCameraLocation;
@@ -434,6 +447,9 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 				UE_LOG(LogTemp, Warning, TEXT("SmoothVoxelOctreeWorld: failed to spawn a chunk actor."));
 				return;
 			}
+			// The actor becomes visible only when every chunk in this new
+			// selection is ready and the old, overlapping LOD leaves are retired.
+			Chunk->SetActorHiddenInGame(true);
 			Chunk->SetTerrainMaterial(TerrainMaterial);
 			ActiveChunks.Add(Node, Chunk);
 		}
