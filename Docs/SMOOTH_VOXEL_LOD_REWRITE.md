@@ -16,7 +16,8 @@ The rewrite lives beside the current world and does not replace the legacy
    transition lookup tables, under the included MIT license, and emits a
    separate CPU mesh for one chunk.
 4. Unreal automation tests cover table validity, repeated density sampling,
-   octree balance and determinism, face masks, and a flat-terrain fixture.
+   octree balance/determinism, face-mask coverage, all six face flags, combined
+   face masks, and a flat coarse/fine seam fixture.
 5. An opt-in actor pair now drives the new path: an octree world manager plus
    async chunk actors, bounded parallel builds, height-envelope culling, and
    deferred retirement of old chunks until the requested set is ready.
@@ -53,9 +54,9 @@ transition faces meet.
 
 ## Next milestones
 
-6. Validate all six face orientations and combined edge/corner transitions,
-   normals, winding, degenerates, deterministic rebuilds, collision and LOD
-   changes in Unreal Editor.
-7. Integrate roads/water/biome/material/edit persistence into the shared field.
-8. Benchmark 4 x 4 km first; only expand toward 8 x 8 km after chunk streaming,
+5. Compile in UE4.27 and run the automation suite, then inspect all six face
+   orientations and combined edge/corner transitions, normals, winding,
+   degenerate triangles, collision and LOD changes in Unreal Editor.
+6. Integrate roads/water/biome/material/edit persistence into the shared field.
+7. Benchmark 4 x 4 km first; only expand toward 8 x 8 km after chunk streaming,
    memory use and frame-time have been measured.
