@@ -9,6 +9,9 @@ struct FVoxelMarchingCubesBuildInput
     int32 Size = 32;
     float VoxelSize = 100.0f;
 
+    // Number of UV repeats per voxel block (0.5 = one repeat every two blocks).
+    float UVScalePerBlock = 0.5f;
+
     /*
      * Density support is derived from blocks in the range [-1, Size].
      * Array side = Size + 2.
