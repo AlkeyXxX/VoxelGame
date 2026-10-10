@@ -85,17 +85,17 @@ void USmoothVoxelFlightComponent::TryBindInput()
 	FlightInputComponent->BindKey(
 		EKeys::F, IE_Pressed, this, &USmoothVoxelFlightComponent::ToggleFlight);
 	FlightInputComponent->BindKey(
-		EKeys::SpaceBar, IE_Pressed, this, &USmoothVoxelFlightComponent::BeginAscend);
+		EKeys::SpaceBar, IE_Pressed, this, &USmoothVoxelFlightComponent::BeginAscend).bConsumeInput = false;
 	FlightInputComponent->BindKey(
-		EKeys::SpaceBar, IE_Released, this, &USmoothVoxelFlightComponent::EndAscend);
+		EKeys::SpaceBar, IE_Released, this, &USmoothVoxelFlightComponent::EndAscend).bConsumeInput = false;
 	FlightInputComponent->BindKey(
-		EKeys::LeftControl, IE_Pressed, this, &USmoothVoxelFlightComponent::BeginDescend);
+		EKeys::LeftControl, IE_Pressed, this, &USmoothVoxelFlightComponent::BeginDescend).bConsumeInput = false;
 	FlightInputComponent->BindKey(
-		EKeys::LeftControl, IE_Released, this, &USmoothVoxelFlightComponent::EndDescend);
+		EKeys::LeftControl, IE_Released, this, &USmoothVoxelFlightComponent::EndDescend).bConsumeInput = false;
 	FlightInputComponent->BindKey(
-		EKeys::RightControl, IE_Pressed, this, &USmoothVoxelFlightComponent::BeginDescend);
+		EKeys::RightControl, IE_Pressed, this, &USmoothVoxelFlightComponent::BeginDescend).bConsumeInput = false;
 	FlightInputComponent->BindKey(
-		EKeys::RightControl, IE_Released, this, &USmoothVoxelFlightComponent::EndDescend);
+		EKeys::RightControl, IE_Released, this, &USmoothVoxelFlightComponent::EndDescend).bConsumeInput = false;
 
 	FlightInputComponent->RegisterComponent();
 	BoundController->PushInputComponent(FlightInputComponent);
