@@ -33,6 +33,10 @@ struct FVoxelMarchingCubesBuildInput
      */
     TArray<uint8> TerrainSurfaceBlocks;
 
+    // Separate from material hints: only paved/main roads use the custom road material.
+    // Dirt road surface blocks still need TerrainSurfaceBlocks for correct vertex colors.
+    TArray<uint8> TerrainRoadMaterialMask;
+
     TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> CancellationToken;
 
     void Init(int32 InSize)
@@ -47,6 +51,7 @@ struct FVoxelMarchingCubesBuildInput
         // Only generated world snapshots provide these optional surface hints.
         TerrainSurfaceHeights.Reset();
         TerrainSurfaceBlocks.Reset();
+        TerrainRoadMaterialMask.Reset();
     }
 };
 
