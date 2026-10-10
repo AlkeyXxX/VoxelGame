@@ -32,6 +32,9 @@ struct FVoxelRWGRoadStamp
     uint8 FillBlock = uint8(EVoxelBlock::Dirt);
     uint8 Priority = 0;
     bool bRoadSurface = true;
+    // Only paved/main and connector roads use the assigned PBR road material.
+    // Rural dirt roads and POI driveways keep their native block colors/material.
+    bool bUseRoadMaterial = false;
 };
 
 /*
