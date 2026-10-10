@@ -1,0 +1,175 @@
+#pragma kernel March
+#include "Assets/Resources/Compute/Utility/GetIndex.hlsl"
+#include "Assets/Resources/Compute/TerrainGeneration/BaseGeneration/MarchingTables.hlsl"
+#include "Assets/Resources/Compute/TerrainGeneration/BaseGeneration/CMapDataSampler.hlsl"
+
+struct vertex{
+    float3 tri;
+    float3 norm;
+    int2 material; //x = base, y = water
+};
+
+struct MarchCube{
+    Corner corners[8];
+};
+
+struct pInfo{
+    uint axis[3];
+};
+
+
+const static int numThreads = 8;
+
+
+
+/*               
+*  _____________  8  ------
+* |  _________  | 7 6      |<-NumOfPoints, Density Map Size
+* | |_|_|_|_|_| | 6 5 5 -  |
+* | |_|_|_|_|_| | 5 4 4  | |
+* | |_|_|_|_|_| | 4 3 3  |<+--ChunkSize / meshSkipInc
+* | |_|_|_|_|_| | 3 2 2  | |  "Real Vertices"
+* | |_|_|_|_|_| | 2 1 1 _| |
+* |_____________| 1_^_^____|
+*Purpose:           ^ | |
+*   Border Normals⅃ | |
+*          Last Edge⅃ |     
+*      Number of Cubes⅃
+*
+*    7---6----6
+*   7|       5|
+*  / 11      /10
+* 4--+-4---5  |
+* |  |     9  |
+* 8  3---2-+--2
+* | 3      | 1
+* 0----0---1/
+* 
+* z
+* ^     .--------.
+* |    /|       /|
+* |   / |      / |    y
+* |  .--+-----.  |   /\
+* |  |  |     |  |   /
+* |  |  .-----+--.  /
+* |  | /      | /  /
+* | xyz_______./  /
+* +---------> x  /
+*/
+
+//Output
+RWStructuredBuffer<uint> counter;
+uint3 counterInd; //x -> vertex, y -> baseTri, z -> waterTri
+
+RWStructuredBuffer<vertex> vertexes;
+
+RWStructuredBuffer<pInfo> triangles;
+RWStructuredBuffer<uint> triangleDict;
+uint bSTART_dict;
+uint bSTART_verts;
+uint bSTART_baseT;
+uint bSTART_waterT;
+
+
+
+MarchCube ReadCube(int3 coord){
+    MarchCube cube;
+    [unroll]for(int i = 0; i < 8; i++){
+        int3 sCoord = clamp(coord + positionFromIndex[i], 0, numCubesPerAxis + 2);
+        uint mapData = ReadMapData(sCoord);
+        cube.corners[i] = SampleStateInfo(mapData);
+    }
+    return cube;
+}
+
+
+float InvLerp(float p1Val, float p2Val) {
+    return (IsoLevel - p1Val) / (p2Val - p1Val);
+}
+
+void AddVertices(int3 coord, int caseIndex, uint state, in MarchCube cube){
+    uint CClass = CellClass(caseIndex);
+    uint count = VertexCount(CClass); 
+    for (uint i = 0; i < count; i++) {
+        uint edgeIndex = Vertices(caseIndex, i);
+        int3 pInd = cornerIndexFromEdge[edgeIndex];
+
+        if(pInd.x != 0) continue; //Duplicate Vertex
+
+        //Figure out point positions
+        int3 p1 = coord + positionFromIndex[pInd.x];
+        int3 p2 = coord + positionFromIndex[pInd.y];
+
+        if(any((uint)p2 >= numPointsPerAxis)) continue; //Out of Bounds
+
+        vertex newVert;
+        //Get point densities
+        float p1Val = cube.corners[pInd.x].density[state];
+        float p2Val = cube.corners[pInd.y].density[state];
+        float interpFactor = InvLerp(p1Val, p2Val);
+
+        newVert.tri = (p1 + interpFactor * (p2 - p1));
+        newVert.norm = GetVertexNormal(p1, pInd.z, interpFactor, state);
+        if((p1Val > p2Val) ^ (state == 0)) pInd.xy = pInd.yx; 
+        newVert.material = uint2(cube.corners[pInd.x].material, cube.corners[pInd.y].material);
+
+        //Append Vertex
+        int appendInd = 0;
+        InterlockedAdd(counter[counterInd.x], 1, appendInd);
+        vertexes[bSTART_verts + appendInd] = newVert;
+
+        //Set To Dictionary
+        triangleDict[3 * indexFromCoord(coord) + pInd.z + bSTART_dict] = appendInd;
+    }
+}
+
+void AddTriangulation(int caseIndex, int3 coord, int2 info){
+    uint CClass = CellClass(caseIndex); 
+    uint count = TriangleCount(CClass); 
+    for (uint i = 0; i < count; i++) {
+        pInfo baseTri;
+        [unroll] for(uint v = 0; v < 3; v++){ //Get the dict index locations of the vertices
+            uint vertexIndex = Triangulation(CClass, 3*i + v);
+            int3 cornerInfo = cornerIndexFromEdge[Vertices(caseIndex, vertexIndex)];
+            baseTri.axis[v] = indexFromCoord(coord + positionFromIndex[cornerInfo.x]) * 3 + cornerInfo.z;
+        }
+
+        //Append Base Triangle
+        int appendInd = 0;
+        InterlockedAdd(counter[info.y], 1, appendInd);
+        triangles[info.x + appendInd] = baseTri;
+    }
+}
+
+
+[numthreads(numThreads,numThreads,numThreads)]
+void March (uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= numPointsPerAxis))
+        return;
+
+    int3 oCoord = int3(id.xyz);
+    MarchCube cube = ReadCube(oCoord);//
+
+    uint terrIndex = 0;
+    uint tspIndex = 0;
+    uint waterIndex = 0;
+    [unroll] for(uint u = 0; u < 8; u++){
+        if ((cube.corners[u].density[0]) >= IsoLevel) terrIndex |= (1 << u);
+        if ((cube.corners[u].density[1]) >= IsoLevel) waterIndex |= (1 << u);
+        if ((cube.corners[u].density[2]) >= IsoLevel) tspIndex |= (1 << u);
+    }
+
+    //Generate Water first so terrain can override its geometry
+    AddVertices(oCoord, waterIndex, SAMPLE_WATER, cube);
+    AddVertices(oCoord, tspIndex, SAMPLE_TSP, cube);
+    AddVertices(oCoord, terrIndex, SAMPLE_TERRAIN, cube);
+
+    //Only add triangles if a valid cube
+    if(any(id >= (uint)numCubesPerAxis)) 
+        return;
+    
+    AddTriangulation(terrIndex, oCoord, int2(bSTART_baseT, counterInd.y));
+    AddTriangulation(tspIndex, oCoord, int2(bSTART_waterT, counterInd.z));
+    AddTriangulation(waterIndex, oCoord, int2(bSTART_waterT, counterInd.z));
+}
