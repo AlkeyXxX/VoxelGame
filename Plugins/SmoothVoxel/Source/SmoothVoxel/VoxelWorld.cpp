@@ -3978,6 +3978,9 @@ void AVoxelWorld::UpdateFarLOD(
     const float LODVoxelSize =
         VoxelSize;
 
+    const float LODUVScalePerBlock =
+        TerrainUVScalePerBlock;
+
     const int32 LODBeachWidth =
         BeachWidth;
 
@@ -4005,6 +4008,7 @@ void AVoxelWorld::UpdateFarLOD(
             LODWorldSizeY,
             LODChunkSize,
             LODVoxelSize,
+            LODUVScalePerBlock,
             LODBeachWidth,
             LODSeaLevel,
             LocalGeneration,
@@ -4038,6 +4042,9 @@ void AVoxelWorld::UpdateFarLOD(
 
             BuildInput.VoxelSize =
                 LODVoxelSize;
+
+            BuildInput.UVScalePerBlock =
+                LODUVScalePerBlock;
 
             BuildInput.BeachWidth =
                 LODBeachWidth;
