@@ -124,13 +124,14 @@ public:
 	float BaseVoxelSize = 100.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0", ClampMax="8"))
-	int32 MaxLod = 7;
+	int32 MaxLod = 6;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0.05", ClampMax="4.0"))
 	float SplitDistanceMultiplier = 0.75f;
 
-	/** Anchor for the moving root window. The active window centre is snapped
-	 * in half-root-size increments around this anchor as the followed actor moves.
+	/** Anchor for the moving root window. The active XY centre is snapped in
+	 * half-root-size increments around this anchor as the followed actor moves;
+	 * the vertical range stays fixed so upward flight does not discard terrain.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree")
 	FVector RootWorldCenter = FVector::ZeroVector;
