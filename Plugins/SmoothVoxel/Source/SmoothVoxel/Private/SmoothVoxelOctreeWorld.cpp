@@ -14,6 +14,9 @@ ASmoothVoxelTransvoxelChunk::ASmoothVoxelTransvoxelChunk()
 	RootComponent = Mesh;
 	Mesh->bUseAsyncCooking = true;
 	Mesh->bUseComplexAsSimpleCollision = true;
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Mesh->SetCollisionObjectType(ECC_WorldStatic);
+	Mesh->SetCollisionResponseToAllChannels(ECR_Block);
 	Mesh->SetMobility(EComponentMobility::Movable);
 }
 
@@ -386,12 +389,19 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 		const FVector ChunkOrigin = SelectionSettings.WorldOrigin +
 			FVector(Node.OriginCells.X, Node.OriginCells.Y, Node.OriginCells.Z) *
 				SelectionSettings.BaseVoxelSize;
-		const FVector ChunkCenter = ChunkOrigin + FVector(
-			Node.GetWorldSize(SelectionSettings.CellsPerAxis, SelectionSettings.BaseVoxelSize) * 0.5f);
+		const float NodeWorldSize = Node.GetWorldSize(
+			SelectionSettings.CellsPerAxis, SelectionSettings.BaseVoxelSize);
+		const FVector ChunkBoundsSize(NodeWorldSize);
+		const FBox ChunkBounds(ChunkOrigin, ChunkOrigin + ChunkBoundsSize);
+
+		// Test the distance to the chunk AABB, not its centre. A player can be
+		// standing on a chunk edge while the centre of a coarse chunk is far
+		// outside CollisionRadius; the centre-only test left such terrain
+		// visible but non-collidable.
 		const bool bCollision =
 			bGenerateNearCollision &&
 			Node.Lod <= FMath::Clamp(CollisionMaxLod, 0, 8) &&
-			FVector::DistSquared(ChunkCenter, CameraLocation) <= CollisionRadiusSq;
+			ChunkBounds.ComputeSquaredDistanceToPoint(CameraLocation) <= CollisionRadiusSq;
 
 		ASmoothVoxelTransvoxelChunk* Chunk = ActiveChunks.FindRef(Node);
 		if (!IsValid(Chunk))
