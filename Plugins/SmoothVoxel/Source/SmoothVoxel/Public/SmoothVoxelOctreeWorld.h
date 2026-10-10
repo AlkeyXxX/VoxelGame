@@ -142,10 +142,12 @@ public:
 	float HeightAmplitude = 850.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
-	float NoiseScale = 0.0035f;
+	// Frequencies are in inverse centimetres. Keep the highest FBM octave
+	// comfortably below the Nyquist limit of 100 cm terrain samples.
+	float NoiseScale = 0.0008f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
-	float DetailScale = 0.0050f;
+	float DetailScale = 0.0006f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
 	float DetailAmplitude = 60.0f;
