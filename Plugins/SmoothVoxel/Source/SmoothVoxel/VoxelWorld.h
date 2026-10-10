@@ -284,7 +284,7 @@ public:
 
     /* Дальность LOD1 в чанках. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="32"))
-    int32 LOD1Radius = 6;
+    int32 LOD1Radius = 8;
 
     /* Дальность LOD2 в чанках. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="64"))
