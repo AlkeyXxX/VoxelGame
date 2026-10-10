@@ -39,6 +39,14 @@ derive correct face masks, keep a consistent world-space density field, retain
 old meshes until replacements finish, and test edges/corners where multiple
 transition faces meet.
 
+## Triangle winding and collision
+
+`FSVoxelTransvoxelMesher::AppendCellToMesh` retains outward shading normals but
+orders triangle indices using Unreal's front-face convention. A mismatch here
+can make a one-sided procedural surface visible only from below and interfere
+with triangle-mesh collision. The flat-field automation test checks the index
+winding separately from the stored outward normals.
+
 ## Runtime tuning notes
 
 - Terrain frequency parameters are in inverse centimetres because the density
