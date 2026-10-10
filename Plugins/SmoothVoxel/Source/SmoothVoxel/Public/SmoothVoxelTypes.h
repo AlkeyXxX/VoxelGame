@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ProceduralMeshComponent.h"
 #include "SmoothVoxelTypes.generated.h"
 
 USTRUCT(BlueprintType)
@@ -20,12 +21,16 @@ struct FSVoxelMeshData
     UPROPERTY()
     TArray<FVector2D> UV0;
 
+    UPROPERTY()
+    TArray<FProcMeshTangent> Tangents;
+
     void Reset()
     {
         Vertices.Reset();
         Triangles.Reset();
         Normals.Reset();
         UV0.Reset();
+        Tangents.Reset();
     }
 
     bool IsEmpty() const
