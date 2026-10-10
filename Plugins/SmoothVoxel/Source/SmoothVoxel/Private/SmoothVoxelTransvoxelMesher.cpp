@@ -38,7 +38,7 @@ namespace
 	}
 
 	FVector SampleOutwardNormal(
-			const FVector& WorldPosition,
+		const FVector& WorldPosition,
 		const FSVoxelGenerationSettings& Settings,
 		float SampleStep)
 	{
@@ -428,6 +428,13 @@ void FSVoxelTransvoxelMesher::Generate(
 		return;
 	}
 
+	// The explicit mesher arguments are authoritative. Runtime callers already
+	// pass these values through Settings, but automation fixtures and other
+	// callers may not have prefilled them.
+	FSVoxelGenerationSettings MeshSettings = Settings;
+	MeshSettings.CellsPerAxis = CellsPerAxis;
+	MeshSettings.VoxelSize = VoxelSize;
+
 	const int32 SamplesPerAxis = CellsPerAxis + 1;
 	const int64 SampleCount64 =
 		static_cast<int64>(SamplesPerAxis) * SamplesPerAxis * SamplesPerAxis;
@@ -527,7 +534,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					false, Settings, TransitionFaceMask, ChunkSize, OutMesh);
+					false, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh);
 			}
 		}
 	}
@@ -618,7 +625,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					bTableFlip, Settings, TransitionFaceMask, ChunkSize, OutMesh);
+					bTableFlip, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh);
 			}
 		}
 	}
