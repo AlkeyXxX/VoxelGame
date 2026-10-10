@@ -35,12 +35,15 @@ The rewrite lives beside the current world and does not replace the legacy
 The new mesher and octree selector are attached to a separate, opt-in terrain
 manager that follows a pawn or configured actor and streams chunks as the view
 moves. It uses an async build limit, rejects stale build results, and keeps
-old chunks until the requested set is ready. The root is a rolling finite
-window, not an unbounded world at once: it shifts horizontally by half its width
-and keeps 50% overlap to avoid stopping terrain generation at the original root
-boundary. Its vertical interval remains anchored to `RootWorldCenter.Z`. The
-default maximum LOD is 6 (up to 64 m between samples with a 1 m base voxel) to
-reduce distant faceting compared with the former 128 m maximum step.
+the old mesh set visible while new chunks are built hidden. When the full
+desired set is ready, it retires old leaves and reveals new leaves together,
+avoiding overlap and z-fighting between old coarse parents and new fine children.
+The root is a rolling finite window, not an unbounded world at once: it shifts
+horizontally by half its width and keeps 50% overlap to avoid stopping terrain
+generation at the original root boundary. Its vertical interval remains
+anchored to `RootWorldCenter.Z`. The default maximum LOD is 6 (up to 64 m
+between samples with a 1 m base voxel) to reduce distant faceting compared with
+the former 128 m maximum step.
 It has not been compiled or run in UE4.27 in this environment, so automation
 tests are added but **not verified in Unreal Editor yet**. No claim is made that
 all seams, collision contacts, edge/corner junctions, material boundaries or
