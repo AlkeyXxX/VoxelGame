@@ -813,16 +813,33 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 			continue;
 		}
 
-		// UE4's procedural mesh front-face winding is opposite the outward
-		// surface normal, so the final index cross should point into solid.
-		// Sample every ninth triangle on both sides of its face to catch
-		// orientation inversions around mining cavities and underside surfaces.
+			// UE4's procedural-mesh front-face convention used by this project
+		// expects the index cross to point into solid, opposite the outward
+		// shading normal. Check every triangle so an edited patch cannot silently
+		// accumulate a few reversed/back-face-culled triangles.
+		if (Mesh.Normals.IsValidIndex(A) &&
+			Mesh.Normals.IsValidIndex(B) &&
+			Mesh.Normals.IsValidIndex(C))
+		{
+			const FVector ExpectedOutward = (
+				Mesh.Normals[A] + Mesh.Normals[B] + Mesh.Normals[C]).GetSafeNormal();
+			if (ExpectedOutward.SizeSquared() > SMALL_NUMBER)
+			{
+				bSampledFacesPointIntoSolid &=
+					FVector::DotProduct(Cross, ExpectedOutward) <= 0.001f;
+				++OrientedFacesChecked;
+			}
+		}
+
+		// Also validate the actual density sides on a subset of triangles. The
+		// comparison only means anything if the probes straddle the isosurface;
+		// comparing arbitrary density magnitudes on the same side was the old bug.
 		if ((Index / 3) % 9 == 0)
 		{
 			const FVector FaceDirection = Cross.GetSafeNormal();
 			const FVector Center = (
 				Mesh.Vertices[A] + Mesh.Vertices[B] + Mesh.Vertices[C]) / 3.0f;
-			const float Probe = 1.0f;
+			const float Probe = FMath::Max(5.0f, Settings.VoxelSize * 0.1f);
 			const float AlongFace = FSVoxelGenerator::SampleDensity(
 				Center.X + FaceDirection.X * Probe,
 				Center.Y + FaceDirection.Y * Probe,
@@ -833,9 +850,8 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 				Center.Y - FaceDirection.Y * Probe,
 				Center.Z - FaceDirection.Z * Probe,
 				Settings);
-			if (FMath::Abs(AlongFace - AgainstFace) > 0.1f)
+			if ((AlongFace > Settings.IsoLevel) != (AgainstFace > Settings.IsoLevel))
 			{
-				++OrientedFacesChecked;
 				bSampledFacesPointIntoSolid &= AlongFace > AgainstFace;
 			}
 		}
