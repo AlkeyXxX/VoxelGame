@@ -100,7 +100,22 @@ namespace
 		const FSVoxelGenerationSettings& Settings,
 		float SampleStep)
 	{
-		const float H = FMath::Max(5.0f, SampleStep);
+		const bool bNearBlockEdit = HasBlockEditNearPosition(LocalPosition, Settings);
+
+		// The global terrain normal radius (typically half a base voxel) is too
+		// wide for the small SDF recesses made by the first mining hits. Using it
+		// here averages the untouched hill through the crater and can orient the
+		// newly exposed side faces as if they were still part of the hill.
+		// Restrict only edited vertices to a local gradient sample; unedited
+		// terrain keeps the established world-space step and the same cost.
+		float H = FMath::Max(5.0f, SampleStep);
+		if (bNearBlockEdit)
+		{
+			H = FMath::Min(
+				H,
+				FMath::Max(2.0f, Settings.BaseVoxelSize * 0.1f));
+		}
+
 		const double HeightXP = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
 			LocalPosition + FVector(H, 0.0f, 0.0f), Settings);
 		const double HeightXM = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
@@ -109,8 +124,6 @@ namespace
 			LocalPosition + FVector(0.0f, H, 0.0f), Settings);
 		const double HeightYM = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
 			LocalPosition - FVector(0.0f, H, 0.0f), Settings);
-
-		const bool bNearBlockEdit = HasBlockEditNearPosition(LocalPosition, Settings);
 
 		// A plain height field has an inexpensive analytical finite-difference
 		// normal. Once mining/placement has modified the SDF, that shortcut is
