@@ -285,7 +285,7 @@ public:
 
 	/** Maximum small-scale variation over flatlands, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="100.0", Units="cm"))
-	float FlatlandNoiseAmplitude = 35.0f;
+	float FlatlandNoiseAmplitude = 0.0f;
 
 	/** Scale of broad, smooth hills. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0000001", ClampMax="0.00002"))
