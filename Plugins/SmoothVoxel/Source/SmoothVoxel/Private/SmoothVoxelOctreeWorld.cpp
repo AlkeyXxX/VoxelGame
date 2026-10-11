@@ -11,6 +11,16 @@
 #include "GameFramework/Pawn.h"
 #include "InputCoreTypes.h"
 
+namespace
+{
+	// Only these materials are fused into the smooth terrain SDF. All other
+	// placeable solid blocks use an independent hard-edged cube mesh.
+	bool IsSmoothTerrainBlock(EVoxelBlock Block)
+	{
+		return Block == EVoxelBlock::Dirt || Block == EVoxelBlock::Sand;
+	}
+}
+
 ASmoothVoxelTransvoxelChunk::ASmoothVoxelTransvoxelChunk()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -252,6 +262,129 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	bBuildFailed = false;
 }
 
+ASmoothVoxelPlacedCubeBlock::ASmoothVoxelPlacedCubeBlock()
+{
+	PrimaryActorTick.bCanEverTick = false;
+
+	Mesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("PlacedCubeMesh"));
+	RootComponent = Mesh;
+	Mesh->bUseAsyncCooking = true;
+	Mesh->bUseComplexAsSimpleCollision = true;
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Mesh->SetCollisionObjectType(ECC_WorldStatic);
+	Mesh->SetCollisionResponseToAllChannels(ECR_Block);
+	Mesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+}
+
+void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
+	EVoxelBlock InBlockType,
+	const FIntVector& InCell,
+	float InBlockSize,
+	UMaterialInterface* InMaterial)
+{
+	BlockType = InBlockType;
+	BlockCell = InCell;
+
+	const float Size = FMath::Max(1.0f, InBlockSize);
+	SetActorLocation(FVector(
+		static_cast<float>(InCell.X) * Size,
+		static_cast<float>(InCell.Y) * Size,
+		static_cast<float>(InCell.Z) * Size));
+
+	if (!Mesh)
+	{
+		return;
+	}
+
+	if (InMaterial)
+	{
+		Mesh->SetMaterial(0, InMaterial);
+	}
+
+	TArray<FVector> Vertices;
+	TArray<int32> Triangles;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UV0;
+	TArray<FLinearColor> Colors;
+	TArray<FProcMeshTangent> Tangents;
+	Vertices.Reserve(24);
+	Triangles.Reserve(36);
+	Normals.Reserve(24);
+	UV0.Reserve(24);
+	Colors.Reserve(24);
+	Tangents.Reserve(24);
+
+	const auto AddFace = [&](
+		const FVector& A,
+		const FVector& B,
+		const FVector& C,
+		const FVector& D,
+		const FVector& FaceNormal)
+	{
+		const int32 First = Vertices.Num();
+		const FVector FaceTangent = (D - A).GetSafeNormal();
+		Vertices.Add(A);
+		Vertices.Add(B);
+		Vertices.Add(C);
+		Vertices.Add(D);
+		Normals.Add(FaceNormal);
+		Normals.Add(FaceNormal);
+		Normals.Add(FaceNormal);
+		Normals.Add(FaceNormal);
+		UV0.Add(FVector2D(0.0f, 0.0f));
+		UV0.Add(FVector2D(0.0f, 1.0f));
+		UV0.Add(FVector2D(1.0f, 1.0f));
+		UV0.Add(FVector2D(1.0f, 0.0f));
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			Colors.Add(FLinearColor::White);
+			Tangents.Add(FProcMeshTangent(FaceTangent, false));
+		}
+		Triangles.Add(First);
+		Triangles.Add(First + 1);
+		Triangles.Add(First + 2);
+		Triangles.Add(First);
+		Triangles.Add(First + 2);
+		Triangles.Add(First + 3);
+	};
+
+	// Every face owns its four vertices: this is deliberate. Reusing shared
+	// corners would average normals and round the block under smooth shading.
+	AddFace(
+		FVector(0, 0, 0), FVector(0, 0, Size), FVector(0, Size, Size), FVector(0, Size, 0),
+		FVector(-1, 0, 0));
+	AddFace(
+		FVector(Size, 0, 0), FVector(Size, Size, 0), FVector(Size, Size, Size), FVector(Size, 0, Size),
+		FVector(1, 0, 0));
+	AddFace(
+		FVector(0, 0, 0), FVector(Size, 0, 0), FVector(Size, 0, Size), FVector(0, 0, Size),
+		FVector(0, -1, 0));
+	AddFace(
+		FVector(0, Size, 0), FVector(0, Size, Size), FVector(Size, Size, Size), FVector(Size, Size, 0),
+		FVector(0, 1, 0));
+	AddFace(
+		FVector(0, 0, 0), FVector(0, Size, 0), FVector(Size, Size, 0), FVector(Size, 0, 0),
+		FVector(0, 0, -1));
+	AddFace(
+		FVector(0, 0, Size), FVector(Size, 0, Size), FVector(Size, Size, Size), FVector(0, Size, Size),
+		FVector(0, 0, 1));
+
+	Mesh->ClearAllMeshSections();
+	Mesh->CreateMeshSection_LinearColor(
+		0,
+		Vertices,
+		Triangles,
+		Normals,
+		UV0,
+		TArray<FVector2D>(),
+		TArray<FVector2D>(),
+		TArray<FVector2D>(),
+		Colors,
+		Tangents,
+		true);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+}
+
 ASmoothVoxelOctreeWorld::ASmoothVoxelOctreeWorld()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -267,6 +400,15 @@ void ASmoothVoxelOctreeWorld::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 	ActiveChunks.Reset();
+
+	for (TPair<FIntVector, ASmoothVoxelPlacedCubeBlock*>& Pair : PlacedCubeBlocks)
+	{
+		if (IsValid(Pair.Value))
+		{
+			Pair.Value->Destroy();
+		}
+	}
+	PlacedCubeBlocks.Reset();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -478,17 +620,67 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 
 void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(const FIntVector& Cell, EVoxelBlock Block)
 {
-	const int8 EditState = Block == EVoxelBlock::Air ? int8(-1) : int8(1);
-	EditedBlockCells.Add(Cell, EditState);
-	if (EditState > 0)
+	ASmoothVoxelPlacedCubeBlock* ExistingCube = PlacedCubeBlocks.FindRef(Cell);
+	const bool bRemoveBlock = Block == EVoxelBlock::Air;
+	const bool bSmoothBlock = !bRemoveBlock && IsSmoothTerrainBlock(Block);
+	int8 EditState = -1;
+
+	if (bRemoveBlock)
 	{
+		// Leave an explicit air override so procedural terrain cannot refill a
+		// mined cell when adjacent chunks rebuild.
+		if (IsValid(ExistingCube))
+		{
+			ExistingCube->Destroy();
+		}
+		PlacedCubeBlocks.Remove(Cell);
+		EditedBlockTypes.Remove(Cell);
+		EditState = -1;
+	}
+	else if (bSmoothBlock)
+	{
+		// Soil/sand are blended into the scalar terrain field and never get a
+		// cube actor. Rounded SDF union keeps their silhouette terrain-like.
+		if (IsValid(ExistingCube))
+		{
+			ExistingCube->Destroy();
+		}
+		PlacedCubeBlocks.Remove(Cell);
 		EditedBlockTypes.Add(Cell, Block);
+		EditState = 1;
 	}
 	else
 	{
-		EditedBlockTypes.Remove(Cell);
+		// Hard blocks reserve an air-shaped cell in the terrain SDF; their actual
+		// visible/collidable shape is a separate flat-shaded cube mesh.
+		ASmoothVoxelPlacedCubeBlock* Cube = ExistingCube;
+		if (!IsValid(Cube))
+		{
+			if (!GetWorld())
+			{
+				return;
+			}
+
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.Owner = this;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Cube = GetWorld()->SpawnActor<ASmoothVoxelPlacedCubeBlock>(
+				FVector::ZeroVector,
+				FRotator::ZeroRotator,
+				SpawnParams);
+			if (!IsValid(Cube))
+			{
+				return;
+			}
+			PlacedCubeBlocks.Add(Cell, Cube);
+		}
+
+		Cube->ConfigureBlock(Block, Cell, GetEffectiveBlockSize(), TerrainMaterial);
+		EditedBlockTypes.Add(Cell, Block);
+		EditState = 2;
 	}
 
+	EditedBlockCells.Add(Cell, EditState);
 	BlockEditSnapshot = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells);
 	RebuildChunksNearEditedCell(Cell);
 }
@@ -559,42 +751,54 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		return false;
 	}
 
-	ASmoothVoxelTransvoxelChunk* HitChunk = Cast<ASmoothVoxelTransvoxelChunk>(Hit.GetActor());
-	if (!HitChunk || HitChunk->GetOwner() != this)
+	FIntVector Cell = FIntVector::ZeroValue;
+	EVoxelBlock HitBlock = EVoxelBlock::Air;
+	ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor());
+	if (IsValid(HitCube) && HitCube->GetOwner() == this)
 	{
-		return false;
+		// Cube collision is exact, so use the cell stored on the actor rather
+		// than trying to infer it again from a collision-face normal.
+		Cell = HitCube->BlockCell;
+		HitBlock = HitCube->BlockType;
 	}
+	else
+	{
+		ASmoothVoxelTransvoxelChunk* HitChunk = Cast<ASmoothVoxelTransvoxelChunk>(Hit.GetActor());
+		if (!HitChunk || HitChunk->GetOwner() != this)
+		{
+			return false;
+		}
 
-	const float Step = GetEffectiveBlockSize();
-	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
-	const FVector InsidePoint = Hit.ImpactPoint - Normal * (Step * 0.2f);
-	// Choose the cell touching the surface rather than shifting a half-cell
-	// inward; the latter can leave the carved box just below the visible surface.
-	const FIntVector Cell = WorldPositionToBlockCell(Hit.ImpactPoint - Normal * (Step * 0.05f));
-	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
-	if (ExistingEdit && *ExistingEdit < 0)
-	{
-		return false;
-	}
-	if (SampleCurrentDensityAt(InsidePoint) <= 0.0f)
-	{
-		return false;
-	}
+		const float Step = GetEffectiveBlockSize();
+		const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
+		const FVector InsidePoint = Hit.ImpactPoint - Normal * FMath::Max(0.5f, Step * 0.2f);
+		// Derive both the occupancy check and cell identity from the same point
+		// inside the hit surface; previously the two different offsets could
+		// test one cell but carve its neighbour on steep slopes.
+		Cell = WorldPositionToBlockCell(InsidePoint);
 
-	EVoxelBlock HitBlock = GetBlockTypeForCell(Cell);
-	if (HitBlock == EVoxelBlock::Air)
-	{
-		// On a steep slope, the cell centre may lie just outside the surface even
-		// though the ray is inside solid terrain. Use the actual hit column to
-		// classify that natural surface cell in this case.
-		const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
-		const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
-			static_cast<double>(InsidePoint.X),
-			static_cast<double>(InsidePoint.Y),
-			Settings);
-		const double Depth = SurfaceHeight - static_cast<double>(InsidePoint.Z);
-		HitBlock = Depth <= Step * 1.25 ? EVoxelBlock::Grass :
-			(Depth <= Step * 4.0 ? EVoxelBlock::Dirt : EVoxelBlock::Stone);
+		const int8* ExistingEdit = EditedBlockCells.Find(Cell);
+		if (ExistingEdit && *ExistingEdit < 0)
+		{
+			return false;
+		}
+		if (SampleCurrentDensityAt(InsidePoint) <= 0.0f)
+		{
+			return false;
+		}
+
+		HitBlock = GetBlockTypeForCell(Cell);
+		if (HitBlock == EVoxelBlock::Air)
+		{
+			const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
+			const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
+				static_cast<double>(InsidePoint.X),
+				static_cast<double>(InsidePoint.Y),
+				Settings);
+			const double Depth = SurfaceHeight - static_cast<double>(InsidePoint.Z);
+			HitBlock = Depth <= Step * 1.25 ? EVoxelBlock::Grass :
+				(Depth <= Step * 4.0 ? EVoxelBlock::Dirt : EVoxelBlock::Stone);
+		}
 	}
 
 	if (!UVoxelBlockLibrary::CanBreakBlockFromTable(BlockDataTable, HitBlock))
