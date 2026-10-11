@@ -853,6 +853,13 @@ void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
 
 	WaterSurfaceActor->SetActorHiddenInGame(false);
 	WaterSurfaceActor->SetActorEnableCollision(bWaterCollision);
+	const float WaterSettingsStep = FMath::Max(1.0f, BaseVoxelSize);
+	const FSVoxelGenerationSettings WaterGenerationSettings = MakeGenerationSettings(
+		FVector::ZeroVector,
+		FIntVector::ZeroValue,
+		WaterSettingsStep,
+		WaterSettingsStep,
+		false);
 	WaterSurfaceActor->ConfigureSurface(
 		RootWorldCenter,
 		GetWorldSizeCentimeters(),
@@ -860,6 +867,7 @@ void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
 		WaterTileSize,
 		WaterGridResolution,
 		WaterMaterial,
+		WaterGenerationSettings,
 		bWaterCollision);
 }
 
@@ -1273,6 +1281,10 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 		FMath::Max(1.0f, EffectiveBaseVoxelSize) * static_cast<float>(1 << SafeMaxLod);
 	FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(Settings, CoarsestVoxelStep);
 	Settings.DetailAmplitude = DetailAmplitude;
+	Settings.bEnableRivers = bEnableRivers;
+	Settings.RiverScale = RiverScale;
+	Settings.RiverHalfWidth = RiverHalfWidth;
+	Settings.RiverDepth = RiverDepth;
 	Settings.BottomDepth = BottomDepth;
 	Settings.bEnableCaves = bEnableCaves;
 	Settings.CaveScale = CaveScale;
