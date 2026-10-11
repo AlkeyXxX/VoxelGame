@@ -91,20 +91,6 @@ namespace
         return FMath::Lerp(B, A, H) + BlendWidth * H * (1.0 - H);
     }
 
-    FORCEINLINE double SmoothMinimum(double A, double B, double BlendWidth)
-    {
-        if (BlendWidth <= SMALL_NUMBER)
-        {
-            return FMath::Min(A, B);
-        }
-
-        const double H = FMath::Clamp(
-            0.5 + 0.5 * (B - A) / BlendWidth,
-            0.0,
-            1.0);
-        return FMath::Lerp(B, A, H) - BlendWidth * H * (1.0 - H);
-    }
-
     FORCEINLINE double BoxSdf(
         double X,
         double Y,
