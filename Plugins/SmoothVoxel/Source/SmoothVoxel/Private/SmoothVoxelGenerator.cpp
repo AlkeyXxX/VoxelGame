@@ -226,19 +226,8 @@ float FSVoxelGenerator::FBM3D(
 // DENSITY
 // ============================================================
 
-float FSVoxelGenerator::Density(
-    double X,
-    double Y,
-    double Z,
-    const FSVoxelGenerationSettings& S)
+double FSVoxelGenerator::SampleSurfaceHeight(double X, double Y, const FSVoxelGenerationSettings& S)
 {
-    // Positive = solid.
-    // Negative = air.
-
-    // --------------------------------------------------------
-    // TERRAIN HEIGHT
-    // --------------------------------------------------------
-
     const double Macro = FBM2D(
         X * static_cast<double>(S.NoiseScale),
         Y * static_cast<double>(S.NoiseScale),
@@ -249,78 +238,114 @@ float FSVoxelGenerator::Density(
         Y * static_cast<double>(S.DetailScale),
         S.Seed + 777);
 
-    const double SurfaceHeight =
-        static_cast<double>(S.BaseHeight) +
+    return static_cast<double>(S.BaseHeight) +
         Macro * static_cast<double>(S.HeightAmplitude) +
         Detail * static_cast<double>(S.DetailAmplitude);
+}
 
-    // --------------------------------------------------------
-    // BASE DENSITY
-    // --------------------------------------------------------
-
-    double D = SurfaceHeight - Z;
-
-    // --------------------------------------------------------
-    // BOTTOM
-    // --------------------------------------------------------
-
-    if (Z < SurfaceHeight - S.BottomDepth)
+double FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
+    const FVector& LocalPosition,
+    const FSVoxelGenerationSettings& Settings)
+{
+    double WorldX;
+    double WorldY;
+    if (Settings.bUseChunkLatticeCoordinates)
     {
-        D = 1.0f;
+        const double BaseStep = static_cast<double>(Settings.BaseVoxelSize);
+        WorldX = static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep +
+            static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep +
+            static_cast<double>(LocalPosition.Y);
+    }
+    else
+    {
+        WorldX = static_cast<double>(Settings.ChunkWorldOrigin.X) +
+            static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkWorldOrigin.Y) +
+            static_cast<double>(LocalPosition.Y);
     }
 
-    // --------------------------------------------------------
-    // CAVES
-    // --------------------------------------------------------
+    return SampleSurfaceHeight(WorldX, WorldY, Settings);
+}
+
+float FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+    const FVector& LocalPosition,
+    double SurfaceHeight,
+    const FSVoxelGenerationSettings& Settings)
+{
+    double WorldX;
+    double WorldY;
+    double WorldZ;
+    if (Settings.bUseChunkLatticeCoordinates)
+    {
+        const double BaseStep = static_cast<double>(Settings.BaseVoxelSize);
+        WorldX = static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep +
+            static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep +
+            static_cast<double>(LocalPosition.Y);
+        WorldZ = static_cast<double>(Settings.ChunkOriginCells.Z) * BaseStep +
+            static_cast<double>(LocalPosition.Z);
+    }
+    else
+    {
+        WorldX = static_cast<double>(Settings.ChunkWorldOrigin.X) +
+            static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkWorldOrigin.Y) +
+            static_cast<double>(LocalPosition.Y);
+        WorldZ = static_cast<double>(Settings.ChunkWorldOrigin.Z) +
+            static_cast<double>(LocalPosition.Z);
+    }
+
+    return DensityFromSurfaceHeight(WorldX, WorldY, WorldZ, SurfaceHeight, Settings);
+}
+
+float FSVoxelGenerator::Density(
+    double X,
+    double Y,
+    double Z,
+    const FSVoxelGenerationSettings& S)
+{
+    return DensityFromSurfaceHeight(X, Y, Z, SampleSurfaceHeight(X, Y, S), S);
+}
+
+float FSVoxelGenerator::DensityFromSurfaceHeight(
+    double X,
+    double Y,
+    double Z,
+    double SurfaceHeight,
+    const FSVoxelGenerationSettings& S)
+{
+    // Positive = solid, negative = air.
+    double D = SurfaceHeight - Z;
+
+    // Preserve the solid-bottom behaviour of the original density field.
+    if (Z < SurfaceHeight - S.BottomDepth)
+    {
+        D = 1.0;
+    }
 
     if (S.bEnableCaves && S.CaveStrength > 0.0f)
     {
-        const float Cave =
-            FBM3D(
-                X * static_cast<double>(S.CaveScale),
-                Y * static_cast<double>(S.CaveScale),
-                Z * static_cast<double>(S.CaveScale),
-                S.Seed + 4242);
+        const float Cave = FBM3D(
+            X * static_cast<double>(S.CaveScale),
+            Y * static_cast<double>(S.CaveScale),
+            Z * static_cast<double>(S.CaveScale),
+            S.Seed + 4242);
 
-        // Convert cave noise into a smooth 0..1 mask.
-        //
-        // Below threshold = no cave.
-        // Above threshold = gradually stronger carving.
-
-        const float Range =
-            FMath::Max(
-                0.001f,
-                1.0f - S.CaveThreshold);
-
-        float T =
-            (Cave - S.CaveThreshold) / Range;
-
+        const float Range = FMath::Max(0.001f, 1.0f - S.CaveThreshold);
+        float T = (Cave - S.CaveThreshold) / Range;
         T = FMath::Clamp(T, 0.0f, 1.0f);
+        const float CaveMask = T * T * (3.0f - 2.0f * T);
 
-        // Smoothstep.
-        const float CaveMask =
-            T * T * (3.0f - 2.0f * T);
-
-        // Only carve existing solid.
-        if (D > 0.0f)
+        if (D > 0.0)
         {
-            // Much weaker than the old 2500 value.
-            //
-            // The old value was large enough to create huge,
-            // aggressive density changes.
-
-            const float CaveCarve =
-                CaveMask *
-                600.0f *
-                S.CaveStrength;
-
+            const float CaveCarve = CaveMask * 600.0f * S.CaveStrength;
             D -= CaveCarve;
         }
     }
 
     return static_cast<float>(D);
 }
-
 
 float FSVoxelGenerator::SampleDensity(
     double WorldX,
