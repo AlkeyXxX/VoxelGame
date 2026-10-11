@@ -680,4 +680,38 @@ bool FSmoothVoxelTransvoxelMixedBoundaryOffsetTest::RunTest(const FString& Param
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelBlockEditDensityTest,
+	"SmoothVoxel.Transvoxel.BlockEditsCreateAndRemoveSolidVolumes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelBlockEditDensityTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.BaseHeight = 0.0f;
+	Settings.HeightAmplitude = 0.0f;
+	Settings.DetailAmplitude = 0.0f;
+	Settings.NoiseScale = 0.0f;
+	Settings.DetailScale = 0.0f;
+	Settings.BaseVoxelSize = 100.0f;
+	Settings.BottomDepth = 2000.0f;
+	Settings.bEnableCaves = false;
+	Settings.IsoLevel = 0.0f;
+
+	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
+		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
+	Edits->Add(FIntVector(0, 0, 0), int8(1));   // Place one solid cell above the surface.
+	Edits->Add(FIntVector(0, 0, -1), int8(-1)); // Carve one cell below the surface.
+	Settings.BlockEdits = Edits;
+
+	const float PlacedCellDensity = FSVoxelGenerator::SampleDensity(50.0, 50.0, 50.0, Settings);
+	const float RemovedCellDensity = FSVoxelGenerator::SampleDensity(50.0, 50.0, -50.0, Settings);
+	const float UnmodifiedDensity = FSVoxelGenerator::SampleDensity(250.0, 250.0, 50.0, Settings);
+
+	TestTrue(TEXT("A solid block edit must add positive density inside its cell"), PlacedCellDensity > 0.0f);
+	TestTrue(TEXT("An air block edit must carve negative density out of solid terrain"), RemovedCellDensity < 0.0f);
+	TestTrue(TEXT("Samples outside edited cells must preserve the procedural density field"), UnmodifiedDensity < 0.0f);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
