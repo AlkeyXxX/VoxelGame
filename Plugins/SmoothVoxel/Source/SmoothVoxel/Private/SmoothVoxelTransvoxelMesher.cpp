@@ -38,23 +38,30 @@ namespace
 	}
 
 	FVector SampleOutwardNormal(
-		const FVector& WorldPosition,
+		const FVector& LocalPosition,
 		const FSVoxelGenerationSettings& Settings,
 		float SampleStep)
 	{
 		const float H = FMath::Max(5.0f, SampleStep);
 		const float Dx =
-			FSVoxelGenerator::SampleDensity(WorldPosition.X + H, WorldPosition.Y, WorldPosition.Z, Settings) -
-			FSVoxelGenerator::SampleDensity(WorldPosition.X - H, WorldPosition.Y, WorldPosition.Z, Settings);
+			FSVoxelGenerator::SampleDensityAtChunkLocal(
+				LocalPosition + FVector(H, 0.0f, 0.0f), Settings) -
+			FSVoxelGenerator::SampleDensityAtChunkLocal(
+				LocalPosition - FVector(H, 0.0f, 0.0f), Settings);
 		const float Dy =
-			FSVoxelGenerator::SampleDensity(WorldPosition.X, WorldPosition.Y + H, WorldPosition.Z, Settings) -
-			FSVoxelGenerator::SampleDensity(WorldPosition.X, WorldPosition.Y - H, WorldPosition.Z, Settings);
+			FSVoxelGenerator::SampleDensityAtChunkLocal(
+				LocalPosition + FVector(0.0f, H, 0.0f), Settings) -
+			FSVoxelGenerator::SampleDensityAtChunkLocal(
+				LocalPosition - FVector(0.0f, H, 0.0f), Settings);
 		const float Dz =
-			FSVoxelGenerator::SampleDensity(WorldPosition.X, WorldPosition.Y, WorldPosition.Z + H, Settings) -
-			FSVoxelGenerator::SampleDensity(WorldPosition.X, WorldPosition.Y, WorldPosition.Z - H, Settings);
+			FSVoxelGenerator::SampleDensityAtChunkLocal(
+				LocalPosition + FVector(0.0f, 0.0f, H), Settings) -
+			FSVoxelGenerator::SampleDensityAtChunkLocal(
+				LocalPosition - FVector(0.0f, 0.0f, H), Settings);
 
 		// Density is positive inside solid terrain, so its negative gradient
-		// points out of the solid.
+		// points out of the solid. Sampling relative to the integer chunk lattice
+		// prevents large absolute float coordinates from contaminating normals.
 		return FVector(-Dx, -Dy, -Dz).GetSafeNormal();
 	}
 
@@ -261,18 +268,23 @@ namespace
 		for (int32 I = 0; I < VertexCount; ++I)
 		{
 			const FVector LocalPosition = CellLocalVertices[I];
-			const FVector WorldPosition = Settings.ChunkWorldOrigin + LocalPosition;
 			const float NormalSampleStep = ComputeNormalSampleStep(Settings);
-			CellNormals[I] = SampleOutwardNormal(WorldPosition, Settings, NormalSampleStep);
+			CellNormals[I] = SampleOutwardNormal(LocalPosition, Settings, NormalSampleStep);
 			OutMesh.Vertices.Add(LocalPosition);
 			OutMesh.Normals.Add(CellNormals[I]);
 
 			// Keep one stable world-XY projection across vertices, cells, LODs,
-			// and chunk boundaries. Switching projection axes per vertex makes
-			// adjacent vertices of a single triangle use incompatible UV spaces,
-			// which visibly skews textures. Steep cliffs/caves should use a
-			// triplanar material rather than per-vertex projection switching.
-			OutMesh.UV0.Add(FVector2D(WorldPosition.X, WorldPosition.Y) * 0.0005f);
+			// and chunk boundaries. Reconstruct UV coordinates from the integer
+			// chunk lattice in double precision, not a rounded absolute FVector.
+			const double WorldX = Settings.bUseChunkLatticeCoordinates
+				? static_cast<double>(Settings.ChunkOriginCells.X) * static_cast<double>(Settings.BaseVoxelSize) + static_cast<double>(LocalPosition.X)
+				: static_cast<double>(Settings.ChunkWorldOrigin.X) + static_cast<double>(LocalPosition.X);
+			const double WorldY = Settings.bUseChunkLatticeCoordinates
+				? static_cast<double>(Settings.ChunkOriginCells.Y) * static_cast<double>(Settings.BaseVoxelSize) + static_cast<double>(LocalPosition.Y)
+				: static_cast<double>(Settings.ChunkWorldOrigin.Y) + static_cast<double>(LocalPosition.Y);
+			OutMesh.UV0.Add(FVector2D(
+				static_cast<float>(WorldX * 0.0005),
+				static_cast<float>(WorldY * 0.0005)));
 
 			// UV0 = (world X, world Y), so for the height-field surface use
 			// the corresponding parametric tangents: dP/dX=(1,0,dZ/dX),
@@ -471,13 +483,13 @@ void FSVoxelTransvoxelMesher::Generate(
 		{
 			for (int32 X = 0; X < SamplesPerAxis; ++X)
 			{
-				const FVector WorldPosition = Settings.ChunkWorldOrigin + FVector(
+				const FVector LocalPosition(
 					static_cast<float>(X) * VoxelSize,
 					static_cast<float>(Y) * VoxelSize,
 					static_cast<float>(Z) * VoxelSize);
 				DensityField[SampleIndex(X, Y, Z, SamplesPerAxis)] =
-					FSVoxelGenerator::SampleDensity(
-						WorldPosition.X, WorldPosition.Y, WorldPosition.Z, Settings);
+					FSVoxelGenerator::SampleDensityAtChunkLocal(
+						LocalPosition, MeshSettings);
 			}
 		}
 	}
@@ -545,9 +557,8 @@ void FSVoxelTransvoxelMesher::Generate(
 						static_cast<float>(Y + RegularCornerOffsets[B][1]) * VoxelSize,
 						static_cast<float>(Z + RegularCornerOffsets[B][2]) * VoxelSize);
 					const FVector PrimaryPosition = FMath::Lerp(PA, PB, T);
-					const FVector PrimaryWorldPosition = MeshSettings.ChunkWorldOrigin + PrimaryPosition;
 					const FVector PrimaryNormal = SampleOutwardNormal(
-						PrimaryWorldPosition,
+						PrimaryPosition,
 						MeshSettings,
 						FMath::Max(5.0f, MeshSettings.NormalSampleStep));
 					CellVertices[V] = ComputeTransitionSecondaryPosition(
@@ -595,9 +606,8 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				for (int32 I = 0; I < 9; ++I)
 				{
-					const FVector WorldPosition = Settings.ChunkWorldOrigin + SamplePositions[I];
-					Samples[I] = FSVoxelGenerator::SampleDensity(
-						WorldPosition.X, WorldPosition.Y, WorldPosition.Z, Settings);
+					Samples[I] = FSVoxelGenerator::SampleDensityAtChunkLocal(
+						SamplePositions[I], MeshSettings);
 				}
 
 				// Transvoxel requires corresponding full-resolution and half-resolution
