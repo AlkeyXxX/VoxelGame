@@ -75,8 +75,11 @@ struct FSVoxelOctreeSelectionSettings
 	/** Size of a single LOD-0 cell in Unreal units (UE centimetres by default). */
 	float BaseVoxelSize = 100.0f;
 
-	/** Root window LOD. At 4 and 32 cells, the root spans 512 metres at 1 m/cell. */
+	/** Maximum LOD allowed for rendered leaves. */
 	int32 MaxLod = 4;
+
+	/** LOD of the streaming root. -1 preserves the original MaxLod-sized root. */
+	int32 RootLod = -1;
 
 	/** Camera-to-node distance threshold, measured in node side lengths. */
 	float SplitDistanceMultiplier = 0.75f;
@@ -123,5 +126,6 @@ public:
 		int32 CellsPerAxis,
 		int32 MaxLod,
 		TArray<uint8>& OutFaceMasks,
-		const FIntVector& RootOriginCells = FIntVector::ZeroValue);
+		const FIntVector& RootOriginCells = FIntVector::ZeroValue,
+		int32 RootLod = -1);
 };
