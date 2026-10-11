@@ -306,10 +306,6 @@ namespace
 		CellNormals.SetNumUninitialized(VertexCount);
 		TArray<FVector2D> CellUVs;
 		CellUVs.SetNumUninitialized(VertexCount);
-		TArray<FVector> TangentSums;
-		TangentSums.SetNumZeroed(VertexCount);
-		TArray<FVector> BitangentSums;
-		BitangentSums.SetNumZeroed(VertexCount);
 
 		for (int32 I = 0; I < VertexCount; ++I)
 		{
@@ -328,6 +324,25 @@ namespace
 			// triplanar material rather than per-vertex projection switching.
 			CellUVs[I] = FVector2D(WorldPosition.X, WorldPosition.Y) * 0.0005f;
 			OutMesh.UV0.Add(CellUVs[I]);
+
+			// The UVs are a world-XY projection, so derive the tangent frame
+			// directly from that projection and the smooth normal. Computing it
+			// independently from each cell's triangle list caused tangent-frame
+			// discontinuities at every cell boundary, visible as dark square
+			// patches with normal-mapped materials (larger on coarse LODs).
+			const FVector Normal = CellNormals[I].GetSafeNormal();
+			const FVector WorldU(1.0f, 0.0f, 0.0f);
+			const FVector WorldV(0.0f, 1.0f, 0.0f);
+			FVector Tangent = WorldU - Normal * FVector::DotProduct(Normal, WorldU);
+			if (!Tangent.Normalize())
+			{
+				Tangent = (WorldV - Normal * FVector::DotProduct(Normal, WorldV)).GetSafeNormal();
+			}
+			const FVector ProjectedBitangent =
+				WorldV - Normal * FVector::DotProduct(Normal, WorldV);
+			const bool bFlipTangentY =
+				FVector::DotProduct(FVector::CrossProduct(Normal, Tangent), ProjectedBitangent) < 0.0f;
+			OutMesh.Tangents.Add(FProcMeshTangent(Tangent, bFlipTangentY));
 		}
 
 		for (int32 I = 0; I < TriangleCount; ++I)
@@ -368,50 +383,11 @@ namespace
 				Swap(B, C);
 			}
 
-			// Build the tangent basis from the final triangle winding and the
-			// same UVs assigned to the vertices. Accumulating over a cell avoids
-			// arbitrary tangent directions on normal-mapped terrain materials.
-			const FVector TangentEdgeA = CellLocalVertices[B] - CellLocalVertices[A];
-			const FVector TangentEdgeB = CellLocalVertices[C] - CellLocalVertices[A];
-			const FVector2D DeltaUV1 = CellUVs[B] - CellUVs[A];
-			const FVector2D DeltaUV2 = CellUVs[C] - CellUVs[A];
-			const float UVDeterminant = DeltaUV1.X * DeltaUV2.Y - DeltaUV1.Y * DeltaUV2.X;
-			if (FMath::Abs(UVDeterminant) > SMALL_NUMBER)
-			{
-				const float InvDeterminant = 1.0f / UVDeterminant;
-				const FVector Tangent =
-					(TangentEdgeA * DeltaUV2.Y - TangentEdgeB * DeltaUV1.Y) * InvDeterminant;
-				const FVector Bitangent =
-					(TangentEdgeB * DeltaUV1.X - TangentEdgeA * DeltaUV2.X) * InvDeterminant;
-				TangentSums[A] += Tangent;
-				TangentSums[B] += Tangent;
-				TangentSums[C] += Tangent;
-				BitangentSums[A] += Bitangent;
-				BitangentSums[B] += Bitangent;
-				BitangentSums[C] += Bitangent;
-			}
-
 			OutMesh.Triangles.Add(BaseVertex + static_cast<int32>(A));
 			OutMesh.Triangles.Add(BaseVertex + static_cast<int32>(B));
 			OutMesh.Triangles.Add(BaseVertex + static_cast<int32>(C));
 		}
 
-		for (int32 I = 0; I < VertexCount; ++I)
-		{
-			const FVector Normal = CellNormals[I].GetSafeNormal();
-			FVector Tangent = TangentSums[I] - Normal * FVector::DotProduct(Normal, TangentSums[I]);
-			if (!Tangent.Normalize())
-			{
-				const FVector FallbackAxis = FMath::Abs(Normal.Z) < 0.9f
-					? FVector::UpVector
-					: FVector::ForwardVector;
-				Tangent = FVector::CrossProduct(FallbackAxis, Normal).GetSafeNormal();
-			}
-
-			const bool bFlipTangentY =
-				FVector::DotProduct(FVector::CrossProduct(Normal, Tangent), BitangentSums[I]) < 0.0f;
-			OutMesh.Tangents.Add(FProcMeshTangent(Tangent, bFlipTangentY));
-		}
 	}
 }
 
