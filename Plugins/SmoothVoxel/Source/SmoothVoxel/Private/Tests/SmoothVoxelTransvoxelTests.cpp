@@ -119,7 +119,7 @@ bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Paramet
 {
 	FSVoxelGenerationSettings Settings;
 	Settings.ChunkWorldOrigin = FVector::ZeroVector;
-	Settings.ChunkOriginCells = FIntVector(2000000, 2000000, 0);
+	Settings.ChunkOriginCells = FIntVector(2000019, 2000000, 0);
 	Settings.BaseVoxelSize = 100.0f;
 	Settings.bUseChunkLatticeCoordinates = true;
 	Settings.BaseHeight = 75.0f;
@@ -132,7 +132,7 @@ bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Paramet
 	FSVoxelMeshData Mesh;
 	// The absolute world coordinate here is 2000 km, so unrebased UVs would
 	// be around 100,000. The rendered UV values should instead remain bounded
-	// because each emitted cell removes one common integer tile offset.
+	// because each chunk removes one shared integer tile offset.
 	FSVoxelTransvoxelMesher::Generate(Settings, 4, 100.0f, 0, Mesh);
 	TestTrue(TEXT("Large-coordinate fixture should generate terrain triangles"), Mesh.Triangles.Num() > 0);
 	TestEqual(TEXT("Each generated vertex has a UV"), Mesh.UV0.Num(), Mesh.Vertices.Num());
@@ -145,14 +145,14 @@ bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Paramet
 	}
 	TestTrue(
 		TEXT("Large absolute world coordinates must not produce large GPU UV values"),
-		MaxAbsoluteUv < 1.0f);
+		MaxAbsoluteUv < 2.0f);
 
 	// Adjacent same-LOD chunks must retain the same repeating-texture phase at
 	// their shared border while using a single continuous UV offset per chunk.
 	FSVoxelGenerationSettings AdjacentSettings = Settings;
 	AdjacentSettings.ChunkOriginCells.X += 4; // Chunk width is 4 base-lattice cells.
 	FSVoxelMeshData AdjacentMesh;
-	FSVoxelTransvoxelMesher::Generate(AdjacentSettings, 4, 1600.0f, 0, AdjacentMesh);
+	FSVoxelTransvoxelMesher::Generate(AdjacentSettings, 4, 100.0f, 0, AdjacentMesh);
 
 	TMap<FIntPoint, FVector2D> AdjacentBorderUvs;
 	for (int32 Index = 0; Index < AdjacentMesh.Vertices.Num(); ++Index)
@@ -171,7 +171,7 @@ bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Paramet
 	for (int32 Index = 0; Index < Mesh.Vertices.Num(); ++Index)
 	{
 		const FVector& Vertex = Mesh.Vertices[Index];
-		if (!FMath::IsNearlyEqual(Vertex.X, 400.0f, 0.01f)
+		if (!FMath::IsNearlyEqual(Vertex.X, 400.0f, 0.01f))
 		{
 			continue;
 		}
