@@ -381,6 +381,18 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			CorrectedWindingCount);
 	}
 
+	// Keep recently mined surfaces visible from both sides as a final fallback.
+	// Density-based winding repair is still applied first; only geometry near
+	// edits receives reverse-wound copies, not every terrain triangle.
+	const int32 TwoSidedTriangleCount =
+		FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(PendingSettings, Data);
+	if (TwoSidedTriangleCount > 0)
+	{
+		UE_LOG(LogTemp, Verbose,
+			TEXT("SmoothVoxel: added two-sided coverage for %d edited terrain triangles."),
+			TwoSidedTriangleCount);
+	}
+
 	// Drop the previous render section and its collision body before applying
 	// the new snapshot. Combined with synchronous cooking on terrain chunks,
 	// this prevents a stale triangle from surviving a mined-cell rebuild.
