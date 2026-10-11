@@ -286,6 +286,55 @@ bool FSmoothVoxelTransvoxelSharedTransitionEdgeTest::RunTest(const FString& Para
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelTangentContinuityTest,
+	"SmoothVoxel.Transvoxel.TangentsContinuousAcrossRegularCells",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelTangentContinuityTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.ChunkWorldOrigin = FVector(-800.0f, -800.0f, 0.0f);
+	Settings.BaseHeight = 200.0f;
+	Settings.HeightAmplitude = 160.0f;
+	Settings.DetailAmplitude = 25.0f;
+	Settings.NoiseScale = 0.0008f;
+	Settings.DetailScale = 0.0006f;
+	Settings.BottomDepth = 2000.0f;
+	Settings.bEnableCaves = false;
+	Settings.IsoLevel = 0.0f;
+
+	FSVoxelMeshData Mesh;
+	FSVoxelTransvoxelMesher::Generate(Settings, 8, 100.0f, 0, Mesh);
+	TestEqual(TEXT("Every vertex should receive one tangent"), Mesh.Tangents.Num(), Mesh.Vertices.Num());
+
+	TMap<FIntVector, FVector> TangentByPosition;
+	int32 DuplicatePositions = 0;
+	for (int32 Index = 0; Index < Mesh.Vertices.Num(); ++Index)
+	{
+		const FVector KeyPosition = Mesh.Vertices[Index] * 10.0f;
+		const FIntVector Key(
+			FMath::RoundToInt(KeyPosition.X),
+			FMath::RoundToInt(KeyPosition.Y),
+			FMath::RoundToInt(KeyPosition.Z));
+		const FVector Tangent = Mesh.Tangents[Index].TangentX.GetSafeNormal();
+		if (const FVector* Existing = TangentByPosition.Find(Key))
+		{
+			++DuplicatePositions;
+			TestTrue(
+				TEXT("Duplicate vertices on adjacent regular cells must have the same tangent frame"),
+				FVector::DotProduct(*Existing, Tangent) > 0.999f);
+		}
+		else
+		{
+			TangentByPosition.Add(Key, Tangent);
+		}
+	}
+
+	TestTrue(TEXT("Fixture should contain vertices shared by adjacent cells"), DuplicatePositions > 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest,
 	"SmoothVoxel.Transvoxel.SlopedCoarseFineSeam",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
