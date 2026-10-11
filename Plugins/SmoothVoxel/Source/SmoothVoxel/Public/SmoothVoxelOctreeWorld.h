@@ -98,6 +98,35 @@ private:
 };
 
 /**
+ * A placed non-soil block. It uses six independent flat-shaded faces instead
+ * of the smooth Transvoxel terrain field, so grass/stone/wood remain genuinely
+ * cubic and are ray-traceable for mining.
+ */
+UCLASS()
+class SMOOTHVOXEL_API ASmoothVoxelPlacedCubeBlock : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASmoothVoxelPlacedCubeBlock();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
+	UProceduralMeshComponent* Mesh = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
+	EVoxelBlock BlockType = EVoxelBlock::Air;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
+	FIntVector BlockCell = FIntVector::ZeroValue;
+
+	void ConfigureBlock(
+		EVoxelBlock InBlockType,
+		const FIntVector& InCell,
+		float InBlockSize,
+		UMaterialInterface* InMaterial);
+};
+
+/**
  * Separate opt-in octree terrain manager. Existing AVoxelWorld generation is
  * not changed: place this actor in a test level to exercise the new path.
  */
@@ -278,12 +307,15 @@ private:
 	TMap<FSVoxelOctreeNode, bool> DesiredCollisionFlags;
 	TSet<FSVoxelOctreeNode> PreparedDesiredNodes;
 
-	// Edits live for the lifetime of this world actor and are copied into an
-	// immutable snapshot before async mesh generation, so workers never read a
-	// TMap that the game thread is mutating.
+	// Edit state +1 adds smooth Dirt/Sand to the terrain SDF, -1 carves air,
+	// and +2 reserves a carved cell filled by a separate hard cube actor.
+	// Workers only read immutable snapshots, never the game-thread maps.
 	FSVoxelBlockEditMap EditedBlockCells;
 	TMap<FIntVector, EVoxelBlock> EditedBlockTypes;
 	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEditSnapshot;
+
+	UPROPERTY()
+	TMap<FIntVector, ASmoothVoxelPlacedCubeBlock*> PlacedCubeBlocks;
 
 	int32 DesiredCellsPerAxis = 32;
 	float DesiredBaseVoxelSize = 100.0f;
