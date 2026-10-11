@@ -25,6 +25,33 @@ bool FSmoothVoxelWorldConfigurationDeterminismTest::RunTest(const FString& Param
 		ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize::Size8Km),
 		800000.0f);
 
+	TestEqual(
+		TEXT("2K preset must use root LOD 6"),
+		ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize::Size2Km),
+		6);
+	TestEqual(
+		TEXT("4K preset must use root LOD 7"),
+		ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize::Size4Km),
+		7);
+	TestEqual(
+		TEXT("8K preset must use root LOD 8"),
+		ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize::Size8Km),
+		8);
+
+	const float BaseSteps[] =
+	{
+		ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize::Size2Km) /
+			(32.0f * static_cast<float>(1 << ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize::Size2Km))),
+		ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize::Size4Km) /
+			(32.0f * static_cast<float>(1 << ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize::Size4Km))),
+		ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize::Size8Km) /
+			(32.0f * static_cast<float>(1 << ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize::Size8Km)))
+	};
+	TestTrue(
+		TEXT("Changing the map size must not change the default base voxel spacing"),
+		FMath::IsNearlyEqual(BaseSteps[0], BaseSteps[1], 0.001f) &&
+		FMath::IsNearlyEqual(BaseSteps[1], BaseSteps[2], 0.001f));
+
 	FSVoxelGenerationSettings Settings;
 	Settings.BaseHeight = 900.0f;
 	Settings.HeightAmplitude = 1800.0f;
