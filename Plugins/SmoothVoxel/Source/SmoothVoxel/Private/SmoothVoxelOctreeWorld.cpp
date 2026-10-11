@@ -1089,10 +1089,12 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 					continue;
 				}
 
+				// MinedTerrainNodes now stores whole voxel-cell coordinates,
+				// so select the nearest cell centre, matching the box cut in the generator.
 				const FVector NodePosition(
-					static_cast<float>(Candidate.X) * Step,
-					static_cast<float>(Candidate.Y) * Step,
-					static_cast<float>(Candidate.Z) * Step);
+					(static_cast<float>(Candidate.X) + 0.5f) * Step,
+					(static_cast<float>(Candidate.Y) + 0.5f) * Step,
+					(static_cast<float>(Candidate.Z) + 0.5f) * Step);
 				const float NodeDensity = FSVoxelGenerator::SampleDensity(
 					static_cast<double>(NodePosition.X),
 					static_cast<double>(NodePosition.Y),
