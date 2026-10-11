@@ -185,7 +185,6 @@ private:
 	float ConfiguredWorldSize = -1.0f;
 	float ConfiguredSeaLevel = 0.0f;
 	float ConfiguredTileSize = 5000.0f;
-	int32 ConfiguredResolution = 0;
 	bool bConfiguredCollision = false;
 	bool bHasConfiguration = false;
 };
