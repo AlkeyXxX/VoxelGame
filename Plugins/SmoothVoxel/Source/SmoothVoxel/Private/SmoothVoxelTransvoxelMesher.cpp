@@ -175,10 +175,9 @@ namespace
 		const float BorderWidth = Step;
 		const float BorderOffset = Step * 0.25f;
 
-		// A regular vertex that also lies on a chunk face without a transition
-		// must not move; otherwise it would open a crack against a same-LOD
-		// neighbour. This matches the border-mask guard in reference
-		// Transvoxel implementations.
+		// A vertex can lie on both a transitioning face and an adjacent
+		// same-LOD face. It still needs the transition offset, but its coordinate
+		// normal to the same-LOD face must remain fixed to avoid opening a crack.
 		uint8 VertexBorderMask = 0;
 		if (FMath::IsNearlyZero(PrimaryPosition.X, 0.01f))
 		{
@@ -204,10 +203,8 @@ namespace
 		{
 			VertexBorderMask |= SVoxelTransitionFace_PositiveZ;
 		}
-		if ((VertexBorderMask & static_cast<uint8>(~TransitionFaceMask)) != 0)
-		{
-			return PrimaryPosition;
-		}
+		const uint8 FixedBorderMask =
+			VertexBorderMask & static_cast<uint8>(~TransitionFaceMask);
 
 		FVector Delta = FVector::ZeroVector;
 
@@ -265,7 +262,28 @@ namespace
 		const FVector SurfaceNormal = SampleOutwardNormal(
 			PrimaryPosition, Settings, ComputeNormalSampleStep(Settings));
 		const FVector Normal = SurfaceNormal.GetSafeNormal();
-		const FVector TangentialDelta = Delta - Normal * FVector::DotProduct(Normal, Delta);
+		FVector TangentialDelta = Delta - Normal * FVector::DotProduct(Normal, Delta);
+
+		// Tangent projection can introduce a component along a neighbouring
+		// same-LOD face. Lock just that boundary axis rather than cancelling the
+		// whole offset; this closes LOD gaps at mixed-face edges and corners.
+		if (FixedBorderMask & (SVoxelTransitionFace_NegativeX | SVoxelTransitionFace_PositiveX))
+		{
+			TangentialDelta.X = 0.0f;
+		}
+		if (FixedBorderMask & (SVoxelTransitionFace_NegativeY | SVoxelTransitionFace_PositiveY))
+		{
+			TangentialDelta.Y = 0.0f;
+		}
+		if (FixedBorderMask & (SVoxelTransitionFace_NegativeZ | SVoxelTransitionFace_PositiveZ))
+		{
+			TangentialDelta.Z = 0.0f;
+		}
+
+		if (TangentialDelta.SizeSquared() <= SMALL_NUMBER)
+		{
+			return PrimaryPosition;
+		}
 		return PrimaryPosition + TangentialDelta;
 	}
 
