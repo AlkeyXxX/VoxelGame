@@ -382,14 +382,53 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	}
 
 	// Keep recently mined surfaces visible from both sides as a final fallback.
-	// Density-based winding repair is still applied first; only geometry near
-	// edits receives reverse-wound copies, not every terrain triangle.
+	// Build reverse-wound copies only near edits, then place them in a render-only
+	// section so overlapping back faces never enter the player collision mesh.
+	const int32 OriginalVertexCount = Data.Vertices.Num();
+	const int32 OriginalTriangleIndexCount = Data.Triangles.Num();
+	const int32 OriginalNormalCount = Data.Normals.Num();
+	const int32 OriginalUVCount = Data.UV0.Num();
+	const int32 OriginalTangentCount = Data.Tangents.Num();
+	FSVoxelMeshData EditedBackfaceData;
 	const int32 TwoSidedTriangleCount =
 		FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(PendingSettings, Data);
 	if (TwoSidedTriangleCount > 0)
 	{
+		EditedBackfaceData.Vertices.Reserve(Data.Vertices.Num() - OriginalVertexCount);
+		for (int32 Index = OriginalVertexCount; Index < Data.Vertices.Num(); ++Index)
+		{
+			EditedBackfaceData.Vertices.Add(Data.Vertices[Index]);
+		}
+
+		EditedBackfaceData.Triangles.Reserve(Data.Triangles.Num() - OriginalTriangleIndexCount);
+		for (int32 Index = OriginalTriangleIndexCount; Index < Data.Triangles.Num(); ++Index)
+		{
+			EditedBackfaceData.Triangles.Add(Data.Triangles[Index] - OriginalVertexCount);
+		}
+
+		for (int32 Index = OriginalNormalCount; Index < Data.Normals.Num(); ++Index)
+		{
+			EditedBackfaceData.Normals.Add(Data.Normals[Index]);
+		}
+		for (int32 Index = OriginalUVCount; Index < Data.UV0.Num(); ++Index)
+		{
+			EditedBackfaceData.UV0.Add(Data.UV0[Index]);
+		}
+		for (int32 Index = OriginalTangentCount; Index < Data.Tangents.Num(); ++Index)
+		{
+			EditedBackfaceData.Tangents.Add(Data.Tangents[Index]);
+		}
+
+		// Strip the render-only copies back out of the main terrain data. Section
+		// zero retains the original collision topology; section one is visual only.
+		Data.Vertices.SetNum(OriginalVertexCount);
+		Data.Triangles.SetNum(OriginalTriangleIndexCount);
+		Data.Normals.SetNum(OriginalNormalCount);
+		Data.UV0.SetNum(OriginalUVCount);
+		Data.Tangents.SetNum(OriginalTangentCount);
+
 		UE_LOG(LogTemp, Verbose,
-			TEXT("SmoothVoxel: added two-sided coverage for %d edited terrain triangles."),
+			TEXT("SmoothVoxel: added render-only two-sided coverage for %d edited terrain triangles."),
 			TwoSidedTriangleCount);
 	}
 
@@ -411,6 +450,23 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			TArray<FLinearColor>(),
 			Data.Tangents,
 			bCreateCollision);
+	}
+
+	if (!EditedBackfaceData.IsEmpty())
+	{
+		Mesh->CreateMeshSection_LinearColor(
+			1,
+			EditedBackfaceData.Vertices,
+			EditedBackfaceData.Triangles,
+			EditedBackfaceData.Normals,
+			EditedBackfaceData.UV0,
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			TArray<FLinearColor>(),
+			EditedBackfaceData.Tangents,
+			false);
+		Mesh->SetMaterial(1, Mesh->GetMaterial(0));
 	}
 
 	// Only fine terrain casts shadows; distant coarse chunks otherwise multiply
