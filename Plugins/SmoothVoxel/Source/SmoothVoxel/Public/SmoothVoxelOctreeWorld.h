@@ -276,7 +276,7 @@ public:
 	float DetailAmplitude = 60.0f;
 
 	/** Target flatland share outside deserts and mountain ranges. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.5", ClampMax="0.9"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.2", ClampMax="0.9"))
 	float FlatlandCoverage = 0.62f;
 
 	/** Scale of broad flatland/hill region borders. Smaller values create larger regions. */
@@ -346,7 +346,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="100.0", Units="cm"))
 	float WaterTileSize = 5000.0f;
 
-	/** Resolution of the fixed-level river/lake water sheet; the sea plane remains a single quad. */
+	/** Base resolution of the river/lake grid. Narrow rivers automatically raise its effective resolution. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="16", ClampMax="512"))
 	int32 WaterGridResolution = 512;
 
