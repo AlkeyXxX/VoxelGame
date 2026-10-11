@@ -299,7 +299,7 @@ private:
 	FSVoxelGenerationSettings MakeBlockQuerySettings() const;
 	float SampleCurrentDensityAt(const FVector& WorldPosition) const;
 	EVoxelBlock GetBlockTypeForCell(const FIntVector& Cell) const;
-	void ApplyBlockCellEdit(
+	bool ApplyBlockCellEdit(
 		const FIntVector& Cell,
 		EVoxelBlock Block,
 		int8 EditStateOverride = 0,
