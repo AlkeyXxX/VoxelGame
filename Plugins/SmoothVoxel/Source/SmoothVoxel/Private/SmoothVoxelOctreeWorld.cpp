@@ -1130,77 +1130,19 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		return true;
 	}
 
-	// Select a real density sample on the shared integer lattice instead of
-	// assigning progress to floor(InsidePoint / Step). Surface motion after a
-	// hit can change that floored cell, while the nearest unmined solid sample
-	// remains stable until the current node has actually been removed.
-	const float Step = GetEffectiveBlockSize();
-	const FIntVector BaseNode = WorldPositionToBlockCell(InsidePoint);
-	const FSVoxelGenerationSettings MiningQuerySettings = MakeBlockQuerySettings();
-	FIntVector BestNode = FIntVector::ZeroValue;
-	float BestDistanceSquared = TNumericLimits<float>::Max();
-	FVector ViewLocation = FVector::ZeroVector;
-	FRotator ViewRotation = FRotator::ZeroRotator;
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+	// Mine the voxel cell containing a point just inside the hit surface.
+	// Because the selected cell is derived from the ray hit (not the nearest
+	// lattice corner), repeated hits while aiming vertically down remove
+	// cells in the same X/Y column and produce a straight, block-sized shaft.
+	const FIntVector MinedCell = WorldPositionToBlockCell(InsidePoint);
+	if (SampleCurrentDensityAt(InsidePoint) <= 0.0f)
 	{
-		PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
-	}
-	const FVector RayDirection = ViewRotation.Vector().GetSafeNormal();
-	for (int32 DZ = -1; DZ <= 1; ++DZ)
-	{
-		for (int32 DY = -1; DY <= 1; ++DY)
-		{
-			for (int32 DX = -1; DX <= 1; ++DX)
-			{
-				const FIntVector Candidate = BaseNode + FIntVector(DX, DY, DZ);
-				if (MinedTerrainNodes.Contains(Candidate))
-				{
-					continue;
-				}
-
-				// MinedTerrainNodes are keyed by density-lattice nodes.
-				// Keep selection on that same lattice as the generator's mining SDF.
-				const FVector NodePosition(
-					static_cast<float>(Candidate.X) * Step,
-					static_cast<float>(Candidate.Y) * Step,
-					static_cast<float>(Candidate.Z) * Step);
-				const float NodeDensity = FSVoxelGenerator::SampleDensity(
-					static_cast<double>(NodePosition.X),
-					static_cast<double>(NodePosition.Y),
-					static_cast<double>(NodePosition.Z),
-					MiningQuerySettings);
-				if (NodeDensity <= 0.0f)
-				{
-					continue;
-				}
-
-				// Prefer the solid lattice node closest to the actual view ray,
-				// not merely the nearest node to a sloped collision point. This
-				// prevents successive hits while looking down from steering a shaft
-				// sideways as the exposed surface changes.
-				const FVector ToNode = NodePosition - Hit.ImpactPoint;
-				const float AlongRay = FVector::DotProduct(ToNode, RayDirection);
-				const FVector LateralOffset = ToNode - RayDirection * AlongRay;
-				const float DistanceSquared = LateralOffset.SizeSquared() +
-					FMath::Square(FMath::Max(0.0f, FMath::Abs(AlongRay) - Step * 0.5f));
-				if (DistanceSquared < BestDistanceSquared)
-				{
-					BestDistanceSquared = DistanceSquared;
-					BestNode = Candidate;
-				}
-			}
-		}
-	}
-
-	if (BestDistanceSquared == TNumericLimits<float>::Max() ||
-		BestDistanceSquared > Step * Step * 3.0f)
-	{
-		// No current solid grid sample near this surface: this can happen if a
-		// stale physical collision reports a face that is already fully mined.
+		// Stale collision or a mesh rebuild caught the ray outside the current
+		// solid field; do not record a cut unless this exact point is solid.
 		return false;
 	}
 
-	float& Progress = TerrainMiningProgress.FindOrAdd(BestNode);
+	float& Progress = TerrainMiningProgress.FindOrAdd(MinedCell);
 	const float NextProgress = FMath::Min(1.0f, Progress + ToolDamage / FMath::Max(ToolDamage, Durability));
 	if (NextProgress < 1.0f)
 	{
@@ -1216,11 +1158,11 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		return false;
 	}
 
-	TerrainMiningProgress.Remove(BestNode);
-	MinedTerrainNodes.Add(BestNode);
+	TerrainMiningProgress.Remove(MinedCell);
+	MinedTerrainNodes.Add(MinedCell);
 	MinedNodeSnapshot =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
-	RebuildChunksNearEditedCell(BestNode, true);
+	RebuildChunksNearEditedCell(MinedCell, false);
 
 	if (Inventory && DropBlock != EVoxelBlock::Air)
 	{
@@ -1310,36 +1252,16 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		return false;
 	}
 	// A face hit on a placed cube is authoritative: allow stacking/sideways
-	// placement even when the underlying smooth landscape occupies the cell
-	// centre. Terrain-only placement still refuses to bury a new block in solid.
+	// placement even when the underlying terrain occupies the target cell.
+	// On terrain, keep the centre test to avoid placing deep inside solid
+	// ground, but do not reject a legitimate surface placement just because
+	// some cell corners intersect a slope. Hard cubes no longer carve that
+	// intersecting terrain, so placement cannot act as a mining tool.
 	if (!bTargetedPlacedCube &&
-		(!ExistingEdit || *ExistingEdit == 0))
+		(!ExistingEdit || *ExistingEdit == 0) &&
+		SampleCurrentDensityAt(BlockCellCenter(Cell)) > 0.0f)
 	{
-		// A single air sample at the cell centre is not enough: a sliver of
-		// terrain can still intersect the target cube, and placing there would
-		// erase that terrain through the block-edit SDF. Require the whole
-		// target cell (centre plus corners) to be clear before placing.
-		const FVector Center = BlockCellCenter(Cell);
-		const float HalfStep = Step * 0.49f;
-		if (SampleCurrentDensityAt(Center) > 0.0f)
-		{
-			return false;
-		}
-		for (int32 ZSign = -1; ZSign <= 1; ZSign += 2)
-		{
-			for (int32 YSign = -1; YSign <= 1; YSign += 2)
-			{
-				for (int32 XSign = -1; XSign <= 1; XSign += 2)
-				{
-					const FVector Corner = Center + FVector(
-						HalfStep * XSign, HalfStep * YSign, HalfStep * ZSign);
-					if (SampleCurrentDensityAt(Corner) > 0.0f)
-					{
-						return false;
-					}
-				}
-			}
-		}
+		return false;
 	}
 
 	ApplyBlockCellEdit(Cell, BlockToPlace);
