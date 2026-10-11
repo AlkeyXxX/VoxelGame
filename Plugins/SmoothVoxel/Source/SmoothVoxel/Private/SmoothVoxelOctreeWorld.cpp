@@ -904,7 +904,9 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 	RebuildChunksNearEditedCell(Cell);
 }
 
-void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(const FIntVector& Cell)
+void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(
+	const FIntVector& Cell,
+	bool bGridNode)
 {
 	check(IsInGameThread());
 	if (ActiveChunks.Num() == 0 || DesiredNodes.Num() == 0)
@@ -913,8 +915,14 @@ void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(const FIntVector& Cell
 	}
 
 	const float Step = GetEffectiveBlockSize();
-	const FVector Center = BlockCellCenter(Cell);
-	const FVector EditExtent(Step * 0.55f);
+	const FVector Center = bGridNode
+		? FVector(
+			static_cast<float>(Cell.X) * Step,
+			static_cast<float>(Cell.Y) * Step,
+			static_cast<float>(Cell.Z) * Step)
+		: BlockCellCenter(Cell);
+	const float EditRadius = Step * (bGridNode ? 1.1f : 0.55f);
+	const FVector EditExtent(EditRadius);
 	const FBox EditBounds(Center - EditExtent, Center + EditExtent);
 
 	for (const TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
