@@ -925,6 +925,36 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		EditState = EditStateOverride != 0 ? EditStateOverride : int8(2);
 	}
 
+	// A newly placed block must be able to refill a previously mined hole.
+	// Clear completed/progressing mine nodes at the eight corners of this cell;
+	// node edits have their own key space, but their SDF otherwise keeps carving
+	// the new placement back out on every subsequent mesh build.
+	if (!bRemoveBlock)
+	{
+		bool bClearedMinedNode = false;
+		for (int32 DZ = 0; DZ <= 1; ++DZ)
+		{
+			for (int32 DY = 0; DY <= 1; ++DY)
+			{
+				for (int32 DX = 0; DX <= 1; ++DX)
+				{
+					const FIntVector Node = Cell + FIntVector(DX, DY, DZ);
+					bClearedMinedNode |= MinedTerrainNodes.Remove(Node) > 0;
+					TerrainMiningProgress.Remove(Node);
+				}
+			}
+		}
+		if (bClearedMinedNode)
+		{
+			MinedNodeSnapshot.Reset();
+			if (MinedTerrainNodes.Num() > 0)
+			{
+				MinedNodeSnapshot =
+					MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
+			}
+		}
+	}
+
 	EditedBlockCells.Add(Cell, EditState);
 	BlockEditSnapshot = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells);
 	BlockEditCenterSnapshot.Reset();
