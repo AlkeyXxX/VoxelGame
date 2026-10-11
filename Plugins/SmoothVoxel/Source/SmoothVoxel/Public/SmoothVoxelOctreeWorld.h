@@ -119,11 +119,18 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
 	FIntVector BlockCell = FIntVector::ZeroValue;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
+	int32 DamageStage = 0;
+
 	void ConfigureBlock(
 		EVoxelBlock InBlockType,
 		const FIntVector& InCell,
 		float InBlockSize,
-		UMaterialInterface* InMaterial);
+		UMaterialInterface* InMaterial,
+		int32 InDamageStage = 0);
+
+	int32 RegisterDamageHit();
+	int32 GetDamageStage() const { return DamageStage; }
 };
 
 /**
@@ -287,7 +294,7 @@ private:
 	FSVoxelGenerationSettings MakeBlockQuerySettings() const;
 	float SampleCurrentDensityAt(const FVector& WorldPosition) const;
 	EVoxelBlock GetBlockTypeForCell(const FIntVector& Cell) const;
-	void ApplyBlockCellEdit(const FIntVector& Cell, EVoxelBlock Block);
+	void ApplyBlockCellEdit(const FIntVector& Cell, EVoxelBlock Block, int8 EditStateOverride = 0);
 	void RebuildChunksNearEditedCell(const FIntVector& Cell);
 
 	FSVoxelGenerationSettings MakeGenerationSettings(
