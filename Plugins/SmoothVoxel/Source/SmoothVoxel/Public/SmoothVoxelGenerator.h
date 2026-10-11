@@ -4,7 +4,7 @@
 #include "CoreMinimal.h"
 #include "SmoothVoxelTypes.h"
 
-// Sparse world-aligned edits: +1 adds smooth Dirt/Sand, -1..-5 are progressive terrain-mining stages, +2 reserves a separately rendered cube.
+// Sparse block-cell edits: +1 adds smooth Dirt/Sand, negative values preserve legacy cell-removal calls, +2 reserves a separately rendered cube. Ray mining uses FSVoxelMinedNodeSet.
 using FSVoxelBlockEditMap = TMap<FIntVector, int8>;
 using FSVoxelBlockEditCenterMap = TMap<FIntVector, FVector>;
 // Fully mined density-lattice nodes. Keys identify exact grid sample coordinates,
@@ -57,9 +57,8 @@ struct FSVoxelGenerationSettings
 
 	// Immutable snapshots shared safely with asynchronous mesh workers.
 	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEdits;
-	// Terrain mining edits are centred at the hit point; placed blocks default
-	// to their grid-cell centre. Keeping this beside the edit snapshot avoids
-	// a first mining hit being lost because a centred diamond misses a cell edge.
+	// Optional centres for explicit block-cell edits. The ray-mining path uses
+	// exact density-grid nodes instead, stored in MinedNodes below.
 	TSharedPtr<const FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> BlockEditCenters;
 	// Immutable grid-node cuts are separate from placed-cell edits so mining
 	// progress can never collide with a block placement at the same integer key.
