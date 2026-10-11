@@ -177,9 +177,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="16"))
 	int32 MaxChunkRequestsPerFrame = 4;
 
-	/** Safety budget for octree leaves. 8192 permits the minimum 8K root coverage at LOD 4. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="32", ClampMax="8192"))
-	int32 MaxLeafCount = 8192;
+	/** Chunk budget kept conservative to avoid long frame stalls while streaming is still being optimized. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="32", ClampMax="2048"))
+	int32 MaxLeafCount = 2048;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="128"))
 	int32 CellsPerAxis = 32;
@@ -262,6 +262,10 @@ public:
 
 	/** Root levels are part of the size preset so the global voxel spacing is identical across 2K/4K/8K. */
 	static int32 GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize InWorldSize);
+
+	/** Raise the far-world LOD when the requested tree depth cannot fit the leaf budget. */
+	static int32 GetEffectiveMaxLodForBudget(
+		int32 RootLod, int32 RequestedMaxLod, int32 MaxLeafCount);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
 	bool bEnableBlockEditing = true;
