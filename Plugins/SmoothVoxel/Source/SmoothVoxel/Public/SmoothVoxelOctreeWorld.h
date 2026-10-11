@@ -160,12 +160,13 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Water")
 	UProceduralMeshComponent* Mesh = nullptr;
 
-	/** Builds level lake/ocean water plus continuous, terrain-following river ribbons. */
+	/** Builds level lake/ocean water plus continuous river ribbons near the terrain surface. */
 	void ConfigureSurface(
 		const FVector& WorldCenter,
 		float WorldSize,
 		float InSeaLevel,
 		float InTileSize,
+		int32 InResolution,
 		UMaterialInterface* InMaterial,
 		const FSVoxelGenerationSettings& InGenerationSettings,
 		bool bEnableCollision);
@@ -174,6 +175,7 @@ private:
 	void BuildSurfaceMesh(
 		float WorldSize,
 		float InTileSize,
+		int32 InResolution,
 		const FSVoxelGenerationSettings& GenerationSettings,
 		bool bEnableCollision);
 
@@ -187,6 +189,7 @@ private:
 	float ConfiguredWorldSize = -1.0f;
 	float ConfiguredSeaLevel = 0.0f;
 	float ConfiguredTileSize = 5000.0f;
+	int32 ConfiguredResolution = 0;
 	FSVoxelGenerationSettings ConfiguredGenerationSettings;
 	bool bConfiguredCollision = false;
 	bool bHasConfiguration = false;
