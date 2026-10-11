@@ -982,7 +982,9 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	// a chunk corner. This makes the edited SDF and transition faces meet at the
 	// same place, the worst case for tiny/cull-reversed triangles.
 	FSVoxelGenerationSettings RoofSettings;
-	RoofSettings.BaseHeight = 775.0f;
+	// Reproduce the reported sequence: dig a three-cell shaft, then a 1-wide,
+	// 2-high horizontal tunnel, leaving exactly one voxel layer as the roof.
+	RoofSettings.BaseHeight = 950.0f;
 	RoofSettings.HeightAmplitude = 0.0f;
 	RoofSettings.DetailAmplitude = 0.0f;
 	RoofSettings.NoiseScale = 0.0f;
@@ -995,6 +997,13 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> RoofMinedNodes =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
 	RoofMinedNodes->Add(FIntVector(0, 0, 15));
+	RoofMinedNodes->Add(FIntVector(0, 0, 16));
+	RoofMinedNodes->Add(FIntVector(0, 0, 17));
+	for (int32 X = 1; X <= 3; ++X)
+	{
+		RoofMinedNodes->Add(FIntVector(X, 0, 16));
+		RoofMinedNodes->Add(FIntVector(X, 0, 17));
+	}
 	RoofSettings.MinedNodes = RoofMinedNodes;
 
 	const uint8 EditedTransitionMasks[] =
@@ -1010,8 +1019,19 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		FSVoxelMeshData EditedTransitionMesh;
 		FSVoxelTransvoxelMesher::Generate(
 			RoofSettings, 16, 50.0f, FaceMask, EditedTransitionMesh);
+		const int32 OriginalTriangleIndexCount = EditedTransitionMesh.Triangles.Num();
+		const int32 TwoSidedTriangleCount =
+			FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
+				RoofSettings, EditedTransitionMesh);
 		TestTrue(
-			TEXT("A roof-open mining cut at a chunk corner must keep valid triangle winding at LOD transitions"),
+			TEXT("The one-cell-thick roof fixture must generate edited surface triangles"),
+			TwoSidedTriangleCount > 0);
+		TestEqual(
+			TEXT("Every edited surface triangle must gain exactly one reverse-wound copy"),
+			EditedTransitionMesh.Triangles.Num(),
+			OriginalTriangleIndexCount + TwoSidedTriangleCount * 3);
+		TestTrue(
+			TEXT("A roof-open mining cut at a chunk corner must keep valid geometry and winding at LOD transitions"),
 			HasConsistentGeometry(EditedTransitionMesh));
 	}
 
