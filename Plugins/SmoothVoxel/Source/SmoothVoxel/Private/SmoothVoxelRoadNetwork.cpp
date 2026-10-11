@@ -5,6 +5,8 @@
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 #include <cmath>
+#include <queue>
+#include <vector>
 
 ASmoothVoxelRoadNetwork::ASmoothVoxelRoadNetwork()
 {
@@ -149,6 +151,338 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         return T * T * (3.0 - 2.0 * T);
     };
 
+    // Route on a deterministic world-aligned navigation grid instead of drawing
+    // a Bezier directly between neighbouring POIs. The cache is shared by all
+    // routes, so each coarse terrain sample is evaluated only once per generation.
+    const double RouteGridStep = FMath::Clamp(
+        FMath::Max(SafeSampleSpacing * 4.0, 2000.0), 2000.0, 5000.0);
+    const int32 WorldGridMinX = FMath::CeilToInt(MinX / RouteGridStep);
+    const int32 WorldGridMaxX = FMath::FloorToInt(MaxX / RouteGridStep);
+    const int32 WorldGridMinY = FMath::CeilToInt(MinY / RouteGridStep);
+    const int32 WorldGridMaxY = FMath::FloorToInt(MaxY / RouteGridStep);
+    const double MaxRouteGrade = 0.30; // Hard limit: avoid cliff faces and canyon walls.
+
+    struct FRoadGridSample
+    {
+        double Height = 0.0;
+        float RiverInfluence = 0.0f;
+        float RiverSignedField = 0.0f;
+        float RiverBankInfluence = 0.0f;
+        float LakeInfluence = 0.0f;
+        ESVoxelBiome Biome = ESVoxelBiome::Plains;
+        bool bAllowed = true;
+    };
+
+    TMap<FIntPoint, FRoadGridSample> RouteGridCache;
+    RouteGridCache.Reserve(8192);
+
+    auto GetRouteGridSample = [&](const FIntPoint& GridCell) -> FRoadGridSample&
+    {
+        if (FRoadGridSample* Existing = RouteGridCache.Find(GridCell))
+        {
+            return *Existing;
+        }
+
+        FRoadGridSample Sample;
+        const double X = static_cast<double>(GridCell.X) * RouteGridStep;
+        const double Y = static_cast<double>(GridCell.Y) * RouteGridStep;
+        Sample.Height = FSVoxelGenerator::SampleSurfaceHeight(X, Y, GenerationSettings);
+        if (GenerationSettings.bEnableRivers)
+        {
+            FSVoxelGenerator::SampleRiverMaskAndField(
+                X, Y, GenerationSettings,
+                Sample.RiverInfluence,
+                Sample.RiverSignedField,
+                &Sample.RiverBankInfluence);
+        }
+        if (GenerationSettings.bEnableLakes)
+        {
+            float LakeWaterLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
+            FSVoxelGenerator::SampleLakeMaskAndLevel(
+                X, Y, GenerationSettings, Sample.LakeInfluence, LakeWaterLevel);
+        }
+        Sample.Biome = FSVoxelGenerator::SampleBiome(X, Y, GenerationSettings);
+
+        // A road must go around a lake, including its shoreline blend zone.
+        // River channels remain candidates only for a near-perpendicular crossing.
+        Sample.bAllowed = !GenerationSettings.bEnableLakes || Sample.LakeInfluence < 0.10f;
+        return RouteGridCache.Add(GridCell, Sample);
+    };
+
+    auto GetRiverTangent = [&](const FIntPoint& GridCell, FVector2D& OutTangent) -> bool
+    {
+        OutTangent = FVector2D::ZeroVector;
+        if (!GenerationSettings.bEnableRivers)
+        {
+            return false;
+        }
+
+        const float FieldXP = GetRouteGridSample(GridCell + FIntPoint(1, 0)).RiverSignedField;
+        const float FieldXM = GetRouteGridSample(GridCell + FIntPoint(-1, 0)).RiverSignedField;
+        const float FieldYP = GetRouteGridSample(GridCell + FIntPoint(0, 1)).RiverSignedField;
+        const float FieldYM = GetRouteGridSample(GridCell + FIntPoint(0, -1)).RiverSignedField;
+        const FVector2D Gradient(FieldXP - FieldXM, FieldYP - FieldYM);
+        if (Gradient.SizeSquared() <= 1.0e-10f)
+        {
+            return false;
+        }
+
+        // The signed river field changes across the channel; its perpendicular
+        // is the approximate direction along the channel.
+        OutTangent = FVector2D(-Gradient.Y, Gradient.X).GetSafeNormal();
+        return OutTangent.SizeSquared() > 0.5f;
+    };
+
+    struct FRoadOpenNode
+    {
+        double Score = 0.0;
+        int32 Index = INDEX_NONE;
+        // std::priority_queue is a max heap by default; reverse the comparison
+        // so the node with the lowest A* score is expanded first.
+        bool operator<(const FRoadOpenNode& Other) const
+        {
+            return Score > Other.Score;
+        }
+    };
+
+    auto FindSafeRoute = [&](const FVector2D& Start, const FVector2D& End,
+        TArray<FVector2D>& OutRoute) -> bool
+    {
+        OutRoute.Reset();
+        const double ChordLength = static_cast<double>((End - Start).Size());
+        if (ChordLength < 1000.0)
+        {
+            return false;
+        }
+
+        const FIntPoint StartCell(
+            FMath::Clamp(FMath::RoundToInt(Start.X / RouteGridStep), WorldGridMinX, WorldGridMaxX),
+            FMath::Clamp(FMath::RoundToInt(Start.Y / RouteGridStep), WorldGridMinY, WorldGridMaxY));
+        const FIntPoint GoalCell(
+            FMath::Clamp(FMath::RoundToInt(End.X / RouteGridStep), WorldGridMinX, WorldGridMaxX),
+            FMath::Clamp(FMath::RoundToInt(End.Y / RouteGridStep), WorldGridMinY, WorldGridMaxY));
+
+        if (StartCell == GoalCell)
+        {
+            OutRoute.Add(Start);
+            OutRoute.Add(End);
+            return true;
+        }
+
+        // First search locally; if a river valley or ridge blocks the corridor,
+        // retry with a wider detour. Both searches are bounded by the map window.
+        const double PaddingBase = FMath::Clamp(ChordLength * 0.35, 8000.0, 30000.0);
+        for (int32 Attempt = 0; Attempt < 2; ++Attempt)
+        {
+            const double Padding = PaddingBase * (Attempt == 0 ? 1.0 : 2.0);
+            const int32 MinGridX = FMath::Max(
+                WorldGridMinX, FMath::FloorToInt((FMath::Min(Start.X, End.X) - Padding) / RouteGridStep));
+            const int32 MaxGridX = FMath::Min(
+                WorldGridMaxX, FMath::CeilToInt((FMath::Max(Start.X, End.X) + Padding) / RouteGridStep));
+            const int32 MinGridY = FMath::Max(
+                WorldGridMinY, FMath::FloorToInt((FMath::Min(Start.Y, End.Y) - Padding) / RouteGridStep));
+            const int32 MaxGridY = FMath::Min(
+                WorldGridMaxY, FMath::CeilToInt((FMath::Max(Start.Y, End.Y) + Padding) / RouteGridStep));
+            const int32 Width = MaxGridX - MinGridX + 1;
+            const int32 Height = MaxGridY - MinGridY + 1;
+            if (Width <= 1 || Height <= 1)
+            {
+                continue;
+            }
+
+            auto ToIndex = [MinGridX, MinGridY, Width](const FIntPoint& Cell)
+            {
+                return (Cell.Y - MinGridY) * Width + (Cell.X - MinGridX);
+            };
+            auto ToCell = [MinGridX, MinGridY, Width](int32 Index)
+            {
+                return FIntPoint(MinGridX + Index % Width, MinGridY + Index / Width);
+            };
+
+            const int32 NodeCount = Width * Height;
+            const int32 StartIndex = ToIndex(StartCell);
+            const int32 GoalIndex = ToIndex(GoalCell);
+            TArray<double> Distance;
+            TArray<int32> Parent;
+            TArray<uint8> Closed;
+            Distance.Init(TNumericLimits<double>::Max(), NodeCount);
+            Parent.Init(INDEX_NONE, NodeCount);
+            Closed.Init(0, NodeCount);
+
+            const auto Heuristic = [&](const FIntPoint& A, const FIntPoint& B)
+            {
+                const int32 DX = FMath::Abs(A.X - B.X);
+                const int32 DY = FMath::Abs(A.Y - B.Y);
+                const int32 Diagonal = FMath::Min(DX, DY);
+                const int32 Straight = DX + DY - 2 * Diagonal;
+                return RouteGridStep * (static_cast<double>(Straight) +
+                    static_cast<double>(Diagonal) * 1.41421356237);
+            };
+
+            std::priority_queue<FRoadOpenNode> Open;
+            Distance[StartIndex] = 0.0;
+            Open.push({ Heuristic(StartCell, GoalCell), StartIndex });
+
+            const int32 Directions[8][2] =
+            {
+                { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+                { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 }
+            };
+
+            while (!Open.empty())
+            {
+                const FRoadOpenNode CurrentOpen = Open.top();
+                Open.pop();
+                const int32 CurrentIndex = CurrentOpen.Index;
+                if (CurrentIndex < 0 || CurrentIndex >= NodeCount || Closed[CurrentIndex])
+                {
+                    continue;
+                }
+                if (CurrentIndex == GoalIndex)
+                {
+                    break;
+                }
+                Closed[CurrentIndex] = 1;
+
+                const FIntPoint CurrentCell = ToCell(CurrentIndex);
+                FRoadGridSample& Current = GetRouteGridSample(CurrentCell);
+                if (!Current.bAllowed && CurrentIndex != StartIndex && CurrentIndex != GoalIndex)
+                {
+                    continue;
+                }
+
+                for (const auto& Direction : Directions)
+                {
+                    const FIntPoint NextCell(
+                        CurrentCell.X + Direction[0],
+                        CurrentCell.Y + Direction[1]);
+                    if (NextCell.X < MinGridX || NextCell.X > MaxGridX ||
+                        NextCell.Y < MinGridY || NextCell.Y > MaxGridY)
+                    {
+                        continue;
+                    }
+
+                    const int32 NextIndex = ToIndex(NextCell);
+                    if (Closed[NextIndex])
+                    {
+                        continue;
+                    }
+
+                    FRoadGridSample& Next = GetRouteGridSample(NextCell);
+                    if (!Next.bAllowed && NextIndex != GoalIndex)
+                    {
+                        continue;
+                    }
+
+                    const bool bDiagonal = Direction[0] != 0 && Direction[1] != 0;
+                    if (bDiagonal)
+                    {
+                        // Don't squeeze diagonally through a lake-mask corner.
+                        const FRoadGridSample& SideX =
+                            GetRouteGridSample(CurrentCell + FIntPoint(Direction[0], 0));
+                        const FRoadGridSample& SideY =
+                            GetRouteGridSample(CurrentCell + FIntPoint(0, Direction[1]));
+                        if (!SideX.bAllowed || !SideY.bAllowed)
+                        {
+                            continue;
+                        }
+                    }
+
+                    const double TravelDistance = RouteGridStep * (bDiagonal ? 1.41421356237 : 1.0);
+                    const double Grade = FMath::Abs(Next.Height - Current.Height) /
+                        FMath::Max(1.0, TravelDistance);
+                    if (Grade > MaxRouteGrade)
+                    {
+                        continue;
+                    }
+
+                    const FVector2D TravelDirection =
+                        FVector2D(static_cast<float>(Direction[0]), static_cast<float>(Direction[1])).GetSafeNormal();
+                    const float RiverInfluence = 0.5f * (Current.RiverInfluence + Next.RiverInfluence);
+                    const float RiverBank = 0.5f * (Current.RiverBankInfluence + Next.RiverBankInfluence);
+                    double RiverPenalty = 0.0;
+                    if (GenerationSettings.bEnableRivers && RiverBank > 0.12f)
+                    {
+                        FVector2D RiverTangent;
+                        if (GetRiverTangent(CurrentCell, RiverTangent))
+                        {
+                            const double ParallelAmount = FMath::Abs(
+                                FVector2D::DotProduct(TravelDirection, RiverTangent));
+
+                            // A road running down a river channel/canyon is never
+                            // allowed. Perpendicular crossings are possible but costly.
+                            if ((RiverInfluence > 0.10f && ParallelAmount > 0.55) ||
+                                (RiverBank > 0.38f && ParallelAmount > 0.68))
+                            {
+                                continue;
+                            }
+
+                            RiverPenalty = TravelDistance * static_cast<double>(RiverBank) *
+                                (ParallelAmount > 0.45 ? 18.0 : 5.0);
+                            if (RiverInfluence > 0.10f)
+                            {
+                                RiverPenalty += TravelDistance * (4.0 + RiverInfluence * 10.0);
+                            }
+                        }
+                        else
+                        {
+                            RiverPenalty = TravelDistance * static_cast<double>(RiverBank) * 8.0;
+                        }
+                    }
+
+                    double StepCost = TravelDistance * (1.0 + Grade * Grade * 80.0) + RiverPenalty;
+                    if (Current.Biome == ESVoxelBiome::Mountain ||
+                        Next.Biome == ESVoxelBiome::Mountain)
+                    {
+                        StepCost *= 2.5;
+                    }
+
+                    const double TentativeDistance = Distance[CurrentIndex] + StepCost;
+                    if (TentativeDistance < Distance[NextIndex])
+                    {
+                        Distance[NextIndex] = TentativeDistance;
+                        Parent[NextIndex] = CurrentIndex;
+                        Open.push({ TentativeDistance + Heuristic(NextCell, GoalCell), NextIndex });
+                    }
+                }
+            }
+
+            if (Parent[GoalIndex] == INDEX_NONE)
+            {
+                continue;
+            }
+
+            TArray<FVector2D> Reversed;
+            for (int32 Index = GoalIndex; Index != INDEX_NONE; Index = Parent[Index])
+            {
+                const FIntPoint Cell = ToCell(Index);
+                Reversed.Add(FVector2D(
+                    static_cast<float>(static_cast<double>(Cell.X) * RouteGridStep),
+                    static_cast<float>(static_cast<double>(Cell.Y) * RouteGridStep)));
+                if (Index == StartIndex)
+                {
+                    break;
+                }
+            }
+
+            if (Reversed.Num() < 2 || Parent[GoalIndex] == INDEX_NONE)
+            {
+                continue;
+            }
+
+            OutRoute.Reserve(Reversed.Num() + 2);
+            OutRoute.Add(Start);
+            for (int32 PointIndex = Reversed.Num() - 2; PointIndex >= 0; --PointIndex)
+            {
+                OutRoute.Add(Reversed[PointIndex]);
+            }
+            OutRoute.Add(End);
+            return true;
+        }
+
+        return false;
+    };
+
     const auto BuildSegment = [&](const FIntPoint& GridCell, const FVector2D& Start, const FVector2D& End)
     {
         const FVector2D Chord = End - Start;
@@ -158,90 +492,140 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             return;
         }
 
-        const FVector2D Direction = Chord / static_cast<float>(ChordLength);
-        const FVector2D Perpendicular(-Direction.Y, Direction.X);
+        // Keep future POI footprints clear. Each neighbouring site gets road
+        // access near the plateau edge instead of having asphalt run through its centre.
+        const double SiteAccessOffset = FMath::Clamp(
+            std::abs(static_cast<double>(GenerationSettings.POIPlateauRadius)) +
+                std::abs(static_cast<double>(GenerationSettings.POIPlateauBlendDistance)) * 0.60 +
+                HalfRoadWidth,
+            0.0,
+            ChordLength * 0.30);
+        const FVector2D ChordDirection = (Chord / static_cast<float>(ChordLength)).GetSafeNormal();
+        const FVector2D RouteStart = Start + ChordDirection * static_cast<float>(SiteAccessOffset);
+        const FVector2D RouteEnd = End - ChordDirection * static_cast<float>(SiteAccessOffset);
 
-        // A small, deterministic quadratic bend avoids a rigid square-grid look
-        // without creating sharp turns or moving the road away from POI centres.
-        const uint32 CurveHash =
-            static_cast<uint32>(GridCell.X) * 73856093u ^
-            static_cast<uint32>(GridCell.Y) * 19349663u ^
-            static_cast<uint32>(GenerationSettings.Seed) * 83492791u;
-        const double CurveSignal =
-            static_cast<double>(CurveHash & 0xFFFFu) / 65535.0 * 2.0 - 1.0;
-        const double CurveOffset = FMath::Clamp(
-            CurveSignal * ChordLength * 0.055, -5000.0, 5000.0);
-        const FVector2D Control = (Start + End) * 0.5f +
-            Perpendicular * static_cast<float>(CurveOffset);
-
-        const int32 SampleCount = FMath::Clamp(
-            FMath::CeilToInt(static_cast<float>(ChordLength / SafeSampleSpacing)), 2, 512);
+        TArray<FVector2D> RoutePoints;
+        if (!FindSafeRoute(RouteStart, RouteEnd, RoutePoints))
+        {
+            UE_LOG(LogTemp, Verbose,
+                TEXT("SmoothVoxel roads: skipped blocked route from site (%d,%d)."),
+                GridCell.X, GridCell.Y);
+            return;
+        }
 
         TArray<FVector2D> Path;
         TArray<double> GroundHeights;
         TArray<double> RoadLifts;
-        Path.Reserve(SampleCount + 1);
-        GroundHeights.Reserve(SampleCount + 1);
-        RoadLifts.SetNumZeroed(SampleCount + 1);
-
-        for (int32 SampleIndex = 0; SampleIndex <= SampleCount; ++SampleIndex)
+        Path.Add(RoutePoints[0]);
+        for (int32 RouteIndex = 1; RouteIndex < RoutePoints.Num(); ++RouteIndex)
         {
-            const double T = static_cast<double>(SampleIndex) / static_cast<double>(SampleCount);
-            const double OneMinusT = 1.0 - T;
-            const double PX = OneMinusT * OneMinusT * Start.X +
-                2.0 * OneMinusT * T * Control.X + T * T * End.X;
-            const double PY = OneMinusT * OneMinusT * Start.Y +
-                2.0 * OneMinusT * T * Control.Y + T * T * End.Y;
-            const FVector2D Point(
-                static_cast<float>(FMath::Clamp(PX, MinX, MaxX)),
-                static_cast<float>(FMath::Clamp(PY, MinY, MaxY)));
-            Path.Add(Point);
+            const FVector2D SegmentStart = RoutePoints[RouteIndex - 1];
+            const FVector2D SegmentEnd = RoutePoints[RouteIndex];
+            const FVector2D Segment = SegmentEnd - SegmentStart;
+            const double SegmentLength = static_cast<double>(Segment.Size());
+            if (SegmentLength < 1.0)
+            {
+                continue;
+            }
 
+            const int32 SegmentSamples = FMath::Max(
+                1, FMath::CeilToInt(static_cast<float>(SegmentLength / SafeSampleSpacing)));
+            for (int32 SampleIndex = 1; SampleIndex <= SegmentSamples; ++SampleIndex)
+            {
+                const double Alpha = static_cast<double>(SampleIndex) / static_cast<double>(SegmentSamples);
+                const FVector2D Point(
+                    static_cast<float>(FMath::Clamp(
+                        SegmentStart.X + Segment.X * Alpha, MinX, MaxX)),
+                    static_cast<float>(FMath::Clamp(
+                        SegmentStart.Y + Segment.Y * Alpha, MinY, MaxY)));
+                if (FVector2D::DistSquared(Path.Last(), Point) > 0.01f)
+                {
+                    Path.Add(Point);
+                }
+            }
+        }
+
+        if (Path.Num() < 2)
+        {
+            return;
+        }
+        const int32 SampleCount = Path.Num() - 1;
+        GroundHeights.Reserve(Path.Num());
+        RoadLifts.SetNumZeroed(Path.Num());
+
+        for (int32 SampleIndex = 0; SampleIndex < Path.Num(); ++SampleIndex)
+        {
+            const FVector2D& Point = Path[SampleIndex];
             const double Ground = FSVoxelGenerator::SampleSurfaceHeight(
                 static_cast<double>(Point.X),
                 static_cast<double>(Point.Y),
                 GenerationSettings);
             GroundHeights.Add(Ground);
 
-            // Water crossings are kept above their water plane instead of
-            // letting a road descend into a carved riverbed or lake basin.
-            // These are simple raised crossings for now; dedicated bridge
-            // meshes and supports can be added without changing route generation.
-            float WaterBodyInfluence = 0.0f;
-            double WaterLevel = static_cast<double>(GenerationSettings.RiverWaterLevel);
-            if (GenerationSettings.bEnableRivers)
+            // Only a route planner-approved, near-perpendicular river crossing
+            // is raised to bridge deck height. Lakes are always routed around.
+            if (!GenerationSettings.bEnableRivers)
             {
-                WaterBodyInfluence = FMath::Clamp(
-                    FSVoxelGenerator::SampleRiverInfluence(
-                        static_cast<double>(Point.X),
-                        static_cast<double>(Point.Y),
-                        GenerationSettings),
-                    0.0f, 1.0f);
-            }
-            if (GenerationSettings.bEnableLakes)
-            {
-                float LakeInfluence = 0.0f;
-                float LakeWaterLevel = static_cast<float>(WaterLevel);
-                FSVoxelGenerator::SampleLakeMaskAndLevel(
-                    static_cast<double>(Point.X),
-                    static_cast<double>(Point.Y),
-                    GenerationSettings,
-                    LakeInfluence,
-                    LakeWaterLevel);
-                if (LakeInfluence > WaterBodyInfluence)
-                {
-                    WaterBodyInfluence = FMath::Clamp(LakeInfluence, 0.0f, 1.0f);
-                    WaterLevel = static_cast<double>(LakeWaterLevel);
-                }
+                continue;
             }
 
-            const double BridgeBlend = SmoothStep(0.02, 0.75, WaterBodyInfluence);
-            const double DeckHeight = WaterLevel + 100.0;
-            RoadLifts[SampleIndex] = FMath::Max(0.0, DeckHeight - Ground) * BridgeBlend;
+            float RiverInfluence = 0.0f;
+            float RiverField = 0.0f;
+            float RiverBankInfluence = 0.0f;
+            FSVoxelGenerator::SampleRiverMaskAndField(
+                static_cast<double>(Point.X),
+                static_cast<double>(Point.Y),
+                GenerationSettings,
+                RiverInfluence,
+                RiverField,
+                &RiverBankInfluence);
+            if (RiverInfluence <= 0.02f)
+            {
+                continue;
+            }
+
+            const FVector2D Before = Path[FMath::Max(0, SampleIndex - 1)];
+            const FVector2D After = Path[FMath::Min(SampleCount, SampleIndex + 1)];
+            FVector2D RoadDirection = (After - Before).GetSafeNormal();
+            if (RoadDirection.SizeSquared() <= 0.5f)
+            {
+                continue;
+            }
+
+            const double GradientStep = FMath::Max(RouteGridStep, SafeSampleSpacing * 2.0);
+            float FieldXP = 0.0f, FieldXM = 0.0f, FieldYP = 0.0f, FieldYM = 0.0f;
+            float UnusedInfluence = 0.0f;
+            FSVoxelGenerator::SampleRiverMaskAndField(
+                Point.X + GradientStep, Point.Y, GenerationSettings,
+                UnusedInfluence, FieldXP);
+            FSVoxelGenerator::SampleRiverMaskAndField(
+                Point.X - GradientStep, Point.Y, GenerationSettings,
+                UnusedInfluence, FieldXM);
+            FSVoxelGenerator::SampleRiverMaskAndField(
+                Point.X, Point.Y + GradientStep, GenerationSettings,
+                UnusedInfluence, FieldYP);
+            FSVoxelGenerator::SampleRiverMaskAndField(
+                Point.X, Point.Y - GradientStep, GenerationSettings,
+                UnusedInfluence, FieldYM);
+            const FVector2D Gradient(FieldXP - FieldXM, FieldYP - FieldYM);
+            if (Gradient.SizeSquared() <= 1.0e-10f)
+            {
+                continue;
+            }
+            const FVector2D RiverTangent(-Gradient.Y, Gradient.X);
+            const FVector2D NormalizedRiverTangent = RiverTangent.GetSafeNormal();
+            const double ParallelAmount = FMath::Abs(
+                FVector2D::DotProduct(RoadDirection, NormalizedRiverTangent));
+            if (ParallelAmount < 0.55)
+            {
+                const double BridgeBlend = SmoothStep(0.02, 0.75, RiverInfluence);
+                const double DeckHeight = static_cast<double>(GenerationSettings.RiverWaterLevel) + 100.0;
+                RoadLifts[SampleIndex] = FMath::Max(0.0, DeckHeight - Ground) * BridgeBlend;
+            }
         }
 
-        // Spread bridge elevation over a few samples to avoid a sudden vertical
-        // step where a road meets the river's sloping banks.
+        // Smooth bridge approaches without creating bridges over lake basins or
+        // lifting any route that runs along the channel.
         for (int32 Pass = 0; Pass < 2; ++Pass)
         {
             TArray<double> SmoothedLifts = RoadLifts;
@@ -278,8 +662,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const double RightGround = FSVoxelGenerator::SampleSurfaceHeight(
                 static_cast<double>(RightXY.X), static_cast<double>(RightXY.Y), GenerationSettings);
             const double Lift = RoadLifts[SampleIndex];
-            const double LeftZ = LeftGround + Lift + SafeSurfaceOffset;
-            const double RightZ = RightGround + Lift + SafeSurfaceOffset;
+            const double CenterGround = GroundHeights[SampleIndex];
+            const double CrossSectionCorrection = FMath::Max(
+                0.0, CenterGround - (LeftGround + RightGround) * 0.5);
+            const double TerrainClearance = FMath::Max(
+                SafeSurfaceOffset,
+                static_cast<double>(GenerationSettings.BaseVoxelSize) * 0.30);
+            const double LeftZ = LeftGround + Lift + TerrainClearance + CrossSectionCorrection;
+            const double RightZ = RightGround + Lift + TerrainClearance + CrossSectionCorrection;
 
             const double DistanceBefore = static_cast<double>((Point - Before).Size());
             const double DistanceAfter = static_cast<double>((After - Point).Size());
