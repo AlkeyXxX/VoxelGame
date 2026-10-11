@@ -111,7 +111,7 @@ void ASmoothVoxelTransvoxelChunk::StartQueuedBuild()
 		MakeShared<FSVoxelMeshData, ESPMode::ThreadSafe>();
 
 	Async(EAsyncExecution::ThreadPool,
-		[WeakThis, WorkRevision, WorkCellsPerAxis, WorkVoxelSize, WorkFaceMask,
+		[WeakThis, WeakWorld, WorkRevision, WorkCellsPerAxis, WorkVoxelSize, WorkFaceMask,
 			WorkSettings, bWorkCollision, Result]() mutable
 		{
 			FSVoxelTransvoxelMesher::Generate(
@@ -204,6 +204,10 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	if (BuildRevision != RequestedRevision)
 	{
 		bBuildQueued = true;
+		if (ASmoothVoxelOctreeWorld* World = Cast<ASmoothVoxelOctreeWorld>(GetOwner()))
+		{
+			World->EnqueueChunkBuild(this);
+		}
 		return;
 	}
 
