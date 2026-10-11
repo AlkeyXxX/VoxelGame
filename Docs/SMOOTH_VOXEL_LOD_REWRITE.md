@@ -114,11 +114,12 @@ winding separately from the stored outward normals.
   reduce repeated rebuilds and completion bursts but cannot guarantee zero
   frame-time cost for every terrain/material configuration.
 - UVs use a stable world-XY projection at fixed world scale, reconstructed from
-  the chunk's integer lattice origin in double precision before conversion to
-  the float UV channel. This is seam-consistent for the height-field terrain and
-  avoids per-vertex projection switching. Near-vertical cliffs can stretch; use
-  triplanar mapping there. Very large absolute UVs may still require material-side
-  wrapping/offset management because UE4 shader coordinates are floats.
+  the chunk's integer lattice origin in double precision. Before writing the
+  procedural mesh, one shared integer tile offset is removed from all UVs in a
+  chunk. This keeps the coordinates bounded while remaining continuous across
+  marching-cubes cell boundaries. Adjacent chunks differ only by whole texture
+  repeats, so seam continuity assumes the material preserves repeating-UV
+  semantics. Near-vertical cliffs can stretch; use triplanar mapping there.
 - Tangents are derived from the UV0 world-XY projection and the smoothed surface
   normal, rather than accumulated independently from each cell's triangle list.
   Duplicate vertices at adjacent cells therefore get the same tangent frame,
