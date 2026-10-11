@@ -58,52 +58,6 @@ namespace
 		return FVector(-Dx, -Dy, -Dz).GetSafeNormal();
 	}
 
-	FVector AdjustBoundaryCorner(
-		FVector Position,
-		uint8 TransitionFaceMask,
-		uint8 FaceToExclude,
-		float ChunkSize,
-		float HalfStep)
-	{
-		if ((TransitionFaceMask & SVoxelTransitionFace_NegativeX) &&
-			!(FaceToExclude & SVoxelTransitionFace_NegativeX) &&
-			FMath::IsNearlyZero(Position.X))
-		{
-			Position.X += HalfStep;
-		}
-		if ((TransitionFaceMask & SVoxelTransitionFace_PositiveX) &&
-			!(FaceToExclude & SVoxelTransitionFace_PositiveX) &&
-			FMath::IsNearlyEqual(Position.X, ChunkSize))
-		{
-			Position.X -= HalfStep;
-		}
-		if ((TransitionFaceMask & SVoxelTransitionFace_NegativeY) &&
-			!(FaceToExclude & SVoxelTransitionFace_NegativeY) &&
-			FMath::IsNearlyZero(Position.Y))
-		{
-			Position.Y += HalfStep;
-		}
-		if ((TransitionFaceMask & SVoxelTransitionFace_PositiveY) &&
-			!(FaceToExclude & SVoxelTransitionFace_PositiveY) &&
-			FMath::IsNearlyEqual(Position.Y, ChunkSize))
-		{
-			Position.Y -= HalfStep;
-		}
-		if ((TransitionFaceMask & SVoxelTransitionFace_NegativeZ) &&
-			!(FaceToExclude & SVoxelTransitionFace_NegativeZ) &&
-			FMath::IsNearlyZero(Position.Z))
-		{
-			Position.Z += HalfStep;
-		}
-		if ((TransitionFaceMask & SVoxelTransitionFace_PositiveZ) &&
-			!(FaceToExclude & SVoxelTransitionFace_PositiveZ) &&
-			FMath::IsNearlyEqual(Position.Z, ChunkSize))
-		{
-			Position.Z -= HalfStep;
-		}
-		return Position;
-	}
-
 	FVector TransitionSampleToChunkLocal(
 		uint8 FaceBit,
 		uint8 TransitionFaceMask,
@@ -164,11 +118,10 @@ namespace
 		const float V = (static_cast<float>(CellV) * 2.0f + Offset[1]) * FineStep;
 		const float Depth = static_cast<float>(Offset[2]) * CoarseStep * 0.5f;
 
-		const FVector RawPosition = FaceOrigin + AxisU * U + AxisV * V + Inward * Depth;
-		// At edges/corners where another face also transitions, use the same
-		// half-cell inset as the neighboring transition strip.
-		return AdjustBoundaryCorner(
-			RawPosition, TransitionFaceMask, FaceBit, ChunkSize, CoarseStep * 0.5f);
+		// Keep the transition-cell lattice on the exact chunk face. Adjacent
+		// transition faces must share the same edge coordinates; insetting each
+		// face independently opens square holes at multi-face junctions.
+		return FaceOrigin + AxisU * U + AxisV * V + Inward * Depth;
 	}
 
 	float ComputeNormalSampleStep(
