@@ -451,6 +451,9 @@ bool FSmoothVoxelTransvoxelTangentContinuityTest::RunTest(const FString& Paramet
 	FSVoxelTransvoxelMesher::Generate(Settings, 8, 100.0f, 0, Mesh);
 	TestEqual(TEXT("Every vertex should receive one tangent"), Mesh.Tangents.Num(), Mesh.Vertices.Num());
 
+	TestEqual(TEXT("Every vertex should have one normal"), Mesh.Normals.Num(), Mesh.Vertices.Num());
+	TestEqual(TEXT("Every vertex should have one UV"), Mesh.UV0.Num(), Mesh.Vertices.Num());
+
 	TArray<int32> VertexUseCount;
 	VertexUseCount.Init(0, Mesh.Vertices.Num());
 	for (const int32 VertexIndex : Mesh.Triangles)
@@ -464,6 +467,10 @@ bool FSmoothVoxelTransvoxelTangentContinuityTest::RunTest(const FString& Paramet
 	int32 SharedIndexedVertices = 0;
 	for (int32 Index = 0; Index < Mesh.Vertices.Num(); ++Index)
 	{
+		if (!Mesh.Tangents.IsValidIndex(Index) || !Mesh.Normals.IsValidIndex(Index))
+		{
+			continue;
+		}
 		const FVector Tangent = Mesh.Tangents[Index].TangentX.GetSafeNormal();
 		TestTrue(TEXT("Every tangent must be finite"), !Tangent.ContainsNaN());
 		TestTrue(TEXT("Every tangent must be nonzero"), Tangent.SizeSquared() > 0.5f);
@@ -690,11 +697,11 @@ bool FSmoothVoxelTransvoxelMixedBoundaryOffsetTest::RunTest(const FString& Param
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FSmoothVoxelMinedNodeDensityTest,
-	"SmoothVoxel.Transvoxel.MinedNodeCutsStableGridSample",
+	FSmoothVoxelMinedCellDensityTest,
+	"SmoothVoxel.Transvoxel.MinedCellCutsAlignedVoxelCell",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FSmoothVoxelMinedNodeDensityTest::RunTest(const FString& Parameters)
+bool FSmoothVoxelMinedCellDensityTest::RunTest(const FString& Parameters)
 {
 	FSVoxelGenerationSettings Settings;
 	Settings.BaseHeight = 250.0f;
