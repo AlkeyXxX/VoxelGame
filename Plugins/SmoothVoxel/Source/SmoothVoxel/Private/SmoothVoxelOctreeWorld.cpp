@@ -248,11 +248,15 @@ void ASmoothVoxelOctreeWorld::RegenerateWorld()
 
 FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	const FVector& ChunkOrigin,
+	const FIntVector& ChunkOriginCells,
 	float VoxelSize) const
 {
 	FSVoxelGenerationSettings Settings;
 	Settings.CellsPerAxis = CellsPerAxis;
 	Settings.VoxelSize = VoxelSize;
+	Settings.BaseVoxelSize = FMath::Max(1.0f, BaseVoxelSize);
+	Settings.ChunkOriginCells = ChunkOriginCells;
+	Settings.bUseChunkLatticeCoordinates = true;
 	Settings.NormalSampleStep = FMath::Max(5.0f, BaseVoxelSize * 0.5f);
 	Settings.IsoLevel = 0.0f;
 	Settings.Seed = Seed;
@@ -521,7 +525,7 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 			Node, SelectionSettings.CellsPerAxis, ChunkOrigin, FaceMask, VoxelSize, bCollision))
 		{
 			const FSVoxelGenerationSettings GeneratorSettings =
-				MakeGenerationSettings(ChunkOrigin, VoxelSize);
+				MakeGenerationSettings(ChunkOrigin, Node.OriginCells, VoxelSize);
 			Chunk->QueueBuild(
 				Node,
 				SelectionSettings.CellsPerAxis,
