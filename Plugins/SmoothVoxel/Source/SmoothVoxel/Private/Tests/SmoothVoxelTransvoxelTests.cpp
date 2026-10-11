@@ -484,7 +484,7 @@ bool FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest::RunTest(const FString& Para
 		if (FineNormal)
 		{
 			TestTrue(
-				TEXT("LOD-aware normal smoothing must keep shared coarse/fine seam normals aligned"),
+				TEXT("World-space normal sampling must keep shared coarse/fine seam normals aligned"),
 				Pair.Value.Equals(*FineNormal, 0.001f));
 		}
 	}
