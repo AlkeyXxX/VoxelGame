@@ -76,6 +76,72 @@ namespace
             static_cast<uint64>(static_cast<uint32>(Seed)) * 0x85EBCA77C2B2AE63ull;
         return static_cast<uint32>(MixHash64(H) >> 40) & 0x00FFFFFFu;
     }
+
+    FORCEINLINE float ApplyBlockEdits(
+        double X,
+        double Y,
+        double Z,
+        float Density,
+        const FSVoxelGenerationSettings& Settings)
+    {
+        if (!Settings.BlockEdits.IsValid() || Settings.BlockEdits->Num() == 0)
+        {
+            return Density;
+        }
+
+        const double Step = FMath::Max(1.0, static_cast<double>(Settings.BaseVoxelSize));
+        const int32 BaseX = static_cast<int32>(std::floor(X / Step));
+        const int32 BaseY = static_cast<int32>(std::floor(Y / Step));
+        const int32 BaseZ = static_cast<int32>(std::floor(Z / Step));
+        const double HalfExtent = Step * 0.55;
+
+        // A sample can be influenced by the eight grid cells that touch it.
+        // Evaluating only these nearby edits avoids scanning the whole edit map.
+        for (int32 DZ = -1; DZ <= 0; ++DZ)
+        {
+            for (int32 DY = -1; DY <= 0; ++DY)
+            {
+                for (int32 DX = -1; DX <= 0; ++DX)
+                {
+                    const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                    const int8* EditState = Settings.BlockEdits->Find(Cell);
+                    if (!EditState || *EditState == 0)
+                    {
+                        continue;
+                    }
+
+                    const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
+                    const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
+                    const double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
+                    const double QX = std::abs(X - CenterX) - HalfExtent;
+                    const double QY = std::abs(Y - CenterY) - HalfExtent;
+                    const double QZ = std::abs(Z - CenterZ) - HalfExtent;
+                    const double OutsideX = FMath::Max(QX, 0.0);
+                    const double OutsideY = FMath::Max(QY, 0.0);
+                    const double OutsideZ = FMath::Max(QZ, 0.0);
+                    const double OutsideDistance = std::sqrt(
+                        OutsideX * OutsideX + OutsideY * OutsideY + OutsideZ * OutsideZ);
+                    const double InsideDistance = FMath::Min(
+                        FMath::Max(QX, FMath::Max(QY, QZ)),
+                        0.0);
+                    const double BoxSdf = OutsideDistance + InsideDistance;
+
+                    if (*EditState > 0)
+                    {
+                        // Union a solid box with the generated terrain.
+                        Density = FMath::Max(Density, static_cast<float>(-BoxSdf));
+                    }
+                    else
+                    {
+                        // Subtract the box from the generated terrain.
+                        Density = FMath::Min(Density, static_cast<float>(BoxSdf));
+                    }
+                }
+            }
+        }
+
+        return Density;
+    }
 }
 
 
@@ -344,7 +410,7 @@ float FSVoxelGenerator::DensityFromSurfaceHeight(
         }
     }
 
-    return static_cast<float>(D);
+    return ApplyBlockEdits(X, Y, Z, static_cast<float>(D), S);
 }
 
 float FSVoxelGenerator::SampleDensity(
