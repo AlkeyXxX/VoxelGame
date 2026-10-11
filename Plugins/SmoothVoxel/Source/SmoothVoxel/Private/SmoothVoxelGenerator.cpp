@@ -740,7 +740,7 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
 
     // Convert world-space channel width into a dimensionless band around the
     // field's zero-contour. Smooth falloff avoids hard cliffs at the carved banks.
-    const double Threshold = FMath::Clamp(HalfWidth * Scale * 0.48, 0.0001, 0.20);
+    const double Threshold = FMath::Clamp(HalfWidth * Scale * 1.6, 0.0001, 0.20);
     const float T = FMath::Clamp(
         static_cast<float>(std::abs(Field) / Threshold),
         0.0f,
@@ -824,6 +824,12 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
     const double Blend = FMath::Clamp(
         std::abs(static_cast<double>(S.LakeShoreBlendDistance)), 0.0,
         Spacing * 0.25 - Radius);
+    // Resolve level before radial mask testing. Boundary samples outside the
+    // lake keep the same elevation, so clipping never interpolates a sloped ramp.
+    OutWaterLevel = Flatness >= 0.5f
+        ? S.RiverWaterLevel
+        : static_cast<float>(SampleUnflattenedSurfaceHeight(SiteX, SiteY, S) - 50.0);
+
     const double DX = X - SiteX;
     const double DY = Y - SiteY;
     const double Distance = std::sqrt(DX * DX + DY * DY);
@@ -842,10 +848,6 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
             static_cast<float>((Distance - Radius) / Blend), 0.0f, 1.0f);
         OutInfluence = 1.0f - T * T * (3.0f - 2.0f * T);
     }
-
-    OutWaterLevel = Flatness >= 0.5f
-        ? S.RiverWaterLevel
-        : static_cast<float>(SampleUnflattenedSurfaceHeight(SiteX, SiteY, S) - 50.0);
 }
 
 double FSVoxelGenerator::SampleSurfaceHeight(
