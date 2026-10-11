@@ -54,7 +54,7 @@ struct FSVoxelGenerationSettings
 	float BaseHeight = 900.0f;
 	float HeightAmplitude = 850.0f;
 	float NoiseScale = 0.00005f;
-	float DetailScale = 0.0000125f;
+	float DetailScale = 0.000035f;
 	float DetailAmplitude = 60.0f;
 
 	bool bEnableRivers = true;
