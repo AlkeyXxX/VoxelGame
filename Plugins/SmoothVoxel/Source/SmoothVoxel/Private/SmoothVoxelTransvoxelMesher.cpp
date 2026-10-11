@@ -139,7 +139,7 @@ namespace
 
 	FVector ComputeTransitionSecondaryPosition(
 		const FVector& PrimaryPosition,
-		const FVector& SurfaceNormal,
+		const FSVoxelGenerationSettings& Settings,
 		uint8 TransitionFaceMask,
 		float ChunkSize,
 		float VoxelSize)
@@ -233,6 +233,16 @@ namespace
 		// Project the displacement into the local tangent plane, following the
 		// standard secondary-position approach so movement is along the surface
 		// rather than simply pushing vertices off the isosurface normal.
+		// Most surface vertices are not moved by a transition. Avoid six
+		// extra density samples for those vertices; they are expensive because
+		// each sample evaluates the multi-octave terrain noise.
+		if (Delta.SizeSquared() <= SMALL_NUMBER)
+		{
+			return PrimaryPosition;
+		}
+
+		const FVector SurfaceNormal = SampleOutwardNormal(
+			PrimaryPosition, Settings, ComputeNormalSampleStep(Settings));
 		const FVector Normal = SurfaceNormal.GetSafeNormal();
 		const FVector TangentialDelta = Delta - Normal * FVector::DotProduct(Normal, Delta);
 		return PrimaryPosition + TangentialDelta;
@@ -275,7 +285,8 @@ namespace
 		const FSVoxelGenerationSettings& Settings,
 		uint8 TransitionFaceMask,
 		float ChunkSize,
-		FSVoxelMeshData& OutMesh)
+		FSVoxelMeshData& OutMesh,
+		TMap<FIntVector, FVector>& NormalCache)
 	{
 		if (VertexCount <= 0 || TriangleCount <= 0)
 		{
@@ -306,15 +317,28 @@ namespace
 		for (int32 I = 0; I < VertexCount; ++I)
 		{
 			const FVector LocalPosition = CellLocalVertices[I];
-			const float NormalSampleStep = ComputeNormalSampleStep(Settings);
-			CellNormals[I] = SampleOutwardNormal(LocalPosition, Settings, NormalSampleStep);
+			// Marching-cubes emits separate vertices for neighbouring cells.
+			// Cache normals by a 0.1 cm local-position key so duplicate vertices
+			// reuse the same expensive density-gradient calculation.
+			const FIntVector NormalKey(
+				FMath::RoundToInt(LocalPosition.X * 10.0f),
+				FMath::RoundToInt(LocalPosition.Y * 10.0f),
+				FMath::RoundToInt(LocalPosition.Z * 10.0f));
+			if (const FVector* CachedNormal = NormalCache.Find(NormalKey))
+			{
+				CellNormals[I] = *CachedNormal;
+			}
+			else
+			{
+				CellNormals[I] = SampleOutwardNormal(
+					LocalPosition, Settings, ComputeNormalSampleStep(Settings));
+				NormalCache.Add(NormalKey, CellNormals[I]);
+			}
 			OutMesh.Vertices.Add(LocalPosition);
 			OutMesh.Normals.Add(CellNormals[I]);
 
-			// Reconstruct world coordinates in double precision, then remove a
-			// per-cell integer tile offset before conversion to the GPU UV format.
-			// This retains the same world-XY mapping modulo texture repetition
-			// without uploading ever-growing absolute coordinates to half floats.
+			// Reconstruct world coordinates in double precision, then subtract
+			// the shared chunk tile offset before conversion to the GPU UV format.
 			double WorldX = 0.0;
 			double WorldY = 0.0;
 			GetWorldXYForUV(LocalPosition, Settings, WorldX, WorldY);
@@ -322,7 +346,7 @@ namespace
 				static_cast<float>(WorldX * UVWorldScale - UvOffsetU),
 				static_cast<float>(WorldY * UVWorldScale - UvOffsetV)));
 
-			// UV0 follows a fixed-scale world-XY projection within this cell.
+			// UV0 follows a fixed-scale world-XY projection within this chunk.
 			// Subtracting a constant integer tile offset does not change its
 			// derivatives, so for a height field use dP/dX=(1,0,dZ/dX) and
 			// dP/dY=(0,1,dZ/dY). Recover their slopes from the outward normal.
@@ -535,6 +559,8 @@ void FSVoxelTransvoxelMesher::Generate(
 	OutMesh.Normals.Reserve(CellsPerAxis * CellsPerAxis * 6);
 	OutMesh.UV0.Reserve(CellsPerAxis * CellsPerAxis * 6);
 	OutMesh.Triangles.Reserve(CellsPerAxis * CellsPerAxis * 12);
+	TMap<FIntVector, FVector> NormalCache;
+	NormalCache.Reserve(CellsPerAxis * CellsPerAxis * 4);
 	const float ChunkSize = static_cast<float>(CellsPerAxis) * VoxelSize;
 
 	// Generate regular cells at the selected LOD. Transition cells are emitted
@@ -594,13 +620,9 @@ void FSVoxelTransvoxelMesher::Generate(
 						static_cast<float>(Y + RegularCornerOffsets[B][1]) * VoxelSize,
 						static_cast<float>(Z + RegularCornerOffsets[B][2]) * VoxelSize);
 					const FVector PrimaryPosition = FMath::Lerp(PA, PB, T);
-					const FVector PrimaryNormal = SampleOutwardNormal(
-						PrimaryPosition,
-						MeshSettings,
-						FMath::Max(5.0f, MeshSettings.NormalSampleStep));
 					CellVertices[V] = ComputeTransitionSecondaryPosition(
 						PrimaryPosition,
-						PrimaryNormal,
+						MeshSettings,
 						TransitionFaceMask,
 						ChunkSize,
 						VoxelSize);
@@ -608,7 +630,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					false, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh);
+					false, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, NormalCache);
 			}
 		}
 	}
@@ -698,7 +720,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					bTableFlip, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh);
+					bTableFlip, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, NormalCache);
 			}
 		}
 	}
