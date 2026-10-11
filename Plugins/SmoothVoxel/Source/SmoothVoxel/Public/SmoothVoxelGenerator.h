@@ -8,6 +8,11 @@ struct FSVoxelGenerationSettings
 {
 	int32 CellsPerAxis = 32;
 	float VoxelSize = 100.0f;
+
+	// World-space gradient distance shared by every LOD to keep surface normals
+	// consistent when adjacent chunks use different sample spacings.
+	float NormalSampleStep = 100.0f;
+
 	float IsoLevel = 0.0f;
 
 	int32 Seed = 1337;
