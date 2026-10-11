@@ -363,8 +363,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
 	bool bEnableRivers = true;
 
+	/** Channel-field frequency. Higher values create more river contours; mask width is scaled with it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.000001", ClampMax="0.00005"))
-	float RiverScale = 0.0000025f;
+	float RiverScale = 0.000004f;
 
 	/** River half-width in centimetres. 250 cm = 2.5 m on each side, 5 m total width. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="250.0", Units="cm"))
