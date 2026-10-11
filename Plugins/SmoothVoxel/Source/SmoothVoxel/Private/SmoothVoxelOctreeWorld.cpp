@@ -622,7 +622,6 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	const float HalfExtent = FMath::Max(100.0f, WorldSize) * 0.5f;
 	const float Step = (HalfExtent * 2.0f) / static_cast<float>(Resolution);
 	const float SafeTileSize = FMath::Max(100.0f, InTileSize);
-	const double RiverDepth = std::abs(static_cast<double>(GenerationSettings.RiverDepth));
 	const int32 VertexCount = Side * Side;
 
 	// Lakes and oceans keep their simple, perfectly level quad.
