@@ -681,6 +681,39 @@ bool FSmoothVoxelTransvoxelMixedBoundaryOffsetTest::RunTest(const FString& Param
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelMinedNodeDensityTest,
+	"SmoothVoxel.Transvoxel.MinedNodeCutsStableGridSample",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelMinedNodeDensityTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.BaseHeight = 250.0f;
+	Settings.HeightAmplitude = 0.0f;
+	Settings.DetailAmplitude = 0.0f;
+	Settings.NoiseScale = 0.0f;
+	Settings.DetailScale = 0.0f;
+	Settings.BaseVoxelSize = 50.0f;
+	Settings.BottomDepth = 1000.0f;
+	Settings.bEnableCaves = false;
+	Settings.IsoLevel = 0.0f;
+
+	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodes =
+		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
+	const FIntVector Node(2, 2, 4);
+	MinedNodes->Add(Node);
+	Settings.MinedNodes = MinedNodes;
+
+	const float BeforeCut = 250.0f - 200.0f;
+	const float AtMinedNode = FSVoxelGenerator::SampleDensity(100.0, 100.0, 200.0, Settings);
+	const float OutsideMinedNode = FSVoxelGenerator::SampleDensity(200.0, 100.0, 200.0, Settings);
+	TestTrue(TEXT("A mined grid node must become air at its exact lattice sample"), AtMinedNode < 0.0f);
+	TestTrue(TEXT("Mining one grid node must not clear distant terrain samples"), OutsideMinedNode > 0.0f);
+	TestTrue(TEXT("Fixture must be solid before applying the mined-node snapshot"), BeforeCut > 0.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelTransvoxelBlockEditDensityTest,
 	"SmoothVoxel.Transvoxel.BlockEditsCreateAndRemoveSolidVolumes",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -854,6 +887,7 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 				Settings);
 			if ((AlongFace > Settings.IsoLevel) != (AgainstFace > Settings.IsoLevel))
 			{
+				++OrientedFacesChecked;
 				bSampledFacesPointIntoSolid &= AlongFace > AgainstFace;
 			}
 		}
