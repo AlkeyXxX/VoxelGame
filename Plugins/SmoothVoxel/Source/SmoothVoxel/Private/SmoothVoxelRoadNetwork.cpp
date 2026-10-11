@@ -206,6 +206,21 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             HalfRoadWidth + RouteGridStep * 0.75,
         Spacing * 0.45);
 
+    // A complete ring must fit inside the finite map. Border sites keep their
+    // road connection, but use a normal junction instead of a clipped ring.
+    for (auto It = POIRingSites.CreateIterator(); It; ++It)
+    {
+        const FVector2D* Site = Sites.Find(*It);
+        if (!Site ||
+            Site->X - SiteConnectionRadius - HalfRoadWidth < MinX ||
+            Site->X + SiteConnectionRadius + HalfRoadWidth > MaxX ||
+            Site->Y - SiteConnectionRadius - HalfRoadWidth < MinY ||
+            Site->Y + SiteConnectionRadius + HalfRoadWidth > MaxY)
+        {
+            It.RemoveCurrent();
+        }
+    }
+
     struct FRoadGridSample
     {
         double Height = 0.0;
@@ -251,6 +266,68 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // River channels remain candidates only for a near-perpendicular crossing.
         Sample.bAllowed = !GenerationSettings.bEnableLakes || Sample.LakeInfluence < 0.10f;
         return RouteGridCache.Add(GridCell, Sample);
+    };
+
+    auto FindSiteGate = [&](
+        const FIntPoint& SiteCell,
+        const FVector2D& Site,
+        const FVector2D& DirectionToOtherSite,
+        FVector2D& OutGate) -> bool
+    {
+        if (!POIRingSites.Contains(SiteCell))
+        {
+            OutGate = Site;
+            return true;
+        }
+
+        const FVector2D NormalizedDirection = DirectionToOtherSite.GetSafeNormal();
+        double BestAlignment = -2.0;
+        FVector2D BestDirection = FVector2D::ZeroVector;
+        constexpr int32 RingPointCount = 16;
+
+        // Match one of the generated ring vertices, not an arbitrary radial
+        // point. Seed jitter can rotate the approach away from the cardinal
+        // axes; choosing the nearest safe gate prevents tiny gaps at the ring.
+        for (int32 RingIndex = 0; RingIndex < RingPointCount; ++RingIndex)
+        {
+            const double Angle = static_cast<double>(RingIndex) *
+                0.39269908169872415;
+            const FVector2D GateDirection(
+                static_cast<float>(std::cos(Angle)),
+                static_cast<float>(std::sin(Angle)));
+            const FVector2D Gate = Site +
+                GateDirection * static_cast<float>(SiteConnectionRadius);
+
+            if (Gate.X - HalfRoadWidth < MinX || Gate.X + HalfRoadWidth > MaxX ||
+                Gate.Y - HalfRoadWidth < MinY || Gate.Y + HalfRoadWidth > MaxY)
+            {
+                continue;
+            }
+
+            const FIntPoint GateCell(
+                FMath::RoundToInt(Gate.X / RouteGridStep),
+                FMath::RoundToInt(Gate.Y / RouteGridStep));
+            if (!GetRouteGridSample(GateCell).bAllowed)
+            {
+                continue;
+            }
+
+            const double Alignment = FVector2D::DotProduct(
+                GateDirection, NormalizedDirection);
+            if (Alignment > BestAlignment)
+            {
+                BestAlignment = Alignment;
+                BestDirection = GateDirection;
+            }
+        }
+
+        if (BestAlignment < -1.0)
+        {
+            return false;
+        }
+
+        OutGate = Site + BestDirection * static_cast<float>(SiteConnectionRadius);
+        return true;
     };
 
     auto GetRiverTangent = [&](const FIntPoint& GridCell, FVector2D& OutTangent) -> bool
@@ -580,14 +657,15 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
 
         const FVector2D ChordDirection = (Chord / static_cast<float>(ChordLength)).GetSafeNormal();
-        const double StartOffset = bUseSiteGates && POIRingSites.Contains(GridCell)
-            ? FMath::Min(SiteConnectionRadius, ChordLength * 0.35)
-            : 0.0;
-        const double EndOffset = bUseSiteGates && POIRingSites.Contains(OtherGridCell)
-            ? FMath::Min(SiteConnectionRadius, ChordLength * 0.35)
-            : 0.0;
-        const FVector2D RouteStart = Start + ChordDirection * static_cast<float>(StartOffset);
-        const FVector2D RouteEnd = End - ChordDirection * static_cast<float>(EndOffset);
+        FVector2D RouteStart = Start;
+        FVector2D RouteEnd = End;
+        if (bUseSiteGates &&
+            (!FindSiteGate(GridCell, Start, ChordDirection, RouteStart) ||
+             !FindSiteGate(OtherGridCell, End, -ChordDirection, RouteEnd)))
+        {
+            ++SkippedRouteCount;
+            return;
+        }
 
         TArray<FVector2D> RoutePoints;
         if (!FindSafeRoute(RouteStart, RouteEnd, RoutePoints))
