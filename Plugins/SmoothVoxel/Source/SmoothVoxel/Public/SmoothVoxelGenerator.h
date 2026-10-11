@@ -18,9 +18,9 @@ struct FSVoxelGenerationSettings
 
 	// Frequencies are in inverse centimetres. These defaults are sampled
 	// on a 100 cm grid; substantially higher values alias into sharp spikes.
-	float NoiseScale = 0.0008f;
+	float NoiseScale = 0.0001f;
 
-	float DetailScale = 0.0006f;
+	float DetailScale = 0.000075f;
 	float DetailAmplitude = 60.0f;
 
 	// Solid bottom
