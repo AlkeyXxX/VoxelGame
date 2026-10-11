@@ -333,6 +333,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
 	float RiverHalfWidth = 4000.0f;
 
+	/** Channel bed target is this far below SeaLevel, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", Units="cm"))
 	float RiverDepth = 600.0f;
 
