@@ -88,7 +88,18 @@ namespace
 			FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
 				LocalPosition - FVector(0.0f, 0.0f, H), HeightHere, Settings);
 
-		return FVector(-Dx, -Dy, -Dz).GetSafeNormal();
+		FVector OutwardNormal(-Dx, -Dy, -Dz);
+		if (!OutwardNormal.Normalize())
+		{
+			// Exact corners of a Boolean SDF can have a zero central difference.
+			// Fall back to the underlying height-field normal rather than emitting
+			// a zero normal that can destabilize both shading and winding choice.
+			OutwardNormal = FVector(
+				-static_cast<float>(HeightXP - HeightXM),
+				-static_cast<float>(HeightYP - HeightYM),
+				2.0f * H).GetSafeNormal();
+		}
+		return OutwardNormal;
 	}
 
 	FVector TransitionSampleToChunkLocal(
