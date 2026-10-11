@@ -74,6 +74,30 @@ into the regular surface tangent plane and leaves face intersections on exact
 shared coordinates. These changes are new and still require runtime verification
 at all six face orientations and edge/corner combinations.
 
+## Mining and block placement in the smooth-world path
+
+The opt-in `ASmoothVoxelOctreeWorld` has its own sparse runtime edit overlay; it
+does not reuse the legacy world's block save format. Mining subtracts a bounded
+cell volume from the same density field used by Transvoxel. Normal sampling near
+an edit now uses that edited field (rather than the untouched hill's height-field
+normal), and mesh emission rejects triangles that collapse after vertex-index
+deduplication. This specifically targets incorrectly oriented cut-wall triangles
+and degenerate faces that can appear as gaps after digging downward.
+
+Placed `Dirt` and `Sand` are rounded, blended SDF additions to the smooth
+landscape. Other placeable block types (for example `Grass`, `Stone`, and
+`Wood`) reserve an air cell in the terrain mesh and render as separate six-face
+cubes with per-face normals and collision. This distinction is deliberate: hard
+blocks do not pass through the terrain's smooth normal field. The current edit
+overlay lasts for the lifetime of the octree world actor; SaveGame persistence
+and per-block material assignment are not part of this change.
+
+The new mining/cube path and edited-mesh regression tests have **not** been built
+or executed in UE4.27 in this environment. Check LMB mining on a vertical face,
+dig several cells downward, place/remove Grass and Stone, then place Dirt and
+Sand to verify the intended smooth blend before treating the change as runtime
+validated.
+
 ## Triangle winding and collision
 
 `FSVoxelTransvoxelMesher::AppendCellToMesh` retains outward shading normals but
@@ -159,7 +183,7 @@ Regression tests cover sloped density fields and a coarse/fine shared-face conto
 
 ## Legacy player Blueprint warning
 
-The player Blueprint still has legacy block-interaction logic that expects an `AVoxelWorld` reference. The opt-in `ASmoothVoxelOctreeWorld` is a different class and does not populate that variable. In a test map using only the smooth manager, guard the existing block-interaction call with an `IsValid` check or disable that legacy interaction in the debug player Blueprint. This warning is separate from mesh topology.
+The legacy block nodes on `AVoxelWorld` still expect an `AVoxelWorld` reference. When the player Blueprint is switched to the opt-in `ASmoothVoxelOctreeWorld`, store a reference to the actual smooth-world actor at `BeginPlay` and validate it before calling `Break Block by Ray` or `Place Block by Ray`. A missing reference is a Blueprint wiring issue, separate from mesh topology.
 
 ## Coordinate contract
 
