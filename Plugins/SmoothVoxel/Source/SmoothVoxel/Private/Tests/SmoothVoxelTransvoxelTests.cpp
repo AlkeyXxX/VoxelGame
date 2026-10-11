@@ -1020,7 +1020,23 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		FSVoxelMeshData EditedTransitionMesh;
 		FSVoxelTransvoxelMesher::Generate(
 			RoofSettings, 16, 50.0f, FaceMask, EditedTransitionMesh);
+		TestTrue(
+			TEXT("A one-cell-thick mined roof must generate valid source geometry and winding"),
+			HasConsistentGeometry(EditedTransitionMesh));
+
+		const int32 OriginalVertexCount = EditedTransitionMesh.Vertices.Num();
 		const int32 OriginalTriangleIndexCount = EditedTransitionMesh.Triangles.Num();
+		TMap<FVector, FVector> SourceNormalsByPosition;
+		for (int32 VertexIndex = 0; VertexIndex < OriginalVertexCount; ++VertexIndex)
+		{
+			if (EditedTransitionMesh.Normals.IsValidIndex(VertexIndex))
+			{
+				SourceNormalsByPosition.Add(
+					EditedTransitionMesh.Vertices[VertexIndex],
+					EditedTransitionMesh.Normals[VertexIndex]);
+			}
+		}
+
 		const int32 TwoSidedTriangleCount =
 			FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 				RoofSettings, EditedTransitionMesh);
@@ -1031,9 +1047,26 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 			TEXT("Every edited surface triangle must gain exactly one reverse-wound copy"),
 			EditedTransitionMesh.Triangles.Num(),
 			OriginalTriangleIndexCount + TwoSidedTriangleCount * 3);
+
+		bool bBackfaceNormalsMatchOriginal = true;
+		for (int32 VertexIndex = OriginalVertexCount;
+			VertexIndex < EditedTransitionMesh.Vertices.Num();
+			++VertexIndex)
+		{
+			const FVector* SourceNormal =
+				SourceNormalsByPosition.Find(EditedTransitionMesh.Vertices[VertexIndex]);
+			if (!SourceNormal ||
+				!EditedTransitionMesh.Normals.IsValidIndex(VertexIndex) ||
+				FVector::DotProduct(
+					*SourceNormal, EditedTransitionMesh.Normals[VertexIndex]) < 0.999f)
+			{
+				bBackfaceNormalsMatchOriginal = false;
+				break;
+			}
+		}
 		TestTrue(
-			TEXT("A roof-open mining cut at a chunk corner must keep valid geometry and winding at LOD transitions"),
-			HasConsistentGeometry(EditedTransitionMesh));
+			TEXT("Reverse-wound roof copies must preserve source normals to avoid inverted lighting"),
+			bBackfaceNormalsMatchOriginal);
 	}
 
 	return true;
