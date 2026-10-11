@@ -631,22 +631,63 @@ namespace
 				OutMesh.Normals[static_cast<int32>(GlobalC)]).GetSafeNormal();
 			const FVector FaceDirection = MeshFaceNormal.GetSafeNormal();
 			float Facing = FVector::DotProduct(FaceDirection, ExpectedNormal);
+			bool bReverseWinding = false;
+			bool bOrientationResolved = false;
 
-			// Near sharp SDF corners, the three smooth vertex normals can cancel
-			// or become almost tangent to a face. In that case sample the edited
-			// scalar field at the triangle centre with the local mining gradient
-			// step rather than leaving the table's potentially opposite winding.
-			if (ExpectedNormal.SizeSquared() <= SMALL_NUMBER || FMath::Abs(Facing) < 0.05f)
+			// Prefer a well-conditioned averaged normal. At sharp mining corners,
+			// the three vertex normals can cancel or become nearly tangent, so
+			// recompute the gradient locally before falling back to the table.
+			if (ExpectedNormal.SizeSquared() > SMALL_NUMBER && FMath::Abs(Facing) >= 0.05f)
+			{
+				bReverseWinding = Facing > 0.0f;
+				bOrientationResolved = true;
+			}
+			else
 			{
 				const FVector TriangleCenter = (MeshA + MeshB + MeshC) / 3.0f;
-				ExpectedNormal = SampleOutwardNormal(
+				const FVector LocalOutwardNormal = SampleOutwardNormal(
 					TriangleCenter, Settings, ComputeNormalSampleStep(Settings));
-				Facing = FVector::DotProduct(FaceDirection, ExpectedNormal);
+				const float LocalFacing = FVector::DotProduct(FaceDirection, LocalOutwardNormal);
+				if (LocalOutwardNormal.SizeSquared() > SMALL_NUMBER &&
+					FMath::Abs(LocalFacing) >= 0.05f)
+				{
+					bReverseWinding = LocalFacing > 0.0f;
+					bOrientationResolved = true;
+				}
+				else
+				{
+					// Density can resolve only the genuinely ambiguous cases. Do
+					// not infer winding from density magnitudes when both probes are
+					// on the same side of the isosurface: that produced random flips
+					// as the edited SDF changed.
+					const float ProbeDistance = FMath::Max(
+						5.0f, Settings.BaseVoxelSize * 0.1f);
+					const float DensityAlongFace = FSVoxelGenerator::SampleDensityAtChunkLocal(
+						TriangleCenter + FaceDirection * ProbeDistance, Settings);
+					const float DensityAgainstFace = FSVoxelGenerator::SampleDensityAtChunkLocal(
+						TriangleCenter - FaceDirection * ProbeDistance, Settings);
+					const bool bProbesStraddleSurface =
+						(DensityAlongFace > Settings.IsoLevel) !=
+						(DensityAgainstFace > Settings.IsoLevel);
+					if (bProbesStraddleSurface)
+					{
+						// The raw cross must point into solid for this project's
+						// procedural-mesh front-face convention.
+						bReverseWinding = DensityAlongFace < DensityAgainstFace;
+						bOrientationResolved = true;
+					}
+					else if (ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
+						FMath::Abs(Facing) > SMALL_NUMBER)
+					{
+						bReverseWinding = Facing > 0.0f;
+						bOrientationResolved = true;
+					}
+				}
 			}
 
-			// Procedural-mesh front faces use the winding opposite our outward
-			// normal convention. A positive dot points toward air, so reverse it.
-			if (ExpectedNormal.SizeSquared() > SMALL_NUMBER && Facing > 0.0f)
+			// If neither the gradient nor density can resolve a degenerate corner,
+			// preserve the lookup table's original winding/transition flip.
+			if (bOrientationResolved && bReverseWinding)
 			{
 				Swap(GlobalB, GlobalC);
 			}
