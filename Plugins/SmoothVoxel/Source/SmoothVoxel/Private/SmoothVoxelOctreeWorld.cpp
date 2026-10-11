@@ -13,11 +13,12 @@
 
 namespace
 {
-	// Only these materials are fused into the smooth terrain SDF. All other
-	// placeable solid blocks use an independent hard-edged cube mesh.
+	// Placed blocks must keep exact grid-aligned cube geometry. Fusing adjacent
+	// dirt/sand blocks into the smooth terrain SDF produced unstable seams and
+	// visible mesh artifacts as the second block was added.
 	bool IsSmoothTerrainBlock(EVoxelBlock Block)
 	{
-		return Block == EVoxelBlock::Dirt || Block == EVoxelBlock::Sand;
+		return false;
 	}
 }
 
@@ -1190,6 +1191,7 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 
 	// Placed cubes are valid placement surfaces too. Use their exact logical
 	// cell plus the dominant hit-face axis instead of requiring a terrain chunk.
+	bool bTargetedPlacedCube = false;
 	if (ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor()))
 	{
 		if (HitCube->GetOwner() != this)
@@ -1212,6 +1214,7 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 			FaceStep.Z = Normal.Z >= 0.0f ? 1 : -1;
 		}
 		Cell = HitCube->BlockCell + FaceStep;
+		bTargetedPlacedCube = true;
 	}
 	else
 	{
@@ -1228,7 +1231,12 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	{
 		return false;
 	}
-	if ((!ExistingEdit || *ExistingEdit == 0) && SampleCurrentDensityAt(BlockCellCenter(Cell)) > 0.0f)
+	// A face hit on a placed cube is authoritative: allow stacking/sideways
+	// placement even when the underlying smooth landscape occupies the cell
+	// centre. Terrain-only placement still refuses to bury a new block in solid.
+	if (!bTargetedPlacedCube &&
+		(!ExistingEdit || *ExistingEdit == 0) &&
+		SampleCurrentDensityAt(BlockCellCenter(Cell)) > 0.0f)
 	{
 		return false;
 	}
