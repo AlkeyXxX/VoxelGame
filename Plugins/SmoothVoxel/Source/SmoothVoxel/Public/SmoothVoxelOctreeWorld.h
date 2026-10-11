@@ -441,7 +441,7 @@ public:
 
 	/** Longitudinal mesh sampling distance. Lower values smooth roads but create more triangles. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="250.0", ClampMax="5000.0", Units="cm"))
-	float RoadSampleSpacing = 1000.0f;
+	float RoadSampleSpacing = 500.0f;
 
 	/** Lifts the road surface slightly above terrain to prevent z-fighting, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="2.0", ClampMax="100.0", Units="cm"))
