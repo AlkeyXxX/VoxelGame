@@ -4,6 +4,51 @@
 #include "SmoothVoxelTransvoxelMesher.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelCachedSurfaceHeightDensityTest,
+	"SmoothVoxel.Transvoxel.CachedSurfaceHeightMatchesDensity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelCachedSurfaceHeightDensityTest::RunTest(const FString& Parameters)
+{
+	for (const bool bEnableCaves : { false, true })
+	{
+		FSVoxelGenerationSettings Settings;
+		Settings.BaseHeight = 900.0f;
+		Settings.HeightAmplitude = 6000.0f;
+		Settings.DetailAmplitude = 60.0f;
+		Settings.ChunkOriginCells = FIntVector(173, -91, 4);
+		Settings.BaseVoxelSize = 97.65625f;
+		Settings.bUseChunkLatticeCoordinates = true;
+		Settings.bEnableCaves = bEnableCaves;
+		Settings.CaveStrength = 1.0f;
+		Settings.BottomDepth = 2000.0f;
+
+		const FVector Samples[] =
+		{
+			FVector(0.0f, 0.0f, 500.0f),
+			FVector(217.25f, 813.5f, 900.0f),
+			FVector(1500.0f, 721.0f, 4500.0f),
+			FVector(2810.0f, 1990.0f, -600.0f)
+		};
+
+		for (const FVector& LocalPosition : Samples)
+		{
+			const double SurfaceHeight =
+				FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(LocalPosition, Settings);
+			const float Reference =
+				FSVoxelGenerator::SampleDensityAtChunkLocal(LocalPosition, Settings);
+			const float Cached =
+				FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+					LocalPosition, SurfaceHeight, Settings);
+			TestTrue(
+				TEXT("A cached column height must preserve exact density, including caves and bottom fill"),
+				FMath::IsNearlyEqual(Reference, Cached, 0.001f));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelTransvoxelCellTableTest,
 	"SmoothVoxel.Transvoxel.OfficialTablesAllCases",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
