@@ -157,7 +157,11 @@ namespace
         float Density,
         const FSVoxelGenerationSettings& Settings)
     {
-        if (!Settings.BlockEdits.IsValid() || Settings.BlockEdits->Num() == 0)
+        const bool bHasBlockEdits =
+            Settings.BlockEdits.IsValid() && Settings.BlockEdits->Num() > 0;
+        const bool bHasMinedNodes =
+            Settings.MinedNodes.IsValid() && Settings.MinedNodes->Num() > 0;
+        if (!bHasBlockEdits && !bHasMinedNodes)
         {
             return Density;
         }
@@ -167,12 +171,8 @@ namespace
         const int32 BaseY = static_cast<int32>(std::floor(Y / Step));
         const int32 BaseZ = static_cast<int32>(std::floor(Z / Step));
 
-        // Edit-state contract:
-        //  +1: Dirt/Sand, smoothly unioned into the landscape.
-        //  -1..-4: successive mining hits; the octahedral recess grows each hit.
-        //  -5: the terrain cell has been fully mined out.
-        //  +2: hard placed cube; its matching cell is removed from the terrain
-        //      mesh and the cube is drawn separately with flat normals.
+        // Cell edits are reserved for block placement/removal. Terrain mining
+        // uses MinedNodes, a separate set of exact density-lattice coordinates.
         const double RoundRadius = Step * 0.28;
         const double SmoothBlend = Step * 0.10;
         const double HardBoxHalfExtent = Step * 0.5 + FMath::Max(0.05, Step * 0.0005);
@@ -181,100 +181,119 @@ namespace
         double CandidateSdfs[27];
         int32 CandidateCount = 0;
 
-        for (int32 DZ = -1; DZ <= 1; ++DZ)
+        if (bHasBlockEdits)
         {
-            for (int32 DY = -1; DY <= 1; ++DY)
+            for (int32 DZ = -1; DZ <= 1; ++DZ)
             {
-                for (int32 DX = -1; DX <= 1; ++DX)
+                for (int32 DY = -1; DY <= 1; ++DY)
                 {
-                    const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
-                    const int8* EditState = Settings.BlockEdits->Find(Cell);
-                    if (!EditState || *EditState == 0 ||
-                        *EditState > 2 || *EditState < -5)
+                    for (int32 DX = -1; DX <= 1; ++DX)
                     {
-                        continue;
-                    }
-
-                    double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
-                    double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
-                    double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
-                    if (Settings.BlockEditCenters.IsValid())
-                    {
-                        if (const FVector* EditCenter = Settings.BlockEditCenters->Find(Cell))
+                        const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        const int8* EditState = Settings.BlockEdits->Find(Cell);
+                        if (!EditState || *EditState == 0 ||
+                            *EditState > 2 || *EditState < -5)
                         {
-                            CenterX = static_cast<double>(EditCenter->X);
-                            CenterY = static_cast<double>(EditCenter->Y);
-                            CenterZ = static_cast<double>(EditCenter->Z);
+                            continue;
                         }
-                    }
 
-                    CandidateStates[CandidateCount] = *EditState;
-                    if (*EditState == 1)
-                    {
-                        // A rounded union with smooth-min gives soil/sand a
-                        // natural boundary that blends into the surrounding SDF.
-                        CandidateSdfs[CandidateCount] = BoxSdf(
-                            X, Y, Z, CenterX, CenterY, CenterZ,
-                            Step * 0.5, RoundRadius);
-                    }
-                    else if (*EditState == 2)
-                    {
-                        // Hard cubes need an exact cell-shaped cavity behind
-                        // their separate cube mesh so terrain cannot protrude.
-                        CandidateSdfs[CandidateCount] = BoxSdf(
-                            X, Y, Z, CenterX, CenterY, CenterZ,
-                            HardBoxHalfExtent, 0.0);
-                    }
-                    else
-                    {
-                        // Repeated clicks widen the same soft depression:
-                        // a single hit leaves a subtle dent, not an instant
-                        // square pit one whole voxel wide.
-                        static const double DamageRadiusByStage[5] =
+                        double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
+                        double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
+                        double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
+                        if (Settings.BlockEditCenters.IsValid())
                         {
-                            0.30, 0.46, 0.63, 0.81, 1.02
-                        };
-                        const int32 Stage = FMath::Clamp(
-                            static_cast<int32>(-(*EditState)) - 1,
-                            0,
-                            4);
-                        CandidateSdfs[CandidateCount] = OctahedronSdf(
-                            X, Y, Z, CenterX, CenterY, CenterZ,
-                            Step * DamageRadiusByStage[Stage]);
+                            if (const FVector* EditCenter = Settings.BlockEditCenters->Find(Cell))
+                            {
+                                CenterX = static_cast<double>(EditCenter->X);
+                                CenterY = static_cast<double>(EditCenter->Y);
+                                CenterZ = static_cast<double>(EditCenter->Z);
+                            }
+                        }
+
+                        CandidateStates[CandidateCount] = *EditState;
+                        if (*EditState == 1)
+                        {
+                            CandidateSdfs[CandidateCount] = BoxSdf(
+                                X, Y, Z, CenterX, CenterY, CenterZ,
+                                Step * 0.5, RoundRadius);
+                        }
+                        else if (*EditState == 2)
+                        {
+                            CandidateSdfs[CandidateCount] = BoxSdf(
+                                X, Y, Z, CenterX, CenterY, CenterZ,
+                                HardBoxHalfExtent, 0.0);
+                        }
+                        else
+                        {
+                            // Legacy API removals remain supported, but ray mining
+                            // no longer uses progressive -1..-5 density stages.
+                            CandidateSdfs[CandidateCount] = OctahedronSdf(
+                                X, Y, Z, CenterX, CenterY, CenterZ,
+                                Step * 1.02);
+                        }
+                        ++CandidateCount;
                     }
-                    ++CandidateCount;
+                }
+            }
+
+            // Add soil/sand before cuts so excavations always win overlaps.
+            for (int32 Index = 0; Index < CandidateCount; ++Index)
+            {
+                if (CandidateStates[Index] == 1)
+                {
+                    Density = static_cast<float>(SmoothMaximum(
+                        static_cast<double>(Density),
+                        -CandidateSdfs[Index],
+                        SmoothBlend));
+                }
+            }
+
+            for (int32 Index = 0; Index < CandidateCount; ++Index)
+            {
+                const int8 State = CandidateStates[Index];
+                if (State == 2)
+                {
+                    Density = FMath::Min(Density, static_cast<float>(CandidateSdfs[Index]));
+                }
+                else if (State < 0)
+                {
+                    Density = static_cast<float>(SmoothMinimum(
+                        static_cast<double>(Density),
+                        CandidateSdfs[Index],
+                        SmoothBlend));
                 }
             }
         }
 
-        // Add smooth materials before applying mining cuts. This means a
-        // later excavation always wins over a placed soil/sand addition.
-        for (int32 Index = 0; Index < CandidateCount; ++Index)
+        // A mined sample removes one stable voxel-sized region centered exactly
+        // on a density lattice node. The one-node neighborhood matches the
+        // query radius and ensures every rebuilt LOD sees the same world-space
+        // modification instead of a hit-point-dependent diamond.
+        if (bHasMinedNodes)
         {
-            if (CandidateStates[Index] == 1)
+            const double MinedNodeRadius = Step * 1.0;
+            const double MinedNodeBlend = Step * 0.08;
+            for (int32 DZ = -1; DZ <= 1; ++DZ)
             {
-                Density = static_cast<float>(SmoothMaximum(
-                    static_cast<double>(Density),
-                    -CandidateSdfs[Index],
-                    SmoothBlend));
-            }
-        }
+                for (int32 DY = -1; DY <= 1; ++DY)
+                {
+                    for (int32 DX = -1; DX <= 1; ++DX)
+                    {
+                        const FIntVector Node(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        if (!Settings.MinedNodes->Contains(Node))
+                        {
+                            continue;
+                        }
 
-        for (int32 Index = 0; Index < CandidateCount; ++Index)
-        {
-            const int8 State = CandidateStates[Index];
-            if (State == 2)
-            {
-                Density = FMath::Min(Density, static_cast<float>(CandidateSdfs[Index]));
-            }
-            else if (State < 0)
-            {
-                // Smooth subtraction rounds the edge where exposed terrain
-                // meets the mined-out volume, avoiding a hard Boolean seam.
-                Density = static_cast<float>(SmoothMinimum(
-                    static_cast<double>(Density),
-                    CandidateSdfs[Index],
-                    SmoothBlend));
+                        const double NodeX = static_cast<double>(Node.X) * Step;
+                        const double NodeY = static_cast<double>(Node.Y) * Step;
+                        const double NodeZ = static_cast<double>(Node.Z) * Step;
+                        const double NodeSdf = OctahedronSdf(
+                            X, Y, Z, NodeX, NodeY, NodeZ, MinedNodeRadius);
+                        Density = static_cast<float>(SmoothMinimum(
+                            static_cast<double>(Density), NodeSdf, MinedNodeBlend));
+                    }
+                }
             }
         }
 
