@@ -145,9 +145,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="7"))
 	int32 RootWindowLod = 7;
 
-	/** Refine chunks earlier so LOD transition boundaries are less noticeable near the player. */
+	/** LOD refinement distance multiplier. Higher values create more chunks and transition boundaries. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0.05", ClampMax="4.0"))
-	float SplitDistanceMultiplier = 1.0f;
+	float SplitDistanceMultiplier = 0.75f;
 
 	/** Fixed centre of the finite world bounds. The world does not follow the
 	 * player; its horizontal size is capped at 4 km per axis.
