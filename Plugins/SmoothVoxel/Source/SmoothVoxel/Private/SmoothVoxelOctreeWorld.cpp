@@ -824,29 +824,9 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		EditState = bRemoveBlock ? int8(-5) : (bSmoothBlock ? int8(1) : int8(2));
 	}
 
-	// Removing a separately rendered hard cube restores the procedural terrain
-	// field under it; only actual terrain mining keeps an explicit air override.
-	if (bRemoveBlock && IsValid(ExistingCube) && EditStateOverride == 0)
-	{
-		ExistingCube->Destroy();
-		PlacedCubeBlocks.Remove(Cell);
-		EditedBlockTypes.Remove(Cell);
-		EditedBlockCells.Remove(Cell);
-		EditedBlockCenters.Remove(Cell);
-		BlockEditSnapshot.Reset();
-		if (EditedBlockCells.Num() > 0)
-		{
-			BlockEditSnapshot = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells);
-		}
-		BlockEditCenterSnapshot.Reset();
-		if (EditedBlockCenters.Num() > 0)
-		{
-			BlockEditCenterSnapshot =
-				MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters);
-		}
-		RebuildChunksNearEditedCell(Cell);
-		return;
-	}
+	// Breaking a placed hard cube leaves its cell explicitly empty. The
+	// placement API only accepts an air cell, so dropping the edit here would
+	// let the procedural field refill that cell and create apparent block dupes.
 
 	if (bRemoveBlock)
 	{
