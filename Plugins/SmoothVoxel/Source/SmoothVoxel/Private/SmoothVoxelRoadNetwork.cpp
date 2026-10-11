@@ -404,7 +404,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
         // First search locally; if a river valley or ridge blocks the corridor,
         // retry with a wider detour. Both searches are bounded by the map window.
-        const double PaddingBase = FMath::Clamp(ChordLength * 0.35, 8000.0, 30000.0);
+        const double PaddingBase = FMath::Clamp(ChordLength * 0.35, 8000.0, 60000.0);
         for (int32 Attempt = 0; Attempt < 2; ++Attempt)
         {
             const double AttemptMaxGrade = Attempt == 0 ? MaxRouteGrade : 0.70;
@@ -720,6 +720,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         TArray<float> RiverInfluences;
         TArray<float> RiverBankInfluences;
         TArray<uint8> bBridgeCrossing;
+        int32 BridgesInThisSegment = 0;
         RiverInfluences.SetNumZeroed(Path.Num());
         RiverBankInfluences.SetNumZeroed(Path.Num());
         bBridgeCrossing.SetNumZeroed(Path.Num());
@@ -836,7 +837,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         RoadLifts[DeckIndex],
                         FMath::Max(0.0, DeckHeight - GroundHeights[DeckIndex]));
                 }
-                ++BuiltBridgeCount;
+                ++BridgesInThisSegment;
             }
             else
             {
@@ -858,6 +859,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 return;
             }
         }
+        BuiltBridgeCount += BridgesInThisSegment;
 
         const int32 FirstVertex = Vertices.Num();
         double TravelledDistance = 0.0;
@@ -987,9 +989,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     };
 
     // Connect each viable POI to the next viable site along the cardinal
-    // axes, skipping up to two unsuitable/mountain/lake cells. Without this,
+    // axes, skipping up to three unsuitable/mountain/lake cells. Without this,
     // any rejected POI site severed the entire road row and created short stubs.
-    const int32 MaxSiteLinkGap = 3;
+    const int32 MaxSiteLinkGap = 4;
     const int32 CardinalDirections[2][2] = { { 1, 0 }, { 0, 1 } };
     for (int32 GridY = MinGridY; GridY <= MaxGridY; ++GridY)
     {
