@@ -14,6 +14,7 @@
 #include "InputCoreTypes.h"
 #include "Engine/World.h"
 #include "CollisionShape.h"
+#include "CollisionQueryParams.h"
 
 namespace
 {
