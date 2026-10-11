@@ -321,7 +321,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
             std::priority_queue<FRoadOpenNode> Open;
             Distance[StartIndex] = 0.0;
-            Open.push({ Heuristic(StartCell, GoalCell), StartIndex });
+            FRoadOpenNode InitialNode;
+            InitialNode.Score = Heuristic(StartCell, GoalCell);
+            InitialNode.Index = StartIndex;
+            Open.push(InitialNode);
 
             const int32 Directions[8][2] =
             {
@@ -345,7 +348,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 Closed[CurrentIndex] = 1;
 
                 const FIntPoint CurrentCell = ToCell(CurrentIndex);
-                FRoadGridSample& Current = GetRouteGridSample(CurrentCell);
+                // Copy cached values before requesting neighbouring samples: TMap
+                // insertions may rehash and invalidate references to its elements.
+                const FRoadGridSample Current = GetRouteGridSample(CurrentCell);
                 if (!Current.bAllowed && CurrentIndex != StartIndex && CurrentIndex != GoalIndex)
                 {
                     continue;
@@ -368,7 +373,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         continue;
                     }
 
-                    FRoadGridSample& Next = GetRouteGridSample(NextCell);
+                    const FRoadGridSample Next = GetRouteGridSample(NextCell);
                     if (!Next.bAllowed && NextIndex != GoalIndex)
                     {
                         continue;
@@ -378,9 +383,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     if (bDiagonal)
                     {
                         // Don't squeeze diagonally through a lake-mask corner.
-                        const FRoadGridSample& SideX =
+                        const FRoadGridSample SideX =
                             GetRouteGridSample(CurrentCell + FIntPoint(Direction[0], 0));
-                        const FRoadGridSample& SideY =
+                        const FRoadGridSample SideY =
                             GetRouteGridSample(CurrentCell + FIntPoint(0, Direction[1]));
                         if (!SideX.bAllowed || !SideY.bAllowed)
                         {
@@ -667,7 +672,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 0.0, CenterGround - (LeftGround + RightGround) * 0.5);
             const double TerrainClearance = FMath::Max(
                 SafeSurfaceOffset,
-                static_cast<double>(GenerationSettings.BaseVoxelSize) * 0.30);
+                static_cast<double>(GenerationSettings.BaseVoxelSize) * 0.50);
             const double LeftZ = LeftGround + Lift + TerrainClearance + CrossSectionCorrection;
             const double RightZ = RightGround + Lift + TerrainClearance + CrossSectionCorrection;
 
