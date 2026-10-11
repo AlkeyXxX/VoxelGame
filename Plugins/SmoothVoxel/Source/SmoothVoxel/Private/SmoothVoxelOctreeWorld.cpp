@@ -322,7 +322,7 @@ void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 	const bool bCameraMoved =
 		!bHasCompletedSelection ||
 		FVector::DistSquared(CameraLocation, LastCompletedCameraLocation) >=
-			FMath::Square(FMath::Max(1.0f, UpdateDistance));
+			FMath::Square(FMath::Max(1000.0f, UpdateDistance));
 	const bool bIntervalElapsed =
 		TimeSinceSelection >= FMath::Max(0.05f, UpdateIntervalSeconds);
 
@@ -595,7 +595,10 @@ void ASmoothVoxelOctreeWorld::LaunchQueuedBuilds(const FVector& CameraLocation)
 			FVector::DistSquared(B.GetActorLocation(), CameraLocation);
 	});
 
-	const int32 Limit = FMath::Clamp(MaxConcurrentBuilds, 1, 16);
+	// More worker tasks increase CPU contention and bunch up render-resource
+	// uploads. Keep a small fixed ceiling; completed mesh commits are separately
+	// budgeted to one per frame.
+	const int32 Limit = FMath::Clamp(MaxConcurrentBuilds, 1, 2);
 	for (ASmoothVoxelTransvoxelChunk* Chunk : QueuedChunks)
 	{
 		if (InFlightCount >= Limit)
