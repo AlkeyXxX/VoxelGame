@@ -104,8 +104,11 @@ winding separately from the stored outward normals.
 - Chunk streaming work is spread across frames: at most `MaxChunkRequestsPerFrame`
   chunks are spawned/reconfigured per frame, obsolete chunks are retired in
   batches, and identical mesh vertices are indexed once per chunk to reduce GPU
-  vertex data and upload size. Normals are reused with those shared vertices.
-  This reduces overhead but still needs profiling in UE4.27.
+  vertex data and upload size. Height noise is cached once per X/Y sample column
+  instead of being recomputed at every Z layer; height-field normals also avoid
+  six full density evaluations. Only the nearby fine LODs cast dynamic shadows,
+  and chunks without collision have their collision component disabled. This
+  reduces CPU and shadow-pass work but still needs profiling in UE4.27.
 - `SplitDistanceMultiplier` controls how early the octree refines a chunk.
   The default is 0.75; raising it increases the number of fine chunks and LOD
   boundaries and can reduce frame rate. Existing placed Blueprint/level instances
