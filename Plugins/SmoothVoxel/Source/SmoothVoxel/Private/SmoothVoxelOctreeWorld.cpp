@@ -689,6 +689,33 @@ int32 ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(
 	}
 }
 
+int32 ASmoothVoxelOctreeWorld::GetEffectiveMaxLodForBudget(
+	int32 RootLod,
+	int32 RequestedMaxLod,
+	int32 MaxLeafCount)
+{
+	const int32 SafeRootLod = FMath::Clamp(RootLod, 0, 10);
+	const int32 SafeRequestedMaxLod = FMath::Clamp(RequestedMaxLod, 0, SafeRootLod);
+	const int32 SafeLeafBudget = FMath::Max(1, MaxLeafCount);
+
+	// Each mandatory octree level multiplies the minimum leaf count by eight.
+	// Choose the coarsest allowed far-world LOD that fits this budget; near the
+	// player, optional refinement still follows SplitDistanceMultiplier.
+	int32 AffordableDepth = 0;
+	int64 MinimumLeaves = 1;
+	while (MinimumLeaves <= static_cast<int64>(SafeLeafBudget) / 8)
+	{
+		MinimumLeaves *= 8;
+		++AffordableDepth;
+	}
+
+	const int32 BudgetLimitedMaxLod = FMath::Max(0, SafeRootLod - AffordableDepth);
+	return FMath::Clamp(
+		FMath::Max(SafeRequestedMaxLod, BudgetLimitedMaxLod),
+		0,
+		SafeRootLod);
+}
+
 FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	const FVector& ChunkOrigin,
 	const FIntVector& ChunkOriginCells,
@@ -1782,9 +1809,15 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	// spacing from the selected dimensions so all three sizes have exact,
 	// centred boundaries and keep the same world-space noise lattice.
 	const float SelectedWorldSizeCm = GetWorldSizeCentimeters();
-	SelectionSettings.MaxLod = FMath::Clamp(MaxLod, 0, 4);
+	const int32 RequestedMaxLod = FMath::Clamp(MaxLod, 0, 4);
 	SelectionSettings.RootLod = FMath::Clamp(
-		GetRootLodForWorldSize(), SelectionSettings.MaxLod, 8);
+		GetRootLodForWorldSize(), RequestedMaxLod, 8);
+	// Keep the runtime safety budget conservative even when an existing level
+	// instance still has the old 8192 default serialized in its properties.
+	SelectionSettings.MaxLeafCount = FMath::Clamp(MaxLeafCount, 32, 2048);
+	SelectionSettings.MaxLod = GetEffectiveMaxLodForBudget(
+		SelectionSettings.RootLod, RequestedMaxLod, SelectionSettings.MaxLeafCount);
+
 	const float RootCellCount = static_cast<float>(
 		SelectionSettings.CellsPerAxis * (1 << SelectionSettings.RootLod));
 	const float MaxCellSizeForWorldBound = SelectedWorldSizeCm / RootCellCount;
@@ -1792,10 +1825,6 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	BaseVoxelSize = SelectionSettings.BaseVoxelSize;
 
 	SelectionSettings.SplitDistanceMultiplier = FMath::Clamp(SplitDistanceMultiplier, 0.05f, 4.0f);
-	// At 8K, the default LOD 4 root coverage requires at least 4096 leaves.
-	// Keep the editor-set safety budget authoritative; an intentionally smaller
-	// cap fails selection safely instead of silently allocating a huge tree.
-	SelectionSettings.MaxLeafCount = FMath::Max(32, MaxLeafCount);
 
 	const float RootSize = static_cast<float>(SelectionSettings.CellsPerAxis) *
 		static_cast<float>(1 << SelectionSettings.RootLod) *
