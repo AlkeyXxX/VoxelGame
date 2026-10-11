@@ -16,7 +16,8 @@ enum class EVoxelBlock : uint8
     Stone = 3,
     Sand  = 4,
     Wood  = 5,
-    Water = 6
+    Water = 6,
+    Asphalt = 7
 };
 
 /*
@@ -34,7 +35,7 @@ struct SMOOTHVOXEL_API FVoxelBlockDefinition : public FTableRowBase
     /*
      * FVoxelBlockDefinition является строкой DataTable.
      * Row Name должен совпадать с именем EVoxelBlock:
-     * Air, Grass, Dirt, Stone, Sand, Wood, Water.
+     * Air, Grass, Dirt, Stone, Sand, Wood, Water, Asphalt.
      */
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Block")
