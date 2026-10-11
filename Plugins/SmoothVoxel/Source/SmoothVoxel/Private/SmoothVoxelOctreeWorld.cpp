@@ -125,13 +125,54 @@ void ASmoothVoxelTransvoxelChunk::StartQueuedBuild()
 				{
 					if (WeakThis.IsValid())
 					{
-						WeakThis->CompleteBuild(
+						// Do not upload/render/cook many meshes in the same frame.
+						// Hand the CPU result to the world manager, which commits at
+						// most one completed chunk per Tick.
+						WeakThis->QueueCompletedBuild(
 							WorkRevision,
-							MoveTemp(*Result),
+							Result,
 							bWorkCollision);
 					}
 				});
 		});
+}
+
+void ASmoothVoxelTransvoxelChunk::QueueCompletedBuild(
+	int32 BuildRevision,
+	const TSharedPtr<FSVoxelMeshData, ESPMode::ThreadSafe>& Data,
+	bool bCreateCollision)
+{
+	check(IsInGameThread());
+
+	if (BuildRevision != RequestedRevision)
+	{
+		bBuildInProgress = false;
+		bBuildQueued = true;
+		return;
+	}
+
+	PendingCompletedRevision = BuildRevision;
+	PendingCompletedData = Data;
+	bPendingCompletedCollision = bCreateCollision;
+	bHasPendingBuildApply = true;
+}
+
+void ASmoothVoxelTransvoxelChunk::ApplyPendingBuild()
+{
+	check(IsInGameThread());
+	if (!bHasPendingBuildApply || !PendingCompletedData.IsValid())
+	{
+		return;
+	}
+
+	const int32 BuildRevision = PendingCompletedRevision;
+	const bool bCreateCollision = bPendingCompletedCollision;
+	FSVoxelMeshData Data = MoveTemp(*PendingCompletedData);
+	PendingCompletedData.Reset();
+	bHasPendingBuildApply = false;
+	PendingCompletedRevision = -1;
+
+	CompleteBuild(BuildRevision, MoveTemp(Data), bCreateCollision);
 }
 
 void ASmoothVoxelTransvoxelChunk::CompleteBuild(
@@ -243,6 +284,11 @@ void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 		Target = UGameplayStatics::GetPlayerPawn(this, 0);
 	}
 	const FVector CameraLocation = IsValid(Target) ? Target->GetActorLocation() : GetActorLocation();
+
+	// CreateMeshSection_LinearColor and mesh/collision resource creation still
+	// need game-thread work. Apply only one finished CPU mesh per frame to avoid
+	// bursts of completions freezing the editor/game during fast flight.
+	ApplyOneCompletedBuild(CameraLocation);
 
 	// Do not keep changing the desired tree while a replacement is still being
 	// generated. This prevents moving-camera churn and lets old meshes stay up.
@@ -489,6 +535,34 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	bApplyingSelection = true;
 	bSelectionFailed = false;
 	bForceUpdate = false;
+}
+
+void ASmoothVoxelOctreeWorld::ApplyOneCompletedBuild(const FVector& CameraLocation)
+{
+	ASmoothVoxelTransvoxelChunk* BestChunk = nullptr;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+
+	for (TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
+	{
+		ASmoothVoxelTransvoxelChunk* Chunk = Pair.Value;
+		if (!IsValid(Chunk) || !Chunk->HasPendingBuildApply())
+		{
+			continue;
+		}
+
+		const float DistanceSquared =
+			FVector::DistSquared(Chunk->GetActorLocation(), CameraLocation);
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			BestChunk = Chunk;
+		}
+	}
+
+	if (IsValid(BestChunk))
+	{
+		BestChunk->ApplyPendingBuild();
+	}
 }
 
 void ASmoothVoxelOctreeWorld::LaunchQueuedBuilds(const FVector& CameraLocation)
