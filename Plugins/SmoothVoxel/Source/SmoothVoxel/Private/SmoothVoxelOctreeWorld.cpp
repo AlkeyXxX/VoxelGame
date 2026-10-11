@@ -1878,6 +1878,14 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 		return false;
 	});
 
+	UE_LOG(LogTemp, Log,
+		TEXT("SmoothVoxelOctreeWorld: %0.1f km map, %d visible candidate chunks, root LOD %d, far LOD %d, budget %d."),
+		SelectedWorldSizeCm / 100000.0f,
+		Leaves.Num(),
+		SelectionSettings.RootLod,
+		SelectionSettings.MaxLod,
+		SelectionSettings.MaxLeafCount);
+
 	if (Leaves.Num() == 0)
 	{
 		for (TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
