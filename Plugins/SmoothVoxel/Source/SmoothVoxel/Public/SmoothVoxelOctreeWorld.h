@@ -260,6 +260,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="Voxel|World")
 	static float GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize InWorldSize);
 
+	/** Root levels are part of the size preset so the global voxel spacing is identical across 2K/4K/8K. */
+	static int32 GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize InWorldSize);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
 	bool bEnableBlockEditing = true;
 
@@ -306,7 +309,7 @@ private:
 	void ApplyOneCompletedBuild(const FVector& CameraLocation);
 	bool AreDesiredChunksReady() const;
 	void RetireUndesiredChunks(int32 MaxChunksToRetire);
-	int32 GetRootLodForWorldSize() const;
+	int32 GetRootLodForWorldSize() const { return GetRootLodForWorldSizePreset(WorldSize); }
 
 	bool TraceInteractionRay(FHitResult& OutHit) const;
 	float GetEffectiveBlockSize() const;
