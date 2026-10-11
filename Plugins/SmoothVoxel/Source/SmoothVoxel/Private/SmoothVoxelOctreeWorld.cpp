@@ -258,17 +258,13 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.BaseHeight = BaseHeight;
 	Settings.HeightAmplitude = HeightAmplitude;
 
-	// The height field uses 3 FBM octaves with frequency multipliers 1, 2 and
-	// 4. Keep the highest octave below 0.35 lattice units per coarsest sample.
-	// This is a global cap (not per-LOD filtering): every chunk and transition
-	// still samples the same scalar function, avoiding density discontinuities at
-	// LOD boundaries while preventing distant coarse cells from aliasing noise.
+	Settings.NoiseScale = NoiseScale;
+	Settings.DetailScale = DetailScale;
+
 	const int32 SafeMaxLod = FMath::Clamp(MaxLod, 0, 3);
 	const float CoarsestVoxelStep =
 		FMath::Max(1.0f, BaseVoxelSize) * static_cast<float>(1 << SafeMaxLod);
-	const float MaxNoiseScale = 0.35f / (CoarsestVoxelStep * 4.0f);
-	Settings.NoiseScale = FMath::Min(FMath::Max(0.0f, NoiseScale), MaxNoiseScale);
-	Settings.DetailScale = FMath::Min(FMath::Max(0.0f, DetailScale), MaxNoiseScale * 0.75f);
+	FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(Settings, CoarsestVoxelStep);
 	Settings.DetailAmplitude = DetailAmplitude;
 	Settings.BottomDepth = BottomDepth;
 	Settings.bEnableCaves = bEnableCaves;
