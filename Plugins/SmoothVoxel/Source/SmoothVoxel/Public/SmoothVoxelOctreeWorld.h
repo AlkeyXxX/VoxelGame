@@ -324,17 +324,24 @@ private:
 	TSet<FSVoxelOctreeNode> PreparedDesiredNodes;
 
 	// Block-cell edits: +1 adds smooth Dirt/Sand, negative values preserve
-	// explicit legacy cell removals, and +2 reserves a hard cube cavity.
-	// Ray mining stores progress and completed cuts separately in lattice-node
-	// coordinates. Workers only read immutable snapshots.
+	// explicit legacy air cuts, and +2 marks a separately rendered hard cube.
+	// Hard cubes never modify the procedural terrain density field.
 	FSVoxelBlockEditMap EditedBlockCells;
 	FSVoxelBlockEditCenterMap EditedBlockCenters;
 	TMap<FIntVector, EVoxelBlock> EditedBlockTypes;
 	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEditSnapshot;
 	TSharedPtr<const FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> BlockEditCenterSnapshot;
 
-	// Mining progress and completed cuts are keyed by absolute density-grid
-	// nodes, independent from block-cell edits and fractional trace coordinates.
+	// A placed cube temporarily replaces the edit state of its target cell.
+	// Restore the prior state when that cube is broken so removing a block
+	// does not itself excavate terrain or refill a previously mined cell.
+	TMap<FIntVector, int8> PrePlacedBlockEditStates;
+	TMap<FIntVector, FVector> PrePlacedBlockEditCenters;
+	TMap<FIntVector, EVoxelBlock> PrePlacedBlockEditTypes;
+
+	// Mining progress and completed cuts are keyed by absolute integer voxel
+	// cells. Each completed cut removes one axis-aligned cell from the density
+	// field, producing stable floors/walls while looking straight down.
 	TMap<FIntVector, float> TerrainMiningProgress;
 	FSVoxelMinedNodeSet MinedTerrainNodes;
 	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodeSnapshot;
