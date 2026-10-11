@@ -1240,11 +1240,6 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	{
 		FaceStep.Z = Normal.Z >= 0.0f ? 1 : -1;
 	}
-	const FVector FaceDirection(
-		static_cast<float>(FaceStep.X),
-		static_cast<float>(FaceStep.Y),
-		static_cast<float>(FaceStep.Z));
-
 	FIntVector Cell = FIntVector::ZeroValue;
 	FVector CubeWorldOrigin = FVector::ZeroVector;
 	if (ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor()))
@@ -1275,9 +1270,8 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		Cell = WorldPositionToBlockCell(CubeWorldOrigin);
 	}
 
-	// Cell keys alone cannot detect overlap when the first block is offset
-	// from the terrain hit point. Reject positive-volume cube intersections,
-	// while allowing exact face-to-face contact for stacking.
+	// Keep the overlap guard as a safety net for stale or inconsistent edit
+	// state, while allowing exact face-to-face contact for stacking.
 	const FVector TargetMin = CubeWorldOrigin;
 	const FVector TargetMax = TargetMin + FVector(Step);
 	const float OverlapTolerance = FMath::Max(0.05f, Step * 0.001f);
