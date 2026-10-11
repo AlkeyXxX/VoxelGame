@@ -1062,7 +1062,15 @@ void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
 
 	WaterSurfaceActor->SetActorHiddenInGame(false);
 	WaterSurfaceActor->SetActorEnableCollision(bWaterCollision);
-	const float WaterSettingsStep = FMath::Max(1.0f, BaseVoxelSize);
+	// Derive the voxel step from the selected world preset instead of the
+	// last completed terrain selection. This keeps the expensive water mesh
+	// from rebuilding a second time during the first Octree streaming pass.
+	const int32 WaterCellsPerAxis = FMath::Clamp(CellsPerAxis, 4, 128);
+	const int32 WaterRootLod = GetRootLodForWorldSize();
+	const float WaterSettingsStep = FMath::Max(
+		1.0f,
+		GetWorldSizeCentimeters() /
+			(static_cast<float>(WaterCellsPerAxis) * static_cast<float>(1 << WaterRootLod)));
 	const FSVoxelGenerationSettings WaterGenerationSettings = MakeGenerationSettings(
 		FVector::ZeroVector,
 		FIntVector::ZeroValue,
