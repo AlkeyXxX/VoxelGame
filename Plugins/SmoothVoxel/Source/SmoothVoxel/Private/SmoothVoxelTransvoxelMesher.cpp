@@ -135,6 +135,41 @@ namespace
 			return CoarseNormalStep;
 		}
 
+		// A vertex on any same-LOD chunk border must use the coarse sampling
+		// distance, even if another face of this chunk transitions to finer LOD.
+		// Otherwise the normal step changes at the corner of the transition face
+		// but not on the neighbouring same-LOD chunk, creating square lighting
+		// patches whose size increases with the LOD.
+		uint8 VertexBorderMask = 0;
+		if (FMath::IsNearlyZero(LocalPosition.X, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_NegativeX;
+		}
+		if (FMath::IsNearlyEqual(LocalPosition.X, ChunkSize, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_PositiveX;
+		}
+		if (FMath::IsNearlyZero(LocalPosition.Y, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_NegativeY;
+		}
+		if (FMath::IsNearlyEqual(LocalPosition.Y, ChunkSize, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_PositiveY;
+		}
+		if (FMath::IsNearlyZero(LocalPosition.Z, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_NegativeZ;
+		}
+		if (FMath::IsNearlyEqual(LocalPosition.Z, ChunkSize, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_PositiveZ;
+		}
+		if ((VertexBorderMask & static_cast<uint8>(~TransitionFaceMask)) != 0)
+		{
+			return CoarseNormalStep;
+		}
+
 		// Share the finer neighbour's normal sampling distance at the seam,
 		// then blend towards the coarse LOD scale over one coarse cell.
 		float DistanceToTransitionFace = TNumericLimits<float>::Max();
