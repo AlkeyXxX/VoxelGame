@@ -408,10 +408,18 @@ namespace
 		FSVoxelMeshData& OutMesh,
 		TMap<FIntVector, uint32>& VertexCache)
 	{
+		// Keep sub-millimetre edge intersections distinct. Hard-cube cavities
+		// are intentionally inset by fractions of a centimetre; quantizing to
+		// 0.1 cm merged several different edge crossings onto one lattice node,
+		// making valid triangles collapse and leaving real holes in the surface.
+		// At 0.01 cm resolution, even the smallest deliberate cavity margin is
+		// preserved while independently computed copies of a shared edge still
+		// quantize to the same key.
+		constexpr float VertexKeyScale = 100.0f; // 0.01 cm.
 		const FIntVector VertexKey(
-			FMath::RoundToInt(LocalPosition.X * 10.0f),
-			FMath::RoundToInt(LocalPosition.Y * 10.0f),
-			FMath::RoundToInt(LocalPosition.Z * 10.0f));
+			FMath::RoundToInt(LocalPosition.X * VertexKeyScale),
+			FMath::RoundToInt(LocalPosition.Y * VertexKeyScale),
+			FMath::RoundToInt(LocalPosition.Z * VertexKeyScale));
 		if (const uint32* ExistingIndex = VertexCache.Find(VertexKey))
 		{
 			return *ExistingIndex;
