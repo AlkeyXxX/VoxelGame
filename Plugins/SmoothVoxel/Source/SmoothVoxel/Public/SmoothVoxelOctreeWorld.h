@@ -39,6 +39,12 @@ public:
 		bool bCreateCollision);
 
 	void StartQueuedBuild();
+	bool HasPendingBuildApply() const { return bHasPendingBuildApply; }
+	void QueueCompletedBuild(
+		int32 BuildRevision,
+		const TSharedPtr<FSVoxelMeshData, ESPMode::ThreadSafe>& Data,
+		bool bCreateCollision);
+	void ApplyPendingBuild();
 
 	bool IsConfiguredFor(
 		const FSVoxelOctreeNode& Node,
@@ -68,6 +74,11 @@ private:
 		int32 BuildRevision,
 		FSVoxelMeshData&& Data,
 		bool bCreateCollision);
+
+	TSharedPtr<FSVoxelMeshData, ESPMode::ThreadSafe> PendingCompletedData;
+	int32 PendingCompletedRevision = -1;
+	bool bPendingCompletedCollision = false;
+	bool bHasPendingBuildApply = false;
 
 	FSVoxelOctreeNode RequestedNode;
 	FSVoxelGenerationSettings PendingSettings;
@@ -109,10 +120,10 @@ public:
 	float UpdateIntervalSeconds = 0.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1.0"))
-	float UpdateDistance = 200.0f;
+	float UpdateDistance = 1000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="16"))
-	int32 MaxConcurrentBuilds = 4;
+	int32 MaxConcurrentBuilds = 2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="32", ClampMax="8192"))
 	int32 MaxLeafCount = 2048;
@@ -192,6 +203,7 @@ public:
 private:
 	void RebuildForCamera(const FVector& CameraLocation);
 	void LaunchQueuedBuilds(const FVector& CameraLocation);
+	void ApplyOneCompletedBuild(const FVector& CameraLocation);
 	bool AreDesiredChunksReady() const;
 	void RetireUndesiredChunks();
 
