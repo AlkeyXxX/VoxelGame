@@ -261,7 +261,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.NoiseScale = NoiseScale;
 	Settings.DetailScale = DetailScale;
 
-	const int32 SafeMaxLod = FMath::Clamp(MaxLod, 0, 3);
+	const int32 SafeMaxLod = FMath::Clamp(MaxLod, 0, 4);
 	const float CoarsestVoxelStep =
 		FMath::Max(1.0f, BaseVoxelSize) * static_cast<float>(1 << SafeMaxLod);
 	FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(Settings, CoarsestVoxelStep);
@@ -355,7 +355,7 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	// Keep the largest cell spacing within the noise bandwidth used by
 	// MakeGenerationSettings. Serialized actor instances cannot re-enable the
 	// previous very coarse LODs that aliased the terrain into stripes.
-	SelectionSettings.MaxLod = FMath::Clamp(MaxLod, 0, 3);
+	SelectionSettings.MaxLod = FMath::Clamp(MaxLod, 0, 4);
 	SelectionSettings.SplitDistanceMultiplier = FMath::Clamp(SplitDistanceMultiplier, 0.05f, 4.0f);
 	SelectionSettings.MaxLeafCount = FMath::Max(32, MaxLeafCount);
 
