@@ -253,7 +253,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	FSVoxelGenerationSettings Settings;
 	Settings.CellsPerAxis = CellsPerAxis;
 	Settings.VoxelSize = VoxelSize;
-	Settings.NormalSampleStep = FMath::Max(5.0f, BaseVoxelSize);
+	Settings.NormalSampleStep = FMath::Max(5.0f, BaseVoxelSize * 0.5f);
 	Settings.IsoLevel = 0.0f;
 	Settings.Seed = Seed;
 	Settings.BaseHeight = BaseHeight;
