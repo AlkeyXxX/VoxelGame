@@ -842,21 +842,21 @@ bool FSmoothVoxelTransvoxelBlockEditDensityTest::RunTest(const FString& Paramete
 	Edits->Add(FIntVector(1, 1, 1), int8(1));   // Smooth cell must be found near its boundary.
 	Edits->Add(FIntVector(0, 0, 0), int8(-5)); // Fully mined octahedron wins where it overlaps a smooth addition.
 	Edits->Add(FIntVector(0, 0, -1), int8(-1)); // Carve one cell below the surface.
-	Edits->Add(FIntVector(2, 0, 1), int8(2));   // A hard cube reserves air in the terrain SDF.
+	Edits->Add(FIntVector(2, 0, -1), int8(2));  // Hard cube overlaps otherwise solid terrain.
 	Settings.BlockEdits = Edits;
 
 	const float PlacedCellDensity = FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, Settings);
 	const float SmoothCellBoundaryDensity = FSVoxelGenerator::SampleDensity(101.0, 150.0, 150.0, Settings);
 	const float OverlapCarveWinsDensity = FSVoxelGenerator::SampleDensity(100.0, 50.0, 50.0, Settings);
 	const float RemovedCellDensity = FSVoxelGenerator::SampleDensity(50.0, 50.0, -50.0, Settings);
-	const float HardCubeCellDensity = FSVoxelGenerator::SampleDensity(250.0, 50.0, 150.0, Settings);
+	const float HardCubeCellDensity = FSVoxelGenerator::SampleDensity(250.0, 50.0, -50.0, Settings);
 	const float UnmodifiedDensity = FSVoxelGenerator::SampleDensity(250.0, 250.0, 50.0, Settings);
 
 	TestTrue(TEXT("A smooth soil edit must add positive density inside its cell"), PlacedCellDensity > 0.0f);
 	TestTrue(TEXT("The rounded smooth edit must remain continuous near its cell boundary"), SmoothCellBoundaryDensity > 0.0f);
 	TestTrue(TEXT("A carved cell must remain air even where it overlaps a neighbouring smooth addition"), OverlapCarveWinsDensity < 0.0f);
 	TestTrue(TEXT("An air edit must carve negative density out of solid terrain"), RemovedCellDensity < 0.0f);
-	TestTrue(TEXT("A hard-cube cell must stay air in the terrain field; its cube is rendered separately"), HardCubeCellDensity < 0.0f);
+	TestTrue(TEXT("A hard-cube occupancy marker must not carve an otherwise solid terrain sample"), HardCubeCellDensity > 0.0f);
 	TestTrue(TEXT("Samples outside edited cells must preserve the procedural density field"), UnmodifiedDensity < 0.0f);
 	return true;
 }
