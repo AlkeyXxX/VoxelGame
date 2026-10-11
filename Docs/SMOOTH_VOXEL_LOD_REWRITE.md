@@ -38,12 +38,12 @@ The rewrite lives beside the current world and does not replace the legacy
 
 The new mesher and octree selector are attached to a separate, opt-in terrain
 manager that follows a pawn or configured actor and streams chunks as the view
-moves. It rejects stale build results and keeps the old mesh set visible while
-new chunks are built hidden. When the full desired set is ready, it retires old
-leaves and reveals new leaves together, avoiding overlap and z-fighting between
-old coarse parents and newly built fine children. Completed CPU meshes are
-committed one per frame, and worker concurrency is capped at two to reduce
-game-thread upload bursts and CPU contention.
+moves. It rejects stale build results. On initial spawn, chunks become visible
+as they finish; during later LOD replacements, new chunks stay hidden until the
+full desired set is ready, then old leaves are retired and new leaves revealed
+together to avoid overlap and z-fighting between coarse parents and fine children.
+Completed CPU meshes are committed one per frame, and worker concurrency is
+capped at two to reduce game-thread upload bursts and CPU contention.
 The root is a rolling finite window, not an unbounded world at once: it shifts
 horizontally by half its width and keeps 50% overlap to avoid stopping terrain
 generation at the original root boundary. Its vertical interval remains
