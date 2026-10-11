@@ -127,8 +127,7 @@ public:
 		const FIntVector& InCell,
 		float InBlockSize,
 		UMaterialInterface* InMaterial,
-		int32 InDamageStage = 0,
-		const FVector* InWorldOriginOverride = nullptr);
+		int32 InDamageStage = 0);
 
 	int32 RegisterDamageHit();
 	int32 GetDamageStage() const { return DamageStage; }
