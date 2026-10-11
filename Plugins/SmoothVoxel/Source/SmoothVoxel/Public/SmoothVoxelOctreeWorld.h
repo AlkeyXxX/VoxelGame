@@ -127,7 +127,8 @@ public:
 		const FIntVector& InCell,
 		float InBlockSize,
 		UMaterialInterface* InMaterial,
-		int32 InDamageStage = 0);
+		int32 InDamageStage = 0,
+		const FVector* InWorldOriginOverride = nullptr);
 
 	int32 RegisterDamageHit();
 	int32 GetDamageStage() const { return DamageStage; }
@@ -302,7 +303,8 @@ private:
 		const FIntVector& Cell,
 		EVoxelBlock Block,
 		int8 EditStateOverride = 0,
-		const FVector* EditCenterOverride = nullptr);
+		const FVector* EditCenterOverride = nullptr,
+		const FVector* CubeWorldOriginOverride = nullptr);
 	void RebuildChunksNearEditedCell(const FIntVector& Cell, bool bGridNode = false);
 
 	FSVoxelGenerationSettings MakeGenerationSettings(
