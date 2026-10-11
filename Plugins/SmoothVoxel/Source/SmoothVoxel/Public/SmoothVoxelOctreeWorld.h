@@ -213,7 +213,7 @@ private:
 	void LaunchQueuedBuilds(const FVector& CameraLocation);
 	void ApplyOneCompletedBuild(const FVector& CameraLocation);
 	bool AreDesiredChunksReady() const;
-	void RetireUndesiredChunks();
+	void RetireUndesiredChunks(int32 MaxChunksToRetire);
 
 	FSVoxelGenerationSettings MakeGenerationSettings(
 		const FVector& ChunkOrigin,
