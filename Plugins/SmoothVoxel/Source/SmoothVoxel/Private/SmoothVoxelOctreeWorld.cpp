@@ -1287,7 +1287,7 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		if (!IsValid(ExistingCube))
 		{
 			continue;
-			}
+		}
 		const FVector ExistingMin = ExistingCube->GetActorLocation();
 		const FVector ExistingMax = ExistingMin + FVector(Step);
 		const float OverlapX = FMath::Min(TargetMax.X, ExistingMax.X) -
