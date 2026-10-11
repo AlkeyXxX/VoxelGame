@@ -52,6 +52,13 @@ public:
 		float WorldZ,
 		const FSVoxelGenerationSettings& Settings);
 
+	/** Clamp the FBM frequencies so its highest octave is representable at the
+	 * coarsest voxel step, without changing the density field from LOD to LOD.
+	 */
+	static void ClampNoiseScalesForMaxSampleStep(
+		FSVoxelGenerationSettings& Settings,
+		float CoarsestVoxelStep);
+
 	static void Generate(
 		const FSVoxelGenerationSettings& Settings,
 		FSVoxelMeshData& OutMesh);
