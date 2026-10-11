@@ -133,7 +133,7 @@ bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Paramet
 	// The absolute world coordinate here is 2000 km, so unrebased UVs would
 	// be around 100,000. The rendered UV values should instead remain bounded
 	// because each emitted cell removes one common integer tile offset.
-	FSVoxelTransvoxelMesher::Generate(Settings, 4, 1600.0f, 0, Mesh);
+	FSVoxelTransvoxelMesher::Generate(Settings, 4, 100.0f, 0, Mesh);
 	TestTrue(TEXT("Large-coordinate fixture should generate terrain triangles"), Mesh.Triangles.Num() > 0);
 	TestEqual(TEXT("Each generated vertex has a UV"), Mesh.UV0.Num(), Mesh.Vertices.Num());
 
@@ -145,13 +145,12 @@ bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Paramet
 	}
 	TestTrue(
 		TEXT("Large absolute world coordinates must not produce large GPU UV values"),
-		MaxAbsoluteUv < 2.0f);
+		MaxAbsoluteUv < 1.0f);
 
 	// Adjacent same-LOD chunks must retain the same repeating-texture phase at
-	// their shared border even though each cell independently removes an
-	// integer UV tile offset.
+	// their shared border while using a single continuous UV offset per chunk.
 	FSVoxelGenerationSettings AdjacentSettings = Settings;
-	AdjacentSettings.ChunkOriginCells.X += 64; // 4 cells * (1600 / 100) lattice steps.
+	AdjacentSettings.ChunkOriginCells.X += 4; // Chunk width is 4 base-lattice cells.
 	FSVoxelMeshData AdjacentMesh;
 	FSVoxelTransvoxelMesher::Generate(AdjacentSettings, 4, 1600.0f, 0, AdjacentMesh);
 
@@ -172,7 +171,7 @@ bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Paramet
 	for (int32 Index = 0; Index < Mesh.Vertices.Num(); ++Index)
 	{
 		const FVector& Vertex = Mesh.Vertices[Index];
-		if (!FMath::IsNearlyEqual(Vertex.X, 6400.0f, 0.01f))
+		if (!FMath::IsNearlyEqual(Vertex.X, 400.0f, 0.01f)
 		{
 			continue;
 		}
