@@ -186,6 +186,49 @@ bool FSmoothVoxelOctreeBalanceTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelOctreeIndependentRootWindowTest,
+	"SmoothVoxel.Octree.RootWindowCanExceedMaximumLeafLod",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelOctreeIndependentRootWindowTest::RunTest(const FString& Parameters)
+{
+	FSVoxelOctreeSelectionSettings Settings;
+	Settings.CellsPerAxis = 8;
+	Settings.BaseVoxelSize = 100.0f;
+	Settings.MaxLod = 2;
+	Settings.RootLod = 4;
+	Settings.SplitDistanceMultiplier = 0.75f;
+	Settings.MaxLeafCount = 128;
+	Settings.WorldOrigin = FVector::ZeroVector;
+	Settings.RootOriginCells = FIntVector(-64, -64, -64);
+
+	// Stay well outside the root so only the forced subdivision from RootLod
+	// to MaxLod is exercised; no camera-proximity splits should occur.
+	const FVector FarCamera(1000000.0f, 1000000.0f, 1000000.0f);
+	TArray<FSVoxelOctreeNode> Leaves;
+	TestTrue(TEXT("A larger root window should select successfully"),
+		FSVoxelOctreeSelector::BuildBalancedLeaves(FarCamera, Settings, Leaves));
+
+	const int32 ExpectedLeafCount = 1 << (3 * (Settings.RootLod - Settings.MaxLod));
+	TestEqual(TEXT("Root is fully covered by MaxLod-sized leaves"),
+		Leaves.Num(), ExpectedLeafCount);
+
+	for (const FSVoxelOctreeNode& Node : Leaves)
+	{
+		TestTrue(TEXT("No rendered leaf may exceed MaxLod"), Node.Lod <= Settings.MaxLod);
+	}
+
+	TArray<uint8> FaceMasks;
+	TestTrue(TEXT("Transition masks support a root larger than the leaf LOD"),
+		FSVoxelOctreeSelector::BuildTransitionFaceMasks(
+			Leaves, Settings.CellsPerAxis, Settings.MaxLod, FaceMasks,
+			Settings.RootOriginCells, Settings.RootLod));
+	TestEqual(TEXT("One transition mask is returned per selected leaf"),
+		FaceMasks.Num(), Leaves.Num());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelOctreeStreamingWindowOverlapTest,
 	"SmoothVoxel.Octree.StreamingWindowKeepsWorldAlignedChunks",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
