@@ -137,16 +137,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0", ClampMax="4"))
 	int32 MaxLod = 4;
 
-	/** Streaming window scale, independent of the maximum LOD used by visible chunks. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="8"))
-	int32 RootWindowLod = 6;
+	/** Fixed world window scale. The default fills a 4 km square at default settings. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="7"))
+	int32 RootWindowLod = 7;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0.05", ClampMax="4.0"))
 	float SplitDistanceMultiplier = 0.75f;
 
-	/** Anchor for the moving root window. The active XY centre is snapped in
-	 * half-root-size increments around this anchor as the followed actor moves;
-	 * the vertical range stays fixed so upward flight does not discard terrain.
+	/** Fixed centre of the finite world bounds. The world does not follow the
+	 * player; its horizontal size is capped at 4 km per axis.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree")
 	FVector RootWorldCenter = FVector::ZeroVector;
@@ -214,6 +213,7 @@ private:
 	FSVoxelGenerationSettings MakeGenerationSettings(
 		const FVector& ChunkOrigin,
 		const FIntVector& ChunkOriginCells,
+		float EffectiveBaseVoxelSize,
 		float VoxelSize) const;
 
 	TMap<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*> ActiveChunks;
