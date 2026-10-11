@@ -556,20 +556,34 @@ namespace
 			// look invisible when mining upward.
 			const FVector TriangleCenter = (
 				CellLocalVertices[A] + CellLocalVertices[B] + CellLocalVertices[C]) / 3.0f;
-			const FVector RawFaceDirection = FaceNormal.GetSafeNormal();
-			const float OrientationProbe = FMath::Max(1.0f, Settings.VoxelSize * 0.02f);
-			const float DensityAlongRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
-				TriangleCenter + RawFaceDirection * OrientationProbe, Settings);
-			const float DensityAgainstRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
-				TriangleCenter - RawFaceDirection * OrientationProbe, Settings);
-
 			bool bReverseForUnrealFrontFace = false;
-			if (FMath::Abs(DensityAlongRawNormal - DensityAgainstRawNormal) > KINDA_SMALL_NUMBER)
+
+			// Only evaluate two extra density samples around cave/mining surfaces.
+			// Plain terrain keeps the cheaper normal-dot path so normal mesh builds
+			// do not pay for additional full noise evaluations per triangle.
+			const bool bNeedsDensityOrientation =
+				(Settings.bEnableCaves && Settings.CaveStrength > 0.0f) ||
+				HasBlockEditNearPosition(TriangleCenter, Settings);
+			if (bNeedsDensityOrientation)
 			{
-				// Positive density is solid, negative is air. A conventional cross
-				// pointing into air is outward; UE's procedural-mesh index winding
-				// must be the opposite direction, matching the existing UE4 test.
-				bReverseForUnrealFrontFace = DensityAlongRawNormal < DensityAgainstRawNormal;
+				const FVector RawFaceDirection = FaceNormal.GetSafeNormal();
+				const float OrientationProbe = FMath::Max(1.0f, Settings.VoxelSize * 0.02f);
+				const float DensityAlongRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
+					TriangleCenter + RawFaceDirection * OrientationProbe, Settings);
+				const float DensityAgainstRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
+					TriangleCenter - RawFaceDirection * OrientationProbe, Settings);
+				if (FMath::Abs(DensityAlongRawNormal - DensityAgainstRawNormal) > KINDA_SMALL_NUMBER)
+				{
+					// Positive density is solid, negative is air. A conventional cross
+					// pointing into air is outward; UE's index winding must be opposite.
+					bReverseForUnrealFrontFace =
+						DensityAlongRawNormal < DensityAgainstRawNormal;
+				}
+				else if (ExpectedNormal.SizeSquared() > SMALL_NUMBER)
+				{
+					bReverseForUnrealFrontFace =
+						FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f;
+				}
 			}
 			else if (ExpectedNormal.SizeSquared() > SMALL_NUMBER)
 			{
