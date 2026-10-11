@@ -181,6 +181,39 @@ namespace
         double CandidateSdfs[27];
         int32 CandidateCount = 0;
 
+        // A mined sample removes one stable voxel-sized region centered exactly
+        // on a density lattice node. The one-node neighborhood matches the
+        // query radius and ensures every rebuilt LOD sees the same world-space
+        // modification instead of a hit-point-dependent diamond.
+        if (bHasMinedNodes)
+        {
+            const double MinedNodeRadius = Step * 1.0;
+            const double MinedNodeBlend = Step * 0.08;
+            for (int32 DZ = -1; DZ <= 1; ++DZ)
+            {
+                for (int32 DY = -1; DY <= 1; ++DY)
+                {
+                    for (int32 DX = -1; DX <= 1; ++DX)
+                    {
+                        const FIntVector Node(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        if (!Settings.MinedNodes->Contains(Node))
+                        {
+                            continue;
+                        }
+
+                        const double NodeX = static_cast<double>(Node.X) * Step;
+                        const double NodeY = static_cast<double>(Node.Y) * Step;
+                        const double NodeZ = static_cast<double>(Node.Z) * Step;
+                        const double NodeSdf = OctahedronSdf(
+                            X, Y, Z, NodeX, NodeY, NodeZ, MinedNodeRadius);
+                        Density = static_cast<float>(SmoothMinimum(
+                            static_cast<double>(Density), NodeSdf, MinedNodeBlend));
+                    }
+                }
+            }
+        }
+
+
         if (bHasBlockEdits)
         {
             for (int32 DZ = -1; DZ <= 1; ++DZ)
@@ -265,37 +298,6 @@ namespace
             }
         }
 
-        // A mined sample removes one stable voxel-sized region centered exactly
-        // on a density lattice node. The one-node neighborhood matches the
-        // query radius and ensures every rebuilt LOD sees the same world-space
-        // modification instead of a hit-point-dependent diamond.
-        if (bHasMinedNodes)
-        {
-            const double MinedNodeRadius = Step * 1.0;
-            const double MinedNodeBlend = Step * 0.08;
-            for (int32 DZ = -1; DZ <= 1; ++DZ)
-            {
-                for (int32 DY = -1; DY <= 1; ++DY)
-                {
-                    for (int32 DX = -1; DX <= 1; ++DX)
-                    {
-                        const FIntVector Node(BaseX + DX, BaseY + DY, BaseZ + DZ);
-                        if (!Settings.MinedNodes->Contains(Node))
-                        {
-                            continue;
-                        }
-
-                        const double NodeX = static_cast<double>(Node.X) * Step;
-                        const double NodeY = static_cast<double>(Node.Y) * Step;
-                        const double NodeZ = static_cast<double>(Node.Z) * Step;
-                        const double NodeSdf = OctahedronSdf(
-                            X, Y, Z, NodeX, NodeY, NodeZ, MinedNodeRadius);
-                        Density = static_cast<float>(SmoothMinimum(
-                            static_cast<double>(Density), NodeSdf, MinedNodeBlend));
-                    }
-                }
-            }
-        }
 
         return Density;
     }
