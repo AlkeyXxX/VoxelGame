@@ -304,9 +304,6 @@ namespace
 		const int32 BaseVertex = OutMesh.Vertices.Num();
 		TArray<FVector> CellNormals;
 		CellNormals.SetNumUninitialized(VertexCount);
-		TArray<FVector2D> CellUVs;
-		CellUVs.SetNumUninitialized(VertexCount);
-
 		for (int32 I = 0; I < VertexCount; ++I)
 		{
 			const FVector LocalPosition = CellLocalVertices[I];
@@ -322,26 +319,36 @@ namespace
 			// adjacent vertices of a single triangle use incompatible UV spaces,
 			// which visibly skews textures. Steep cliffs/caves should use a
 			// triplanar material rather than per-vertex projection switching.
-			CellUVs[I] = FVector2D(WorldPosition.X, WorldPosition.Y) * 0.0005f;
-			OutMesh.UV0.Add(CellUVs[I]);
+			OutMesh.UV0.Add(FVector2D(WorldPosition.X, WorldPosition.Y) * 0.0005f);
 
-			// The UVs are a world-XY projection, so derive the tangent frame
-			// directly from that projection and the smooth normal. Computing it
-			// independently from each cell's triangle list caused tangent-frame
-			// discontinuities at every cell boundary, visible as dark square
-			// patches with normal-mapped materials (larger on coarse LODs).
+			// UV0 = (world X, world Y), so for the height-field surface use
+			// the corresponding parametric tangents: dP/dX=(1,0,dZ/dX),
+			// dP/dY=(0,1,dZ/dY). Recover their slopes from the outward normal.
+			// This gives the same tangent frame at the same world point in every
+			// cell and LOD, unlike per-cell triangle-derived tangent accumulation.
 			const FVector Normal = CellNormals[I].GetSafeNormal();
-			const FVector WorldU(1.0f, 0.0f, 0.0f);
-			const FVector WorldV(0.0f, 1.0f, 0.0f);
-			FVector Tangent = WorldU - Normal * FVector::DotProduct(Normal, WorldU);
-			if (!Tangent.Normalize())
+			FVector Tangent;
+			FVector Bitangent;
+			if (FMath::Abs(Normal.Z) > 0.1f)
 			{
-				Tangent = (WorldV - Normal * FVector::DotProduct(Normal, WorldV)).GetSafeNormal();
+				Tangent = FVector(1.0f, 0.0f, -Normal.X / Normal.Z).GetSafeNormal();
+				Bitangent = FVector(0.0f, 1.0f, -Normal.Y / Normal.Z).GetSafeNormal();
 			}
-			const FVector ProjectedBitangent =
-				WorldV - Normal * FVector::DotProduct(Normal, WorldV);
+			else
+			{
+				// A height-field projection is singular on near-vertical walls;
+				// use a stable fallback there and let cliffs/caves use triplanar UVs.
+				const FVector WorldU(1.0f, 0.0f, 0.0f);
+				const FVector WorldV(0.0f, 1.0f, 0.0f);
+				Tangent = WorldU - Normal * FVector::DotProduct(Normal, WorldU);
+				if (!Tangent.Normalize())
+				{
+					Tangent = (WorldV - Normal * FVector::DotProduct(Normal, WorldV)).GetSafeNormal();
+				}
+				Bitangent = WorldV - Normal * FVector::DotProduct(Normal, WorldV);
+			}
 			const bool bFlipTangentY =
-				FVector::DotProduct(FVector::CrossProduct(Normal, Tangent), ProjectedBitangent) < 0.0f;
+				FVector::DotProduct(FVector::CrossProduct(Normal, Tangent), Bitangent) < 0.0f;
 			OutMesh.Tangents.Add(FProcMeshTangent(Tangent, bFlipTangentY));
 		}
 
