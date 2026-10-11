@@ -255,8 +255,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
 	bool bEnableBiomes = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes", meta=(ClampMin="0.00000005", ClampMax="0.00001"))
-	float BiomeScale = 0.00000065f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes", meta=(ClampMin="0.000001", ClampMax="0.00005"))
+	float BiomeScale = 0.00001f;
 
 	/** Reserve many seed-stable clearings for future POI placement. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(DisplayName="Generate POI Plateaus"))
