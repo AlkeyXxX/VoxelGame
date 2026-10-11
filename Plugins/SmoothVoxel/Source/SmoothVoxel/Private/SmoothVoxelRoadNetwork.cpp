@@ -327,15 +327,16 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const int32 CurrentLeft = FirstVertex + SampleIndex * 2;
                 const int32 CurrentRight = CurrentLeft + 1;
 
-                // Winding points the ribbon normals upward, matching the
-                // ProceduralMeshComponent convention used by the voxel world.
+                // Match the voxel mesher's winding convention: the raw triangle
+                // cross product points into the solid. With the upward vertex normals
+                // above, reverse the index order so the road is front-facing from above.
                 Triangles.Add(PreviousLeft);
-                Triangles.Add(PreviousRight);
                 Triangles.Add(CurrentLeft);
+                Triangles.Add(PreviousRight);
 
                 Triangles.Add(PreviousRight);
-                Triangles.Add(CurrentRight);
                 Triangles.Add(CurrentLeft);
+                Triangles.Add(CurrentRight);
             }
         }
 
