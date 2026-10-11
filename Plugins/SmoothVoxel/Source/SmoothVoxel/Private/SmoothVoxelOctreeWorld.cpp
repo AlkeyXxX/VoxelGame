@@ -474,9 +474,8 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	if (bFilterBlockEdits && (bHasBlockEdits || bHasMinedNodes))
 	{
 		const double EditGridStep = FMath::Max(1.0, static_cast<double>(EffectiveBaseVoxelSize));
-		// A mined node sits on a lattice corner, and its SDF reaches one base
-		// voxel in each direction. Include an extra base step so every LOD and
-		// every face-neighbour samples the identical edit field at shared borders.
+		// Mined cells are centred half a base step inside their integer cells.
+		// Include extra padding so neighbours/transition faces sample the same edits.
 		const double Padding = static_cast<double>(VoxelSize) + EditGridStep * 1.5;
 		const double MinX = static_cast<double>(ChunkOrigin.X) - Padding;
 		const double MinY = static_cast<double>(ChunkOrigin.Y) - Padding;
@@ -527,9 +526,11 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 		{
 			for (const FIntVector& Node : *MinedNodeSnapshot)
 			{
-				const double NodeX = static_cast<double>(Node.X) * EditGridStep;
-				const double NodeY = static_cast<double>(Node.Y) * EditGridStep;
-				const double NodeZ = static_cast<double>(Node.Z) * EditGridStep;
+				// MinedTerrainNodes now stores voxel-cell coordinates. Bounds
+				// and SDF centres must use cell centres, not density-lattice corners.
+				const double NodeX = (static_cast<double>(Node.X) + 0.5) * EditGridStep;
+				const double NodeY = (static_cast<double>(Node.Y) + 0.5) * EditGridStep;
+				const double NodeZ = (static_cast<double>(Node.Z) + 0.5) * EditGridStep;
 				if (NodeX >= MinX && NodeX <= MaxX &&
 					NodeY >= MinY && NodeY <= MaxY &&
 					NodeZ >= MinZ && NodeZ <= MaxZ)
@@ -818,7 +819,11 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 {
 	ASmoothVoxelPlacedCubeBlock* ExistingCube = PlacedCubeBlocks.FindRef(Cell);
 	const bool bRemoveBlock = Block == EVoxelBlock::Air;
+	const bool bRemovingPlacedCube = bRemoveBlock && IsValid(ExistingCube);
 	const bool bSmoothBlock = !bRemoveBlock && IsSmoothTerrainBlock(Block);
+	const int8 RestoreEditState = bRemovingPlacedCube
+		? PrePlacedBlockEditStates.FindRef(Cell)
+		: int8(0);
 	int8 EditState = EditStateOverride;
 	if (EditState == 0)
 	{
@@ -839,7 +844,7 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		}
 		PlacedCubeBlocks.Remove(Cell);
 		EditedBlockTypes.Remove(Cell);
-		if (EditCenterOverride && !EditedBlockCenters.Contains(Cell))
+		if (EditCenterOverride && !EditedBlockCenters.Contains(Cell) && !bRemovingPlacedCube)
 		{
 			EditedBlockCenters.Add(Cell, *EditCenterOverride);
 		}
@@ -882,6 +887,31 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 				return;
 			}
 			PlacedCubeBlocks.Add(Cell, Cube);
+
+			// Remember the density edit being temporarily replaced by this cube.
+			// A cube may be placed into a cell which was already explicitly mined;
+			// breaking it must restore that air override rather than refill terrain.
+			if (!PrePlacedBlockEditStates.Contains(Cell))
+			{
+				const int8* PreviousState = EditedBlockCells.Find(Cell);
+				PrePlacedBlockEditStates.Add(Cell, PreviousState ? *PreviousState : int8(0));
+				if (const FVector* PreviousCenter = EditedBlockCenters.Find(Cell))
+				{
+					PrePlacedBlockEditCenters.Add(Cell, *PreviousCenter);
+				}
+				else
+				{
+					PrePlacedBlockEditCenters.Remove(Cell);
+				}
+				if (const EVoxelBlock* PreviousType = EditedBlockTypes.Find(Cell))
+				{
+					PrePlacedBlockEditTypes.Add(Cell, *PreviousType);
+				}
+				else
+				{
+					PrePlacedBlockEditTypes.Remove(Cell);
+				}
+			}
 		}
 
 		Cube->ConfigureBlock(
@@ -895,7 +925,39 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 	// persistent world edits and remain carved out underneath/around the placed
 	// block; otherwise placement can regenerate grass/soil and duplicate drops.
 
-	EditedBlockCells.Add(Cell, EditState);
+	if (bRemovingPlacedCube)
+	{
+		// The hard cube never excavated the procedural field. Remove its
+		// reservation and restore the exact previous cell state instead of
+		// turning block removal into a free mining action.
+		if (RestoreEditState == 0)
+		{
+			EditedBlockCells.Remove(Cell);
+		}
+		else
+		{
+			EditedBlockCells.Add(Cell, RestoreEditState);
+		}
+		if (const FVector* PreviousCenter = PrePlacedBlockEditCenters.Find(Cell))
+		{
+			EditedBlockCenters.Add(Cell, *PreviousCenter);
+		}
+		else
+		{
+			EditedBlockCenters.Remove(Cell);
+		}
+		if (const EVoxelBlock* PreviousType = PrePlacedBlockEditTypes.Find(Cell))
+		{
+			EditedBlockTypes.Add(Cell, *PreviousType);
+		}
+		PrePlacedBlockEditStates.Remove(Cell);
+		PrePlacedBlockEditCenters.Remove(Cell);
+		PrePlacedBlockEditTypes.Remove(Cell);
+	}
+	else
+	{
+		EditedBlockCells.Add(Cell, EditState);
+	}
 	BlockEditSnapshot = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells);
 	BlockEditCenterSnapshot.Reset();
 	if (EditedBlockCenters.Num() > 0)
