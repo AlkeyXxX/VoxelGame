@@ -14,7 +14,7 @@ ASmoothVoxelTransvoxelChunk::ASmoothVoxelTransvoxelChunk()
 	RootComponent = Mesh;
 	Mesh->bUseAsyncCooking = true;
 	Mesh->bUseComplexAsSimpleCollision = true;
-	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetCollisionObjectType(ECC_WorldStatic);
 	Mesh->SetCollisionResponseToAllChannels(ECR_Block);
 	Mesh->SetMobility(EComponentMobility::Movable);
@@ -106,6 +106,7 @@ void ASmoothVoxelTransvoxelChunk::StartQueuedBuild()
 	const bool bWorkCollision = bRequestedCollision;
 	const FSVoxelGenerationSettings WorkSettings = PendingSettings;
 	const TWeakObjectPtr<ASmoothVoxelTransvoxelChunk> WeakThis(this);
+	const TWeakObjectPtr<ASmoothVoxelOctreeWorld> WeakWorld = Cast<ASmoothVoxelOctreeWorld>(GetOwner());
 	const TSharedPtr<FSVoxelMeshData, ESPMode::ThreadSafe> Result =
 		MakeShared<FSVoxelMeshData, ESPMode::ThreadSafe>();
 
@@ -121,8 +122,14 @@ void ASmoothVoxelTransvoxelChunk::StartQueuedBuild()
 				*Result);
 
 			AsyncTask(ENamedThreads::GameThread,
-				[WeakThis, WorkRevision, Result, bWorkCollision]() mutable
+				[WeakThis, WeakWorld, WorkRevision, Result, bWorkCollision]() mutable
 				{
+					// Always release a worker slot even if the chunk became obsolete
+					// and was destroyed while this task was running.
+					if (WeakWorld.IsValid())
+					{
+						WeakWorld->NotifyWorkerBuildFinished();
+					}
 					if (WeakThis.IsValid())
 					{
 						// Do not upload/render/cook many meshes in the same frame.
@@ -148,6 +155,10 @@ void ASmoothVoxelTransvoxelChunk::QueueCompletedBuild(
 	{
 		bBuildInProgress = false;
 		bBuildQueued = true;
+		if (ASmoothVoxelOctreeWorld* World = Cast<ASmoothVoxelOctreeWorld>(GetOwner()))
+		{
+			World->EnqueueChunkBuild(this);
+		}
 		return;
 	}
 
@@ -155,6 +166,10 @@ void ASmoothVoxelTransvoxelChunk::QueueCompletedBuild(
 	PendingCompletedData = Data;
 	bPendingCompletedCollision = bCreateCollision;
 	bHasPendingBuildApply = true;
+	if (ASmoothVoxelOctreeWorld* World = Cast<ASmoothVoxelOctreeWorld>(GetOwner()))
+	{
+		World->EnqueueCompletedChunk(this);
+	}
 }
 
 void ASmoothVoxelTransvoxelChunk::ApplyPendingBuild()
@@ -217,6 +232,12 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			Data.Tangents,
 			bCreateCollision);
 	}
+
+	// Only fine terrain casts shadows; distant coarse chunks otherwise multiply
+	// draw calls in every dynamic shadow pass without meaningful visual gain.
+	Mesh->SetCastShadow(RequestedNode.Lod <= 1);
+	Mesh->SetCollisionEnabled(
+		bCreateCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 
 	CompletedRevision = BuildRevision;
 	bBuildFailed = false;
@@ -623,6 +644,7 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 				*FaceMask,
 				GeneratorSettings,
 				*bCollision);
+			EnqueueChunkBuild(Chunk);
 		}
 
 		PreparedDesiredNodes.Add(Node);
@@ -636,76 +658,105 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 
 void ASmoothVoxelOctreeWorld::ApplyOneCompletedBuild(const FVector& CameraLocation)
 {
-	ASmoothVoxelTransvoxelChunk* BestChunk = nullptr;
-	float BestDistanceSquared = TNumericLimits<float>::Max();
-
-	for (TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
+	// This queue contains only completed CPU meshes, avoiding an O(active chunks)
+	// scan on every rendered frame when the terrain is idle.
+	CompletedChunkBuilds.RemoveAll([](const TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>& WeakChunk)
 	{
-		ASmoothVoxelTransvoxelChunk* Chunk = Pair.Value;
-		if (!IsValid(Chunk) || !Chunk->HasPendingBuildApply())
+		return !WeakChunk.IsValid() || !WeakChunk->HasPendingBuildApply();
+	});
+
+	int32 BestIndex = INDEX_NONE;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	for (int32 Index = 0; Index < CompletedChunkBuilds.Num(); ++Index)
+	{
+		ASmoothVoxelTransvoxelChunk* Chunk = CompletedChunkBuilds[Index].Get();
+		if (!IsValid(Chunk))
 		{
 			continue;
 		}
-
 		const float DistanceSquared =
 			FVector::DistSquared(Chunk->GetActorLocation(), CameraLocation);
 		if (DistanceSquared < BestDistanceSquared)
 		{
 			BestDistanceSquared = DistanceSquared;
-			BestChunk = Chunk;
+			BestIndex = Index;
 		}
 	}
 
-	if (IsValid(BestChunk))
+	if (BestIndex != INDEX_NONE)
 	{
-		BestChunk->ApplyPendingBuild();
+		ASmoothVoxelTransvoxelChunk* Chunk = CompletedChunkBuilds[BestIndex].Get();
+		CompletedChunkBuilds.RemoveAtSwap(BestIndex, 1, false);
+		if (IsValid(Chunk))
+		{
+			Chunk->ApplyPendingBuild();
+		}
+	}
+}
+
+void ASmoothVoxelOctreeWorld::NotifyWorkerBuildFinished()
+{
+	check(IsInGameThread());
+	InFlightMeshBuildCount = FMath::Max(0, InFlightMeshBuildCount - 1);
+}
+
+void ASmoothVoxelOctreeWorld::EnqueueChunkBuild(ASmoothVoxelTransvoxelChunk* Chunk)
+{
+	if (IsValid(Chunk))
+	{
+		QueuedChunkBuilds.AddUnique(TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>(Chunk));
+	}
+}
+
+void ASmoothVoxelOctreeWorld::EnqueueCompletedChunk(ASmoothVoxelTransvoxelChunk* Chunk)
+{
+	if (IsValid(Chunk))
+	{
+		CompletedChunkBuilds.AddUnique(TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>(Chunk));
 	}
 }
 
 void ASmoothVoxelOctreeWorld::LaunchQueuedBuilds(const FVector& CameraLocation)
 {
-	int32 InFlightCount = 0;
-	TArray<ASmoothVoxelTransvoxelChunk*> QueuedChunks;
-
-	for (TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
+	const int32 Limit = FMath::Clamp(MaxConcurrentBuilds, 1, 2);
+	if (InFlightMeshBuildCount >= Limit || QueuedChunkBuilds.Num() == 0)
 	{
-		ASmoothVoxelTransvoxelChunk* Chunk = Pair.Value;
-		if (!IsValid(Chunk))
-		{
-			continue;
-		}
-
-		if (Chunk->IsBuildInProgress())
-		{
-			++InFlightCount;
-		}
-
-		if (DesiredNodes.Contains(Pair.Key) && Chunk->IsBuildQueued() && !Chunk->IsBuildInProgress())
-		{
-			QueuedChunks.Add(Chunk);
-		}
+		return;
 	}
 
-	QueuedChunks.Sort([CameraLocation](const ASmoothVoxelTransvoxelChunk& A, const ASmoothVoxelTransvoxelChunk& B)
+	QueuedChunkBuilds.RemoveAll([this](const TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>& WeakChunk)
 	{
-		return FVector::DistSquared(A.GetActorLocation(), CameraLocation) <
-			FVector::DistSquared(B.GetActorLocation(), CameraLocation);
+		ASmoothVoxelTransvoxelChunk* Chunk = WeakChunk.Get();
+		return !IsValid(Chunk) ||
+			!DesiredNodes.Contains(Chunk->GetNode()) ||
+			!Chunk->IsBuildQueued() ||
+			Chunk->IsBuildInProgress();
 	});
 
-	// More worker tasks increase CPU contention and bunch up render-resource
-	// uploads. Keep a small fixed ceiling; completed mesh commits are separately
-	// budgeted to one per frame.
-	const int32 Limit = FMath::Clamp(MaxConcurrentBuilds, 1, 2);
-	for (ASmoothVoxelTransvoxelChunk* Chunk : QueuedChunks)
+	if (QueuedChunkBuilds.Num() == 0)
 	{
-		if (InFlightCount >= Limit)
-		{
-			break;
-		}
-		if (IsValid(Chunk) && Chunk->IsBuildQueued() && !Chunk->IsBuildInProgress())
+		return;
+	}
+
+	// Sort far-to-near so Pop() launches the nearest requests first. Sorting is
+	// only performed when a worker slot is available, not every frame.
+	QueuedChunkBuilds.Sort([CameraLocation](
+		const TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>& A,
+		const TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>& B)
+	{
+		return FVector::DistSquared(A->GetActorLocation(), CameraLocation) >
+			FVector::DistSquared(B->GetActorLocation(), CameraLocation);
+	});
+
+	while (InFlightMeshBuildCount < Limit && QueuedChunkBuilds.Num() > 0)
+	{
+		TWeakObjectPtr<ASmoothVoxelTransvoxelChunk> WeakChunk = QueuedChunkBuilds.Pop(false);
+		ASmoothVoxelTransvoxelChunk* Chunk = WeakChunk.Get();
+		if (IsValid(Chunk) && DesiredNodes.Contains(Chunk->GetNode()) &&
+			Chunk->IsBuildQueued() && !Chunk->IsBuildInProgress())
 		{
 			Chunk->StartQueuedBuild();
-			++InFlightCount;
+			++InFlightMeshBuildCount;
 		}
 	}
 }
@@ -747,6 +798,13 @@ bool ASmoothVoxelOctreeWorld::AreDesiredChunksReady() const
 
 void ASmoothVoxelOctreeWorld::RetireUndesiredChunks(int32 MaxChunksToRetire)
 {
+	// After a stable selection every desired node has one actor. Avoid walking
+	// the full map each frame when there are no obsolete chunks to retire.
+	if (ActiveChunks.Num() <= DesiredNodes.Num())
+	{
+		return;
+	}
+
 	int32 RetiredCount = 0;
 	const int32 Budget = FMath::Clamp(MaxChunksToRetire, 1, 16);
 
