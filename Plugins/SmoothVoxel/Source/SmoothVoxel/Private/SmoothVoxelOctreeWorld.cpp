@@ -537,7 +537,7 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 	const float RiverHalfWidthForGrid = FMath::Max(
 		250.0f, FMath::Abs(InGenerationSettings.RiverHalfWidth));
 	const int32 ResolutionForRiverWidth = InGenerationSettings.bEnableRivers
-		? FMath::CeilToInt(SafeWorldSize / RiverHalfWidthForGrid)
+		? FMath::CeilToInt(SafeWorldSize / (RiverHalfWidthForGrid * 0.5f))
 		: 16;
 	const int32 SafeResolution = FMath::Clamp(
 		FMath::Max(RequestedResolution, ResolutionForRiverWidth), 16, 4096);
@@ -1536,6 +1536,8 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.Seed = Seed;
 	Settings.bEnableBiomes = bEnableBiomes;
 	Settings.BiomeScale = BiomeScale;
+	Settings.BiomeWorldCenter = RootWorldCenter;
+	Settings.BiomeWorldSize = GetWorldSizeCentimeters();
 	Settings.bEnablePOIPlateaus = bEnablePOIPlateaus;
 	Settings.POISiteSpacing = POISiteSpacing;
 	Settings.POIPlateauRadius = POIPlateauRadius;
@@ -2920,6 +2922,8 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 		BiomeSettings.Seed = Seed;
 		BiomeSettings.bEnableBiomes = bEnableBiomes;
 		BiomeSettings.BiomeScale = BiomeScale;
+		BiomeSettings.BiomeWorldCenter = RootWorldCenter;
+		BiomeSettings.BiomeWorldSize = GetWorldSizeCentimeters();
 		const double ChunkCenterX = static_cast<double>(ChunkOrigin->X) +
 			static_cast<double>(DesiredCellsPerAxis) * static_cast<double>(*VoxelSize) * 0.5;
 		const double ChunkCenterY = static_cast<double>(ChunkOrigin->Y) +
