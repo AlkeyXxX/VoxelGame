@@ -168,10 +168,16 @@ public:
 		float InTileSize,
 		int32 InResolution,
 		UMaterialInterface* InMaterial,
+		const FSVoxelGenerationSettings& InGenerationSettings,
 		bool bEnableCollision);
 
 private:
-	void BuildSurfaceMesh(float WorldSize, float InTileSize, int32 InResolution, bool bEnableCollision);
+	void BuildSurfaceMesh(
+		float WorldSize,
+		float InTileSize,
+		int32 InResolution,
+		const FSVoxelGenerationSettings& GenerationSettings,
+		bool bEnableCollision);
 
 	UPROPERTY()
 	UMaterialInterface* FallbackWaterMaterial = nullptr;
@@ -184,6 +190,7 @@ private:
 	float ConfiguredSeaLevel = 0.0f;
 	float ConfiguredTileSize = 5000.0f;
 	int32 ConfiguredResolution = 0;
+	FSVoxelGenerationSettings ConfiguredGenerationSettings;
 	bool bConfiguredCollision = false;
 	bool bHasConfiguration = false;
 };
@@ -320,6 +327,20 @@ public:
 	/** Assign a project water material here. Starter Content water is used if available. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
 	UMaterialInterface* WaterMaterial = nullptr;
+
+	/** Enable seed-stable river valleys and matching water ribbons. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	bool bEnableRivers = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.000001", ClampMax="0.00005"))
+	float RiverScale = 0.00001f;
+
+	/** Approximate river half-width in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
+	float RiverHalfWidth = 7500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", Units="cm"))
+	float RiverDepth = 350.0f;
 
 	/** Enables deterministic forest/plains/desert/mountain/snow terrain masks. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
