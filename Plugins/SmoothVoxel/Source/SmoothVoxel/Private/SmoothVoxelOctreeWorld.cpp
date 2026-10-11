@@ -696,9 +696,9 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	// It removes terrain-frequency bumps from the visible water while preserving
 	// the broad downhill profile of the river valley.
 	const int32 SmoothingRadius = FMath::Clamp(
-		FMath::RoundToInt(20000.0f / FMath::Max(1.0f, Step)),
-		6,
-		12);
+		FMath::RoundToInt(25000.0f / FMath::Max(1.0f, Step)),
+		8,
+		16);
 	for (int32 Y = 0; Y <= Resolution; ++Y)
 	{
 		for (int32 X = 0; X <= Resolution; ++X)
@@ -777,10 +777,10 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 		const float WC = RiverWeights[C];
 		const float Average = (WA + WB + WC) / 3.0f;
 		const int32 NearChannelVertices =
-			(WA >= 0.18f ? 1 : 0) +
-			(WB >= 0.18f ? 1 : 0) +
-			(WC >= 0.18f ? 1 : 0);
-		return Average >= 0.22f && NearChannelVertices >= 2;
+			(WA >= 0.14f ? 1 : 0) +
+			(WB >= 0.14f ? 1 : 0) +
+			(WC >= 0.14f ? 1 : 0);
+		return Average >= 0.18f && NearChannelVertices >= 2;
 	};
 
 	for (int32 Y = 0; Y < Resolution; ++Y)
