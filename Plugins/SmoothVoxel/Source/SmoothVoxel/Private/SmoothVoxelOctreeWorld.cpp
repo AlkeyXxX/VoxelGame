@@ -1175,6 +1175,37 @@ void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(
 	}
 }
 
+void ASmoothVoxelOctreeWorld::SchedulePostMiningMeshRepair(const FIntVector& Cell)
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	// Mining changes a global density snapshot while nearby chunk meshes are
+	// rebuilt asynchronously. Run one follow-up repair after the edits have
+	// settled; each committed mesh rechecks triangle winding against the latest
+	// density field and fixes faces that would otherwise be back-face culled.
+	const TWeakObjectPtr<ASmoothVoxelOctreeWorld> WeakThis(this);
+	FTimerHandle RepairTimer;
+	GetWorld()->GetTimerManager().SetTimer(
+		RepairTimer,
+		FTimerDelegate::CreateLambda([WeakThis, Cell]()
+		{
+			if (!WeakThis.IsValid())
+			{
+				return;
+			}
+			ASmoothVoxelOctreeWorld* World = WeakThis.Get();
+			if (World && World->GetWorld())
+			{
+				World->RebuildChunksNearEditedCell(Cell, false);
+			}
+			}),
+		0.5f,
+		false);
+}
+
 void ASmoothVoxelOctreeWorld::RemoveBlockAtWorld(const FVector& WorldPosition)
 {
 	ApplyBlockCellEdit(WorldPositionToBlockCell(WorldPosition), EVoxelBlock::Air);
@@ -1282,6 +1313,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		{
 			Inventory->AddBlock(DropBlock, 1);
 		}
+		SchedulePostMiningMeshRepair(Cell);
 		return true;
 	}
 
@@ -1297,6 +1329,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	MinedNodeSnapshot =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
 	RebuildChunksNearEditedCell(MinedCell, false);
+	SchedulePostMiningMeshRepair(MinedCell);
 
 	if (Inventory && DropBlock != EVoxelBlock::Air)
 	{
