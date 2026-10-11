@@ -77,21 +77,27 @@ at all six face orientations and edge/corner combinations.
 ## Mining and block placement in the smooth-world path
 
 The opt-in `ASmoothVoxelOctreeWorld` has its own sparse runtime edit overlay; it
-does not reuse the legacy world's block save format. Mining uses a hit-centred
-octahedral density edit instead of carving a whole axis-aligned cell. Repeated
-hits expand the diamond-shaped recess through five stages, so a single hit creates
-a small dent rather than an immediate square pit. The edit center is stored with
-the immutable worker snapshot so chunk rebuilds and LOD transitions reproduce the
-same excavation. The interaction probes both sides of the collision normal and
-chooses the side whose signed density says it is solid, fixing underside mining
-when collision winding is ambiguous.
+does not reuse the legacy world's block save format. Terrain mining progress is
+keyed by the nearest solid density-grid node, not a fractional ray-hit cell.
+Each hit adds `TerrainMiningToolDamage` divided by the selected block's DataTable
+durability. When progress reaches 100%, that node is added to an immutable mined
+node snapshot, and a voxel-sized octahedral cut is centred exactly on the lattice
+point. Placement edits remain in a separate map, so a mined node cannot overwrite
+a hard-block reservation at the same integer key.
 
-Triangles next to edited density are oriented by probing solid/air density on
-both sides of their centroid; ordinary terrain retains the faster averaged-normal
-path. Mesh emission also rejects triangles that collapse after index deduplication.
-Terrain UVs use dominant-axis planar projection (XY on floors, XZ/YZ on walls)
-instead of projecting every surface onto XY, which previously stretched textures
-into long stripes on vertical pit walls.
+Before accepting procedural-mesh collision, the interaction checks that the hit
+normal straddles the current signed-density surface. A stale asynchronous collision
+face is ignored and the interaction ray marches the current density snapshot instead.
+Mined nodes also use a smaller gradient radius for surface normals. Triangle winding
+is corrected per emitted triangle from its geometric cross and outward shading
+normal, with a local-gradient fallback at sharp edited corners. Vertex welding uses
+0.01 cm quantization to preserve close intersections around hard-cube cavities.
+
+Terrain UVs use one world-space repeat scale and choose the planar projection for
+the whole triangle, with separate vertex caches for XY floors, XZ walls and YZ
+walls. This prevents a shared vertex from inheriting UVs from whichever surface
+orientation happened to be emitted first. Material-level triplanar blending remains
+a better long-term option for smoothly transitioning across steep slopes.
 
 Placed `Dirt` and `Sand` are rounded, blended SDF additions to the smooth
 landscape. Other placeable block types (for example `Grass`, `Stone`, and
@@ -114,8 +120,9 @@ into the landscape before treating the change as runtime validated.
 `FSVoxelTransvoxelMesher::AppendCellToMesh` retains outward shading normals but
 orders triangle indices using Unreal's front-face convention. A mismatch here
 can make a one-sided procedural surface visible only from below and interfere
-with triangle-mesh collision. The flat-field automation test checks the index
-winding separately from the stored outward normals.
+with triangle-mesh collision. Edited-mesh tests check each triangle against the
+averaged outward vertex normal and check indices/areas after repeated mined-node
+edits and hard-cube cavity generation.
 
 ## Runtime tuning notes
 
@@ -167,19 +174,15 @@ winding separately from the stored outward normals.
   workers, and a one-mesh-section-per-frame commit budget. These safeguards
   reduce repeated rebuilds and completion bursts but cannot guarantee zero
   frame-time cost for every terrain/material configuration.
-- UVs use dominant-axis world-space planar projection: XY for horizontal faces,
-  XZ for Y-facing walls and YZ for X-facing walls. Vertical walls use a tighter
-  repeat (one tile per 400 cm versus 2000 cm on floors) to prevent texture scale
-  from looking oversized in pits. Coordinates are reconstructed from the chunk's
-  integer lattice origin in double precision and rebased by integer tile offsets.
-  Axis changes on strongly sloped surfaces can still produce projection seams;
-  true material-level triplanar blending remains the better long-term solution.
-- Tangents are derived from the UV0 world-XY projection and the smoothed surface
-  normal, rather than accumulated independently from each cell's triangle list.
-  Duplicate vertices at adjacent cells therefore get the same tangent frame,
-  which should prevent normal-map lighting from producing cell-sized dark squares.
-  A near-vertical wall is singular for XY projection; use a triplanar material
-  for cliffs/caves. The UE4.27 material result still needs local verification.
+- UVs use per-triangle world-space planar projection at a single repeat scale
+  (one tile per 800 cm): XY for horizontal faces, XZ for Y-facing walls and YZ
+  for X-facing walls. Chunk origins are rebased in double precision to keep GPU UVs
+  bounded. Separate caches avoid sharing one vertex between incompatible UV axes.
+  True material-level triplanar blending remains the best option for smooth
+  texture transitions over strongly sloped terrain.
+- Tangents are derived from the same planar projection as each vertex's UVs and
+  the smoothed surface normal. The UE4.27 material and normal-map result still
+  needs local verification.
 - `BaseHeight=900` places the average surface at about Z=900 cm. With
   `HeightAmplitude=850` and `DetailAmplitude=60`, a test PlayerStart should be
   placed above roughly Z=2000 cm, with additional clearance for the capsule.
