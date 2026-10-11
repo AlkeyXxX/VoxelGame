@@ -251,6 +251,49 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Rendering")
 	UMaterialInterface* TerrainMaterial = nullptr;
 
+	/** Enables deterministic forest/plains/desert/mountain/snow terrain masks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	bool bEnableBiomes = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes", meta=(ClampMin="0.00000005", ClampMax="0.00001"))
+	float BiomeScale = 0.00000065f;
+
+	/** Reserve many seed-stable clearings for future POI placement. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(DisplayName="Generate POI Plateaus"))
+	bool bEnablePOIPlateaus = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(ClampMin="20000.0", Units="cm"))
+	float POISiteSpacing = 65000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(ClampMin="0.0", Units="cm"))
+	float POIPlateauRadius = 6500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(ClampMin="0.0", Units="cm"))
+	float POIPlateauBlendDistance = 5000.0f;
+
+	/** Optional overrides. Unassigned entries fall back to TerrainMaterial. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* PlainsBiomeMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* ForestBiomeMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* DesertBiomeMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* MountainBiomeMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* SnowBiomeMaterial = nullptr;
+
+	UFUNCTION(BlueprintPure, Category="Voxel|Biomes")
+	ESVoxelBiome GetBiomeAtWorldPosition(const FVector& WorldPosition) const;
+
+	/** Returns 0..1; high values are generated flat clearings suitable for POIs. */
+	UFUNCTION(BlueprintPure, Category="Voxel|POI")
+	float GetPOISuitabilityAtWorldPosition(const FVector& WorldPosition) const;
+
 	UFUNCTION(BlueprintCallable, Category="Voxel|Streaming")
 	void RegenerateWorld();
 
