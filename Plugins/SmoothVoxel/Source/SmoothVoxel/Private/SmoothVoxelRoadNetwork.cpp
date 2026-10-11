@@ -121,12 +121,37 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 continue;
             }
             const FIntPoint SiteCell(GridX, GridY);
-            Sites.Add(SiteCell, Site);
+            float LakeInfluence = 0.0f;
+            float LakeLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
+            if (GenerationSettings.bEnableLakes)
+            {
+                FSVoxelGenerator::SampleLakeMaskAndLevel(
+                    static_cast<double>(Site.X),
+                    static_cast<double>(Site.Y),
+                    GenerationSettings,
+                    LakeInfluence,
+                    LakeLevel);
+            }
+
+            // Do not reserve POI gateways on lake surfaces. The surrounding
+            // roads can connect to the next viable site instead of dead-ending
+            // at a site that cannot host a future structure.
+            if (LakeInfluence >= 0.10f)
+            {
+                continue;
+            }
+
             if (GenerationSettings.bEnablePOIPlateaus &&
                 FSVoxelGenerator::SamplePOISuitability(
                     static_cast<double>(Site.X),
                     static_cast<double>(Site.Y),
-                    GenerationSettings) > 0.25f)
+                    GenerationSettings) <= 0.25f)
+            {
+                continue;
+            }
+
+            Sites.Add(SiteCell, Site);
+            if (GenerationSettings.bEnablePOIPlateaus)
             {
                 POIRingSites.Add(SiteCell);
             }
@@ -142,6 +167,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     int32 RoadSegmentCount = 0;
     int32 TotalRoadSamples = 0;
+    int32 SkippedRouteCount = 0;
+    int32 BuiltBridgeCount = 0;
+    int32 SkippedUnsafeBridgeCount = 0;
     const int32 SamplesPerRoad = FMath::Max(
         2, FMath::CeilToInt(static_cast<float>(Spacing / SafeSampleSpacing)));
     const int32 ExpectedSamples = FMath::Clamp(
@@ -172,10 +200,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const int32 WorldGridMinY = FMath::CeilToInt(MinY / RouteGridStep);
     const int32 WorldGridMaxY = FMath::FloorToInt(MaxY / RouteGridStep);
     const double MaxRouteGrade = 0.30; // Preferred maximum for ordinary road segments.
-    const double SiteConnectionRadius =
+    const double SiteConnectionRadius = FMath::Min(
         std::abs(static_cast<double>(GenerationSettings.POIPlateauRadius)) +
-        std::abs(static_cast<double>(GenerationSettings.POIPlateauBlendDistance)) +
-        HalfRoadWidth + RouteGridStep * 0.75;
+            std::abs(static_cast<double>(GenerationSettings.POIPlateauBlendDistance)) +
+            HalfRoadWidth + RouteGridStep * 0.75,
+        Spacing * 0.45);
 
     struct FRoadGridSample
     {
@@ -469,7 +498,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     const bool bCrossRiver = bHasRiverTangent &&
                         RiverBank > 0.12f &&
                         (RiverInfluence > 0.03f || RiverBank > 0.20f) &&
-                        ParallelAmount < 0.75;
+                        ParallelAmount < 0.82;
                     // Permit large terrain-height deltas only for a near-perpendicular
                     // river crossing; the resulting path is replaced by a bank-to-bank
                     // bridge deck after routing.
@@ -563,9 +592,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         TArray<FVector2D> RoutePoints;
         if (!FindSafeRoute(RouteStart, RouteEnd, RoutePoints))
         {
+            ++SkippedRouteCount;
             UE_LOG(LogTemp, Verbose,
-                TEXT("SmoothVoxel roads: skipped blocked route from site (%d,%d)."),
-                GridCell.X, GridCell.Y);
+                TEXT("SmoothVoxel roads: could not route from site (%d,%d) to (%d,%d)."),
+                GridCell.X, GridCell.Y, OtherGridCell.X, OtherGridCell.Y);
             return;
         }
 
@@ -679,7 +709,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             bBridgeCrossing[SampleIndex] =
                 (RiverInfluences[SampleIndex] > 0.02f ||
                  RiverBankInfluences[SampleIndex] > 0.35f) &&
-                ParallelAmount < 0.65 ? 1 : 0;
+                ParallelAmount < 0.80 ? 1 : 0;
         }
 
         // Raise the whole short crossing corridor to a smooth bank-to-bank deck,
@@ -728,12 +758,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         RoadLifts[DeckIndex],
                         FMath::Max(0.0, DeckHeight - GroundHeights[DeckIndex]));
                 }
+                ++BuiltBridgeCount;
             }
             else
             {
                 UE_LOG(LogTemp, Verbose,
                     TEXT("SmoothVoxel roads: omitted an unsafe river crossing (span %.0f cm, bank delta %.0f cm)."),
                     SpanLength, BankHeightDifference);
+                ++SkippedUnsafeBridgeCount;
                 RoadLifts[RunStart] = -1.0;
             }
             ++CandidateIndex;
@@ -876,34 +908,71 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         TotalRoadSamples += SampleCount + 1;
     };
 
+    // Connect each viable POI to the next viable site along the cardinal
+    // axes, skipping up to two unsuitable/mountain/lake cells. Without this,
+    // any rejected POI site severed the entire road row and created short stubs.
+    const int32 MaxSiteLinkGap = 3;
+    const int32 CardinalDirections[2][2] = { { 1, 0 }, { 0, 1 } };
     for (int32 GridY = MinGridY; GridY <= MaxGridY; ++GridY)
     {
         for (int32 GridX = MinGridX; GridX <= MaxGridX; ++GridX)
         {
-            const FVector2D* Site = Sites.Find(FIntPoint(GridX, GridY));
+            const FIntPoint SiteCell(GridX, GridY);
+            const FVector2D* Site = Sites.Find(SiteCell);
             if (!Site)
             {
                 continue;
             }
 
-            if (const FVector2D* EastSite = Sites.Find(FIntPoint(GridX + 1, GridY)))
+            for (const auto& Direction : CardinalDirections)
             {
-                BuildSegment(
-                    FIntPoint(GridX, GridY), FIntPoint(GridX + 1, GridY),
-                    *Site, *EastSite, true);
+                for (int32 Hop = 1; Hop <= MaxSiteLinkGap; ++Hop)
+                {
+                    const FIntPoint CandidateCell(
+                        GridX + Direction[0] * Hop,
+                        GridY + Direction[1] * Hop);
+                    const FVector2D* CandidateSite = Sites.Find(CandidateCell);
+                    if (!CandidateSite)
+                    {
+                        continue;
+                    }
+
+                    BuildSegment(SiteCell, CandidateCell, *Site, *CandidateSite, true);
+                    break;
+                }
             }
-            if (const FVector2D* NorthSite = Sites.Find(FIntPoint(GridX, GridY + 1)))
+
+            // When a mountain/lake removes both immediate neighbours, allow
+            // a diagonal bypass to connect the viable road graph around the gap.
+            const bool bHasEast = Sites.Contains(SiteCell + FIntPoint(1, 0));
+            const bool bHasNorth = Sites.Contains(SiteCell + FIntPoint(0, 1));
+            if (!bHasEast && !bHasNorth)
             {
-                BuildSegment(
-                    FIntPoint(GridX, GridY), FIntPoint(GridX, GridY + 1),
-                    *Site, *NorthSite, true);
+                const int32 DiagonalDirections[2][2] = { { 1, 1 }, { -1, 1 } };
+                for (const auto& Direction : DiagonalDirections)
+                {
+                    for (int32 Hop = 1; Hop <= MaxSiteLinkGap; ++Hop)
+                    {
+                        const FIntPoint CandidateCell(
+                            GridX + Direction[0] * Hop,
+                            GridY + Hop);
+                        const FVector2D* CandidateSite = Sites.Find(CandidateCell);
+                        if (!CandidateSite)
+                        {
+                            continue;
+                        }
+
+                        BuildSegment(SiteCell, CandidateCell, *Site, *CandidateSite, true);
+                        break;
+                    }
+                }
             }
         }
     }
 
-    // An eight-way ring connects all cardinal road gates outside each reserved
-    // POI plateau. Without these links, each incoming road used to stop at the
-    // plateau setback and stayed disconnected from the other roads at that site.
+    // A sixteen-point ring connects cardinal and jittered-angle road gates
+    // outside each reserved POI plateau, keeping long approaches connected even
+    // when seed-stable site jitter makes the route angle slightly non-cardinal.
     if (GenerationSettings.bEnablePOIPlateaus && POIRingSites.Num() > 0)
     {
         for (const FIntPoint& SiteCell : POIRingSites)
@@ -914,19 +983,20 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 continue;
             }
 
-            FVector2D RingPoints[8];
-            for (int32 RingIndex = 0; RingIndex < 8; ++RingIndex)
+            constexpr int32 RingPointCount = 16;
+            FVector2D RingPoints[RingPointCount];
+            for (int32 RingIndex = 0; RingIndex < RingPointCount; ++RingIndex)
             {
                 const double Angle = static_cast<double>(RingIndex) *
-                    0.7853981633974483; // 45 degrees.
+                    0.39269908169872415; // 22.5 degrees.
                 RingPoints[RingIndex] = FVector2D(
                     static_cast<float>(Site->X + std::cos(Angle) * SiteConnectionRadius),
                     static_cast<float>(Site->Y + std::sin(Angle) * SiteConnectionRadius));
             }
 
-            for (int32 RingIndex = 0; RingIndex < 8; ++RingIndex)
+            for (int32 RingIndex = 0; RingIndex < RingPointCount; ++RingIndex)
             {
-                const int32 NextRingIndex = (RingIndex + 1) % 8;
+                const int32 NextRingIndex = (RingIndex + 1) % RingPointCount;
                 BuildSegment(
                     SiteCell, SiteCell,
                     RingPoints[RingIndex], RingPoints[NextRingIndex], false);
@@ -958,6 +1028,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
 
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads: generated %d road segments, %d sites and %d route samples."),
-        RoadSegmentCount, Sites.Num(), TotalRoadSamples);
+        TEXT("SmoothVoxel roads: generated %d road segments from %d viable sites (%d samples), %d bridges; skipped %d blocked routes and %d unsafe bridge spans."),
+        RoadSegmentCount, Sites.Num(), TotalRoadSamples, BuiltBridgeCount,
+        SkippedRouteCount, SkippedUnsafeBridgeCount);
 }
