@@ -97,6 +97,10 @@ namespace
 
         // The 0.55-cell half extent slightly overlaps neighbouring cell volumes,
         // so check the 3x3x3 neighbourhood at boundaries. Never scan the full map.
+        int8 CandidateStates[27];
+        double CandidateBoxSdfs[27];
+        int32 CandidateCount = 0;
+
         for (int32 DZ = -1; DZ <= 1; ++DZ)
         {
             for (int32 DY = -1; DY <= 1; ++DY)
@@ -124,18 +128,28 @@ namespace
                     const double InsideDistance = FMath::Min(
                         FMath::Max(QX, FMath::Max(QY, QZ)),
                         0.0);
-                    const double BoxSdf = OutsideDistance + InsideDistance;
 
-                    if (*EditState > 0)
-                    {
-                        // Union a solid box with the generated terrain.
-                        Density = FMath::Max(Density, static_cast<float>(-BoxSdf));
-                    }
-                    else
-                    {
-                        // Subtract the box from the generated terrain.
-                        Density = FMath::Min(Density, static_cast<float>(BoxSdf));
-                    }
+                    CandidateStates[CandidateCount] = *EditState;
+                    CandidateBoxSdfs[CandidateCount] = OutsideDistance + InsideDistance;
+                    ++CandidateCount;
+                }
+            }
+        }
+
+        // Always union placed solids first and subtract carved cells second.
+        // This makes breaking win at the tiny overlaps between adjacent cells.
+        for (int32 Pass = 0; Pass < 2; ++Pass)
+        {
+            for (int32 Index = 0; Index < CandidateCount; ++Index)
+            {
+                const double BoxSdf = CandidateBoxSdfs[Index];
+                if (Pass == 0 && CandidateStates[Index] > 0)
+                {
+                    Density = FMath::Max(Density, static_cast<float>(-BoxSdf));
+                }
+                else if (Pass == 1 && CandidateStates[Index] < 0)
+                {
+                    Density = FMath::Min(Density, static_cast<float>(BoxSdf));
                 }
             }
         }
