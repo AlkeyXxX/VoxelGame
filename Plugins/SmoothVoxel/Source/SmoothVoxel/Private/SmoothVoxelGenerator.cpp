@@ -444,6 +444,62 @@ float FSVoxelGenerator::SampleTerrainNoise(
         Settings.Seed);
 }
 
+void FSVoxelGenerator::SampleBiomeRegionWeights(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    float& OutDesertWeight,
+    float& OutWinterWeight,
+    float& OutTemperateWeight)
+{
+    OutDesertWeight = 0.0f;
+    OutWinterWeight = 0.0f;
+    OutTemperateWeight = 1.0f;
+    if (!S.bEnableBiomes)
+    {
+        return;
+    }
+
+    const double HalfWorldSize = FMath::Max(
+        1000.0, std::abs(static_cast<double>(S.BiomeWorldSize)) * 0.5);
+    const double NX = (X - static_cast<double>(S.BiomeWorldCenter.X)) / HalfWorldSize;
+    const double NY = (Y - static_cast<double>(S.BiomeWorldCenter.Y)) / HalfWorldSize;
+
+    const auto SmoothStep = [](double Edge0, double Edge1, double Value)
+    {
+        const double T = FMath::Clamp(
+            (Value - Edge0) / FMath::Max(0.000001, Edge1 - Edge0), 0.0, 1.0);
+        return T * T * (3.0 - 2.0 * T);
+    };
+
+    // One large, rounded central temperate region. Low-frequency warp adds
+    // broad lobes so its edge is irregular, but never breaks into scattered islands.
+    const double CentralEdgeNoise = FBM2D(
+        NX * 3.2 + 13.7, NY * 2.7 - 8.4, S.Seed + 4811);
+    const double CentralDetailNoise = FBM2D(
+        NX * 6.1 - 4.3, NY * 5.4 + 11.9, S.Seed + 4819);
+    const double CentralRadius = 0.54 +
+        CentralEdgeNoise * 0.045 + CentralDetailNoise * 0.018;
+    const double RadialDistance = std::sqrt(
+        NX * NX * 0.96 * 0.96 + NY * NY * 1.04 * 1.04);
+    const double OutsideCentral = SmoothStep(
+        CentralRadius - 0.04, CentralRadius + 0.04, RadialDistance);
+
+    // Split the outer map into desert on the left and winter on the right,
+    // using broad and fine warp so the boundary curves across the top and bottom.
+    const double MainBorderWarp = FBM2D(
+        NX * 1.8 + 22.1, NY * 2.4 - 17.3, S.Seed + 4829);
+    const double SmallBorderWarp = FBM2D(
+        NX * 5.0 - 9.7, NY * 4.2 + 3.6, S.Seed + 4831);
+    const double SplitX = 0.015 + MainBorderWarp * 0.14 + SmallBorderWarp * 0.035;
+    const double DesertSide = 1.0 - SmoothStep(
+        SplitX - 0.045, SplitX + 0.045, NX);
+
+    OutDesertWeight = static_cast<float>(OutsideCentral * DesertSide);
+    OutWinterWeight = static_cast<float>(OutsideCentral * (1.0 - DesertSide));
+    OutTemperateWeight = static_cast<float>(1.0 - OutsideCentral);
+}
+
 ESVoxelBiome FSVoxelGenerator::SampleBiome(
     double X,
     double Y,
@@ -454,28 +510,30 @@ ESVoxelBiome FSVoxelGenerator::SampleBiome(
         return ESVoxelBiome::Plains;
     }
 
-    float Temperature = 0.0f;
-    float Moisture = 0.0f;
-    float MountainSignal = 0.0f;
-    SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
+    float DesertWeight = 0.0f;
+    float WinterWeight = 0.0f;
+    float TemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
 
-    if (Temperature < -0.38f || (MountainSignal > 0.26f && Temperature < -0.08f))
+    // Material selection is discrete, but the geography is map-relative and
+    // contiguous. The terrain surface itself uses continuous weights.
+    if (TemperateWeight < 0.5f)
     {
-        return ESVoxelBiome::Snow;
+        return DesertWeight >= WinterWeight
+            ? ESVoxelBiome::Desert
+            : ESVoxelBiome::Snow;
     }
-    if (Temperature > 0.18f && Moisture < 0.05f)
-    {
-        return ESVoxelBiome::Desert;
-    }
-    if (MountainSignal > FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f))
-    {
-        return ESVoxelBiome::Mountain;
-    }
-    if (Moisture > 0.12f)
-    {
-        return ESVoxelBiome::Forest;
-    }
-    return ESVoxelBiome::Plains;
+
+    const double HalfWorldSize = FMath::Max(
+        1000.0, std::abs(static_cast<double>(S.BiomeWorldSize)) * 0.5);
+    const double NX = (X - static_cast<double>(S.BiomeWorldCenter.X)) / HalfWorldSize;
+    const double NY = (Y - static_cast<double>(S.BiomeWorldCenter.Y)) / HalfWorldSize;
+
+    // Plains and forest form a small set of large coherent patches in the centre.
+    const float ForestSignal = FBM2D(
+        NX * 3.0 + 7.1, NY * 3.0 - 9.3, S.Seed + 4849);
+    return ForestSignal > 0.02f ? ESVoxelBiome::Forest : ESVoxelBiome::Plains;
 }
 
 float FSVoxelGenerator::SampleFlatlandInfluence(
@@ -523,6 +581,9 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     float Moisture = 0.0f;
     float MountainSignal = 0.0f;
     SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
+    (void)Temperature;
+    (void)Moisture;
+
     const auto SmoothStep = [](float Edge0, float Edge1, float Value)
     {
         const float T = FMath::Clamp(
@@ -530,15 +591,15 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         return T * T * (3.0f - 2.0f * T);
     };
 
-    // Biome classification remains discrete for labels/materials, but it must
-    // not select height terms through a hard branch. A binary desert switch
-    // used to remove up to MountainHeight in one step, making broad deserts
-    // look like craters surrounded by abrupt mountain walls. Blend desert
-    // climate continuously so terrain relief fades through a broad transition.
-    const float DesertBlend = S.bEnableBiomes
-        ? SmoothStep(0.08f, 0.28f, Temperature) *
-            (1.0f - SmoothStep(-0.10f, 0.18f, Moisture))
-        : 0.0f;
+    // Terrain relief uses continuous map-relative weights to remain smooth
+    // at regional edges; material biome IDs never switch terrain height abruptly.
+    float DesertBlend = 0.0f;
+    float WinterBlend = 0.0f;
+    float TemperateBlend = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S, DesertBlend, WinterBlend, TemperateBlend);
+    (void)WinterBlend;
+    (void)TemperateBlend;
 
     const float NonDesertHillCoverage = FMath::Clamp(
         1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
@@ -745,7 +806,7 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
 
     // Convert world-space channel width into a dimensionless band around the
     // field's zero-contour. Smooth falloff avoids hard cliffs at the carved banks.
-    const double Threshold = FMath::Clamp(HalfWidth * Scale * 1.6, 0.0001, 0.20);
+    const double Threshold = FMath::Clamp(HalfWidth * Scale * 2.0, 0.0001, 0.20);
     const float T = FMath::Clamp(
         static_cast<float>(std::abs(Field) / Threshold),
         0.0f,
@@ -760,8 +821,15 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
         OutInfluence = 0.0f;
         return;
     }
-    // A smooth shared mask keeps rivers entirely inside the broad flat regions.
-    OutInfluence *= SampleFlatlandInfluence(X, Y, S);
+    // Rivers are gated to clearly low-relief areas, not the shoulders of hills.
+    const float Flatness = SampleFlatlandInfluence(X, Y, S);
+    if (Flatness <= 0.72f)
+    {
+        OutInfluence = 0.0f;
+        return;
+    }
+    const float FlatGroundGate = FMath::Clamp((Flatness - 0.72f) / 0.20f, 0.0f, 1.0f);
+    OutInfluence *= FlatGroundGate * FlatGroundGate * (3.0f - 2.0f * FlatGroundGate);
 }
 
 float FSVoxelGenerator::SampleRiverInfluence(
@@ -837,7 +905,26 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
 
     const double DX = X - SiteX;
     const double DY = Y - SiteY;
-    const double Distance = std::sqrt(DX * DX + DY * DY);
+    const uint32 ShapeHash = HashLattice2D(GridX, GridY, S.Seed + 7477);
+    const double Angle = static_cast<double>(ShapeHash & 0xFFFFu) /
+        65535.0 * 6.283185307179586;
+    const double AxisX = 0.72 + static_cast<double>((ShapeHash >> 16) & 0xFFu) / 255.0 * 0.53;
+    const double AxisY = 1.0 / AxisX;
+    const double CosAngle = std::cos(Angle);
+    const double SinAngle = std::sin(Angle);
+    const double RotatedX = DX * CosAngle + DY * SinAngle;
+    const double RotatedY = -DX * SinAngle + DY * CosAngle;
+    const double EllipseDistance = std::sqrt(
+        (RotatedX / AxisX) * (RotatedX / AxisX) +
+        (RotatedY / AxisY) * (RotatedY / AxisY));
+
+    // Stable per-site ellipse parameters plus subtle radial warp add bays and
+    // peninsulas, avoiding both perfect circles and identical lake outlines.
+    const double ShoreNoise = FBM2D(
+        DX / Radius * 1.8 + 17.2,
+        DY / Radius * 1.8 - 6.8,
+        S.Seed + static_cast<int32>(ShapeHash & 0x7FFFu) + 7481);
+    const double Distance = EllipseDistance / (1.0 + ShoreNoise * 0.085);
     if (Distance >= Radius + Blend)
     {
         return;
