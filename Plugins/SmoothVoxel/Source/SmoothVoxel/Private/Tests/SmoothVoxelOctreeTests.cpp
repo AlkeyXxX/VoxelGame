@@ -408,11 +408,14 @@ bool FSmoothVoxelMiningCellCutTest::RunTest(const FString& Parameters)
 	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedCells =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
 	MinedCells->Add(FIntVector(0, 0, 0));
+	MinedCells->Add(FIntVector(0, 0, -1));
 	Settings.MinedNodes = MinedCells;
 
 	const float InsideCut = FSVoxelGenerator::SampleDensity(50.0, 50.0, 50.0, Settings);
+	const float NextVerticalCell = FSVoxelGenerator::SampleDensity(50.0, 50.0, -50.0, Settings);
 	const float AdjacentCell = FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, Settings);
 	TestTrue(TEXT("The selected voxel cell becomes air"), InsideCut < 0.0f);
+	TestTrue(TEXT("The next cell down in the same column becomes air"), NextVerticalCell < 0.0f);
 	TestTrue(TEXT("The neighbouring cell remains solid"), AdjacentCell > 0.0f);
 
 	FSVoxelGenerationSettings PlacementSettings = Settings;
