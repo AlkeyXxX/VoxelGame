@@ -60,7 +60,6 @@ namespace
 
 	FVector TransitionSampleToChunkLocal(
 		uint8 FaceBit,
-		uint8 TransitionFaceMask,
 		int32 CellU,
 		int32 CellV,
 		int32 CellsPerAxis,
@@ -620,7 +619,7 @@ void FSVoxelTransvoxelMesher::Generate(
 				for (int32 I = 0; I < 13; ++I)
 				{
 					SamplePositions[I] = TransitionSampleToChunkLocal(
-						FaceBit, TransitionFaceMask, U, V, CellsPerAxis, VoxelSize, I);
+						FaceBit, U, V, CellsPerAxis, VoxelSize, I);
 				}
 
 				for (int32 I = 0; I < 9; ++I)
