@@ -46,7 +46,7 @@ bool FSmoothVoxelWorldConfigurationDeterminismTest::RunTest(const FString& Param
 	constexpr float StableBaseVoxelSize = 97.65625f;
 	FSVoxelGenerationSettings ChunkSettings = Settings;
 	ChunkSettings.BaseVoxelSize = StableBaseVoxelSize;
-	ChunkSettings.ChunkOriginCells = FIntVector(-1024, -1024, -1024);
+	ChunkSettings.ChunkOriginCells = FIntVector(-1024, -1024, 0);
 	ChunkSettings.bUseChunkLatticeCoordinates = true;
 
 	bool bDifferentSeedChangedDensity = false;
@@ -57,7 +57,7 @@ bool FSmoothVoxelWorldConfigurationDeterminismTest::RunTest(const FString& Param
 	{
 		const double WorldX = ChunkOriginCm + LocalPosition.X;
 		const double WorldY = ChunkOriginCm + LocalPosition.Y;
-		const double WorldZ = ChunkOriginCm + LocalPosition.Z;
+		const double WorldZ = LocalPosition.Z;
 		const float DirectDensity =
 			FSVoxelGenerator::SampleDensity(WorldX, WorldY, WorldZ, Settings);
 		const float RepeatDensity =
