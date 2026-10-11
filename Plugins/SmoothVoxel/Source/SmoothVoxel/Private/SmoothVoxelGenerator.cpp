@@ -464,7 +464,7 @@ ESVoxelBiome FSVoxelGenerator::SampleBiome(
     {
         return ESVoxelBiome::Desert;
     }
-    if (MountainSignal > 0.32f)
+    if (MountainSignal > FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f))
     {
         return ESVoxelBiome::Mountain;
     }
@@ -475,71 +475,115 @@ ESVoxelBiome FSVoxelGenerator::SampleBiome(
     return ESVoxelBiome::Plains;
 }
 
+float FSVoxelGenerator::SampleFlatlandInfluence(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    float Temperature = 0.0f;
+    float Moisture = 0.0f;
+    float MountainSignal = 0.0f;
+    SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
+    if (MountainSignal >= FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f) ||
+        SampleBiome(X, Y, S) == ESVoxelBiome::Mountain)
+    {
+        return 0.0f;
+    }
+
+    const ESVoxelBiome Biome = SampleBiome(X, Y, S);
+    const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.FlatlandRegionScale)));
+    const float Region01 = FMath::Clamp(
+        HashNoise2D(X * Scale, Y * Scale, S.Seed + 5549) * 0.5f + 0.5f,
+        0.0f, 1.0f);
+    const float HillCoverage = Biome == ESVoxelBiome::Desert
+        ? FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f)
+        : FMath::Clamp(1.0f - S.FlatlandCoverage, 0.0f, 0.9f);
+    const float BorderWidth = Biome == ESVoxelBiome::Desert ? 0.025f : 0.075f;
+    const float T = FMath::Clamp(
+        (Region01 - (1.0f - HillCoverage - BorderWidth)) /
+        FMath::Max(0.0001f, BorderWidth * 2.0f), 0.0f, 1.0f);
+    const float SmoothHillBlend = T * T * (3.0f - 2.0f * T);
+    return 1.0f - SmoothHillBlend;
+}
+
 double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     double X,
     double Y,
     const FSVoxelGenerationSettings& S)
 {
-    const double Macro = FBM2D(
-        X * static_cast<double>(S.NoiseScale),
-        Y * static_cast<double>(S.NoiseScale),
-        S.Seed);
-    const double Detail = FBM2D(
+    const double RegionScale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.FlatlandRegionScale)));
+    const float Region01 = FMath::Clamp(
+        HashNoise2D(X * RegionScale, Y * RegionScale, S.Seed + 5549) * 0.5f + 0.5f,
+        0.0f, 1.0f);
+
+    float Temperature = 0.0f;
+    float Moisture = 0.0f;
+    float MountainSignal = 0.0f;
+    SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
+    const ESVoxelBiome Biome = SampleBiome(X, Y, S);
+
+    const auto SmoothStep = [](float Edge0, float Edge1, float Value)
+    {
+        const float T = FMath::Clamp(
+            (Value - Edge0) / FMath::Max(0.0001f, Edge1 - Edge0), 0.0f, 1.0f);
+        return T * T * (3.0f - 2.0f * T);
+    };
+
+    const float HillCoverage = Biome == ESVoxelBiome::Desert
+        ? FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f)
+        : FMath::Clamp(1.0f - S.FlatlandCoverage, 0.0f, 0.9f);
+    const float BorderWidth = Biome == ESVoxelBiome::Desert ? 0.025f : 0.075f;
+    const float HillBlend = SmoothStep(
+        1.0f - HillCoverage - BorderWidth,
+        1.0f - HillCoverage + BorderWidth,
+        Region01);
+
+    const float MountainThreshold = FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f);
+    float MountainBlend = S.bEnableBiomes
+        ? SmoothStep(MountainThreshold - 0.10f, MountainThreshold + 0.12f, MountainSignal)
+        : 0.0f;
+    if (Biome == ESVoxelBiome::Desert)
+    {
+        MountainBlend = 0.0f;
+    }
+
+    const double HillNoise = FBM2D(
+        X * static_cast<double>(S.HillScale),
+        Y * static_cast<double>(S.HillScale),
+        S.Seed + 1001);
+    const double HillShape = SmoothStep(-0.45f, 0.65f, static_cast<float>(HillNoise));
+    const double FineNoise = FBM2D(
         X * static_cast<double>(S.DetailScale),
         Y * static_cast<double>(S.DetailScale),
         S.Seed + 777);
+    const double FineAmplitude = FMath::Lerp(
+        static_cast<double>(S.FlatlandNoiseAmplitude),
+        static_cast<double>(S.DetailAmplitude),
+        static_cast<double>(HillBlend));
+    const double MicroRelief = FineNoise * FineAmplitude;
+    const double HillRelief = HillShape * static_cast<double>(FMath::Abs(S.HillHeight)) *
+        static_cast<double>(HillBlend);
 
-    double ReliefMultiplier = 1.0;
-    double DetailMultiplier = 1.0;
-    double MountainLift = 0.0;
+    // Mountain height is a separate, rare macro-form. Its broad noise is
+    // continuous across chunks/LODs and cannot create narrow, jagged peaks.
+    const double MountainShape = FMath::Clamp((HillNoise + 1.0) * 0.5, 0.0, 1.0);
+    const double MountainLift = MountainShape * static_cast<double>(FMath::Abs(S.MountainHeight)) *
+        static_cast<double>(MountainBlend);
+
     double DuneLift = 0.0;
-
-    if (S.bEnableBiomes)
+    if (Biome == ESVoxelBiome::Desert)
     {
-        float Temperature = 0.0f;
-        float Moisture = 0.0f;
-        float MountainSignal = 0.0f;
-        SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
-
-        const auto SmoothStep = [](float Edge0, float Edge1, float Value)
-        {
-            const float T = FMath::Clamp(
-                (Value - Edge0) / FMath::Max(0.0001f, Edge1 - Edge0), 0.0f, 1.0f);
-            return T * T * (3.0f - 2.0f * T);
-        };
-
-        // The continuous climate masks shape the terrain; discrete biome labels
-        // are for gameplay and materials. Smooth masks prevent cliffs at borders.
-        const float MountainBlend = SmoothStep(0.10f, 0.52f, MountainSignal);
-        const float ForestBlend = SmoothStep(-0.10f, 0.48f, Moisture);
-        const float DesertBlend = SmoothStep(0.05f, 0.50f, Temperature) *
-            (1.0f - SmoothStep(-0.18f, 0.42f, Moisture));
-        const float ColdBlend = SmoothStep(0.12f, 0.58f, -Temperature);
-
-        ReliefMultiplier = 0.42f + ForestBlend * 0.22f + DesertBlend * 0.08f +
-            MountainBlend * 1.25f + ColdBlend * 0.14f;
-        DetailMultiplier = 1.0f + DesertBlend * 0.65f + MountainBlend * 0.15f;
-        MountainLift = static_cast<double>(FMath::Max(0.0f, MountainSignal)) *
-            static_cast<double>(FMath::Abs(S.HeightAmplitude)) * 0.30 *
-            static_cast<double>(MountainBlend);
-
-        if (DesertBlend > 0.001f)
-        {
-            const float Dune = FMath::Abs(HashNoise2D(
-                X * static_cast<double>(S.BiomeScale) * 2.3,
-                Y * static_cast<double>(S.BiomeScale) * 2.3,
-                S.Seed + 4909));
-            DuneLift = static_cast<double>(Dune) *
-                static_cast<double>(FMath::Abs(S.HeightAmplitude)) * 0.10 *
-                static_cast<double>(DesertBlend);
-        }
+        const float Dune = FMath::Abs(HashNoise2D(
+            X * RegionScale * 1.35,
+            Y * RegionScale * 1.35,
+            S.Seed + 4909));
+        DuneLift = static_cast<double>(Dune) *
+            static_cast<double>(FMath::Abs(S.FlatlandNoiseAmplitude)) * 1.5;
     }
 
-    return static_cast<double>(S.BaseHeight) +
-        Macro * static_cast<double>(S.HeightAmplitude) * ReliefMultiplier +
-        Detail * static_cast<double>(S.DetailAmplitude) * DetailMultiplier +
-        MountainLift + DuneLift;
+    return static_cast<double>(S.BaseHeight) + MicroRelief + HillRelief + MountainLift + DuneLift;
 }
+
 
 float FSVoxelGenerator::GetPOIPlateauInfluence(
     double X,
@@ -697,6 +741,15 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     const float SmoothT = T * T * (3.0f - 2.0f * T);
     OutInfluence = 1.0f - SmoothT;
     OutSignedField = static_cast<float>(Field);
+
+    const ESVoxelBiome Biome = SampleBiome(X, Y, S);
+    if (Biome == ESVoxelBiome::Desert || Biome == ESVoxelBiome::Mountain)
+    {
+        OutInfluence = 0.0f;
+        return;
+    }
+    // A smooth shared mask keeps rivers entirely inside the broad flat regions.
+    OutInfluence *= SampleFlatlandInfluence(X, Y, S);
 }
 
 float FSVoxelGenerator::SampleRiverInfluence(
@@ -708,6 +761,84 @@ float FSVoxelGenerator::SampleRiverInfluence(
     float SignedField = 0.0f;
     SampleRiverMaskAndField(X, Y, S, Influence, SignedField);
     return Influence;
+}
+
+
+void FSVoxelGenerator::SampleLakeMaskAndLevel(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    float& OutInfluence,
+    float& OutWaterLevel)
+{
+    OutInfluence = 0.0f;
+    OutWaterLevel = S.RiverWaterLevel;
+    if (!S.bEnableLakes)
+    {
+        return;
+    }
+
+    const double Spacing = FMath::Max(20000.0, std::abs(static_cast<double>(S.LakeSiteSpacing)));
+    const int64 GridX = static_cast<int64>(std::round(X / Spacing));
+    const int64 GridY = static_cast<int64>(std::round(Y / Spacing));
+    const uint32 SiteHash = HashLattice2D(GridX, GridY, S.Seed + 7331);
+    const double SiteChance = static_cast<double>((SiteHash >> 16) & 0xFFu) / 255.0;
+    const double JitterX = (static_cast<double>(SiteHash & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    const double JitterY = (static_cast<double>((SiteHash >> 12) & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    const double SiteX = static_cast<double>(GridX) * Spacing + JitterX * Spacing;
+    const double SiteY = static_cast<double>(GridY) * Spacing + JitterY * Spacing;
+
+    const ESVoxelBiome Biome = SampleBiome(SiteX, SiteY, S);
+    if (Biome == ESVoxelBiome::Desert || Biome == ESVoxelBiome::Mountain)
+    {
+        return;
+    }
+
+    float Temperature = 0.0f;
+    float Moisture = 0.0f;
+    float MountainSignal = 0.0f;
+    SampleBiomeClimate(SiteX, SiteY, S, Temperature, Moisture, MountainSignal);
+    if (MountainSignal >= FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f))
+    {
+        return;
+    }
+
+    const float Flatness = SampleFlatlandInfluence(SiteX, SiteY, S);
+    const float CandidateChance = Flatness >= 0.5f
+        ? FMath::Clamp(S.LakeChance, 0.0f, 1.0f)
+        : FMath::Clamp(S.HillLakeChance, 0.0f, 1.0f);
+    if (SiteChance > static_cast<double>(CandidateChance))
+    {
+        return;
+    }
+
+    const double Radius = FMath::Clamp(
+        std::abs(static_cast<double>(S.LakeRadius)), 500.0, Spacing * 0.25);
+    const double Blend = FMath::Clamp(
+        std::abs(static_cast<double>(S.LakeShoreBlendDistance)), 0.0,
+        Spacing * 0.25 - Radius);
+    const double DX = X - SiteX;
+    const double DY = Y - SiteY;
+    const double Distance = std::sqrt(DX * DX + DY * DY);
+    if (Distance >= Radius + Blend)
+    {
+        return;
+    }
+
+    if (Distance <= Radius || Blend <= SMALL_NUMBER)
+    {
+        OutInfluence = 1.0f;
+    }
+    else
+    {
+        const float T = FMath::Clamp(
+            static_cast<float>((Distance - Radius) / Blend), 0.0f, 1.0f);
+        OutInfluence = 1.0f - T * T * (3.0f - 2.0f * T);
+    }
+
+    OutWaterLevel = Flatness >= 0.5f
+        ? S.RiverWaterLevel
+        : static_cast<float>(SampleUnflattenedSurfaceHeight(SiteX, SiteY, S) - 50.0);
 }
 
 double FSVoxelGenerator::SampleSurfaceHeight(
@@ -732,17 +863,26 @@ double FSVoxelGenerator::SampleSurfaceHeight(
             static_cast<double>(PlateauWeight));
     }
 
-    // Carve a shallow channel relative to the local surface, not toward an
-    // absolute sea-level plane. That avoids quarry-like cliffs wherever a river
-    // crosses terrain higher than the ocean. The water ribbon sits near the
-    // original surface and above this local bed.
     if (S.bEnableRivers)
     {
         const double RiverInfluence = FMath::Clamp(
             static_cast<double>(SampleRiverInfluence(X, Y, S)),
             0.0,
             1.0);
-        SurfaceHeight -= std::abs(static_cast<double>(S.RiverDepth)) * RiverInfluence;
+        const double RiverBedLevel = static_cast<double>(S.RiverWaterLevel) -
+            std::abs(static_cast<double>(S.RiverDepth));
+        SurfaceHeight = FMath::Lerp(SurfaceHeight, RiverBedLevel, RiverInfluence);
+    }
+
+    float LakeInfluence = 0.0f;
+    float LakeWaterLevel = S.RiverWaterLevel;
+    SampleLakeMaskAndLevel(X, Y, S, LakeInfluence, LakeWaterLevel);
+    if (LakeInfluence > 0.0f)
+    {
+        const double LakeBedLevel = static_cast<double>(LakeWaterLevel) -
+            std::abs(static_cast<double>(S.LakeDepth));
+        SurfaceHeight = FMath::Lerp(
+            SurfaceHeight, LakeBedLevel, static_cast<double>(LakeInfluence));
     }
     return SurfaceHeight;
 }
@@ -897,6 +1037,10 @@ void FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(
         0.35f / (FMath::Max(1.0f, CoarsestVoxelStep) * 4.0f);
     Settings.NoiseScale = FMath::Min(FMath::Max(0.0f, Settings.NoiseScale), MaxNoiseScale);
     Settings.DetailScale = FMath::Min(FMath::Max(0.0f, Settings.DetailScale), MaxNoiseScale * 0.75f);
+    Settings.FlatlandRegionScale = FMath::Min(
+        FMath::Max(0.0f, Settings.FlatlandRegionScale), MaxNoiseScale * 0.9f);
+    Settings.HillScale = FMath::Min(
+        FMath::Max(0.0f, Settings.HillScale), MaxNoiseScale);
 }
 
 
