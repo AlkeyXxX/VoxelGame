@@ -427,7 +427,10 @@ void FSVoxelGenerator::SampleBiomeClimate(
     const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.BiomeScale)));
     OutTemperature = FBM2D(X * Scale * 0.60, Y * Scale * 0.60, S.Seed + 1709);
     OutMoisture = HashNoise2D(X * Scale * 0.85, Y * Scale * 0.85, S.Seed + 2903);
-    OutMountainSignal = HashNoise2D(X * Scale * 1.45, Y * Scale * 1.45, S.Seed + 3907);
+    // Mountain regions span several kilometres so they form rare traversable
+    // ranges instead of noisy sub-kilometre spikes.
+    OutMountainSignal = HashNoise2D(
+        X * Scale * 0.35, Y * Scale * 0.35, S.Seed + 3907);
 }
 
 float FSVoxelGenerator::SampleTerrainNoise(
@@ -551,7 +554,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         X * static_cast<double>(S.HillScale),
         Y * static_cast<double>(S.HillScale),
         S.Seed + 1001);
-    const double HillShape = SmoothStep(-0.45f, 0.65f, static_cast<float>(HillNoise));
+    const double HillShape = SmoothStep(-0.10f, 0.75f, static_cast<float>(HillNoise));
     const double FineNoise = FBM2D(
         X * static_cast<double>(S.DetailScale),
         Y * static_cast<double>(S.DetailScale),
@@ -566,7 +569,11 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
 
     // Mountain height is a separate, rare macro-form. Its broad noise is
     // continuous across chunks/LODs and cannot create narrow, jagged peaks.
-    const double MountainShape = FMath::Clamp((HillNoise + 1.0) * 0.5, 0.0, 1.0);
+    const double MountainRegionNoise = FBM2D(
+        X * RegionScale * 0.35,
+        Y * RegionScale * 0.35,
+        S.Seed + 6007);
+    const double MountainShape = FMath::Clamp((MountainRegionNoise + 1.0) * 0.5, 0.0, 1.0);
     const double MountainLift = MountainShape * static_cast<double>(FMath::Abs(S.MountainHeight)) *
         static_cast<double>(MountainBlend);
 
