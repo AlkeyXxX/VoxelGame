@@ -628,7 +628,12 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	SeaVertices.Add(FVector( HalfExtent, -HalfExtent, 0.0f));
 	SeaVertices.Add(FVector( HalfExtent,  HalfExtent, 0.0f));
 	SeaVertices.Add(FVector(-HalfExtent,  HalfExtent, 0.0f));
-	SeaTriangles = { 0, 2, 1, 0, 3, 2 };
+	SeaTriangles.Add(0);
+	SeaTriangles.Add(2);
+	SeaTriangles.Add(1);
+	SeaTriangles.Add(0);
+	SeaTriangles.Add(3);
+	SeaTriangles.Add(2);
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		SeaNormals.Add(FVector::UpVector);
