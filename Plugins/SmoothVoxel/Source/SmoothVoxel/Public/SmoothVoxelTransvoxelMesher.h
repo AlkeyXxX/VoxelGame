@@ -20,6 +20,15 @@ public:
 	static bool ValidateLookupTables();
 
 	/**
+	 * Adds reversed, normal-correct back faces only around edited voxel cells.
+	 * This keeps thin mined roofs visible from the tunnel side when a local
+	 * density probe cannot unambiguously resolve a triangle's winding.
+	 */
+	static int32 AddTwoSidedEditedSurfaceTriangles(
+		const FSVoxelGenerationSettings& Settings,
+		FSVoxelMeshData& Mesh);
+
+	/**
 	 * Builds one chunk from the same world-space density function at any LOD.
 	 *
 	 * VoxelSize is the sample spacing for this chunk. A set face bit indicates
