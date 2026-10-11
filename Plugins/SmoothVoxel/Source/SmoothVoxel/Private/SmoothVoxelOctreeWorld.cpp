@@ -829,6 +829,7 @@ void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
 		if (IsValid(WaterSurfaceActor))
 		{
 			WaterSurfaceActor->SetActorHiddenInGame(true);
+			WaterSurfaceActor->SetActorEnableCollision(false);
 		}
 		return;
 	}
@@ -851,6 +852,7 @@ void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
 	}
 
 	WaterSurfaceActor->SetActorHiddenInGame(false);
+	WaterSurfaceActor->SetActorEnableCollision(bWaterCollision);
 	WaterSurfaceActor->ConfigureSurface(
 		RootWorldCenter,
 		GetWorldSizeCentimeters(),
