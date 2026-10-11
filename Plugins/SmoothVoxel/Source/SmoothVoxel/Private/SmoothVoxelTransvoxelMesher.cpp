@@ -38,11 +38,15 @@ namespace
 		return X + Y * N + Z * N * N;
 	}
 
-	bool HasBlockEditNearPosition(
+		bool HasBlockEditNearPosition(
 		const FVector& LocalPosition,
 		const FSVoxelGenerationSettings& Settings)
 	{
-		if (!Settings.BlockEdits.IsValid() || Settings.BlockEdits->Num() == 0)
+		const bool bHasBlockEdits =
+			Settings.BlockEdits.IsValid() && Settings.BlockEdits->Num() > 0;
+		const bool bHasMinedNodes =
+			Settings.MinedNodes.IsValid() && Settings.MinedNodes->Num() > 0;
+		if (!bHasBlockEdits && !bHasMinedNodes)
 		{
 			return false;
 		}
@@ -62,9 +66,34 @@ namespace
 		const int32 CellY = static_cast<int32>(std::floor(WorldY / BaseStep));
 		const int32 CellZ = static_cast<int32>(std::floor(WorldZ / BaseStep));
 
-		// Most edit snapshots contain only one or a handful of touched cells.
-		// Scanning those few entries is cheaper than issuing 125 hash lookups
-		// for every ordinary vertex in the neighbouring chunk.
+		// Mined nodes sit on lattice vertices rather than cell centres. Check
+		// them first because their sharper local curvature requires a short
+		// gradient radius even when there are no ordinary block-cell edits.
+		if (bHasMinedNodes)
+		{
+			for (int32 DZ = -2; DZ <= 2; ++DZ)
+			{
+				for (int32 DY = -2; DY <= 2; ++DY)
+				{
+					for (int32 DX = -2; DX <= 2; ++DX)
+					{
+						if (Settings.MinedNodes->Contains(FIntVector(
+							CellX + DX, CellY + DY, CellZ + DZ)))
+						{
+							return true;
+						}
+					}
+				}
+			}
+		}
+
+		if (!bHasBlockEdits)
+		{
+			return false;
+		}
+
+		// Small edit snapshots are cheaper to scan linearly than checking 125
+		// hash slots for every ordinary vertex in a neighbouring chunk.
 		if (Settings.BlockEdits->Num() <= 32)
 		{
 			for (const TPair<FIntVector, int8>& Edit : *Settings.BlockEdits)
