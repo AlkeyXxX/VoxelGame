@@ -723,8 +723,8 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 			const int32 Right = Y * Side + FMath::Min(Resolution, X + 1);
 			const int32 Down = FMath::Max(0, Y - 1) * Side + X;
 			const int32 Up = FMath::Min(Resolution, Y + 1) * Side + X;
-			const float DX = FMath::Max(Step, static_cast<float>(Right - Left) * Step / 2.0f);
-			const float DY = FMath::Max(Step, static_cast<float>(Up - Down) * Step / 2.0f);
+			const float DX = Step;
+			const float DY = Step;
 			const float SlopeX = (RiverVertices[Right].Z - RiverVertices[Left].Z) / DX;
 			const float SlopeY = (RiverVertices[Up].Z - RiverVertices[Down].Z) / DY;
 			RiverNormals[Y * Side + X] = FVector(-SlopeX, -SlopeY, 1.0f).GetSafeNormal();
