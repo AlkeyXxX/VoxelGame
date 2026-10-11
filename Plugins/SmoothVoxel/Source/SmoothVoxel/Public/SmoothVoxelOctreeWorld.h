@@ -337,7 +337,7 @@ public:
 
 	/** Approximate river half-width in centimetres. Keep channels narrow relative to the map. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
-	float RiverHalfWidth = 3000.0f;
+	float RiverHalfWidth = 4000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", Units="cm"))
 	float RiverDepth = 600.0f;
