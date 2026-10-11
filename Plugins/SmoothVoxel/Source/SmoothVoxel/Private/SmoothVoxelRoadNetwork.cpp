@@ -560,12 +560,16 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
                             // Keep a cross-river transition competitive with the
                             // long detour down to the river floor and back uphill.
+                            // A crossing-angle edge should be cheaper than driving
+                            // down the bank and searching for a shallow ford. Clear
+                            // longitudinal motion is separately rejected above.
+                            const bool bCrossingAngle = ParallelAmount < 0.82;
                             RiverPenalty = TravelDistance * static_cast<double>(RiverBank) *
-                                (ParallelAmount > 0.65 ? 4.0 : 0.35);
+                                (bCrossingAngle ? 0.15 : 8.0);
                             if (RiverInfluence > 0.10f)
                             {
                                 RiverPenalty += TravelDistance * RiverInfluence *
-                                    (ParallelAmount < 0.65 ? 0.75 : 4.0);
+                                    (bCrossingAngle ? 0.25 : 6.0);
                             }
                         }
                         else
@@ -790,7 +794,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             bBridgeCrossing[SampleIndex] =
                 (RiverInfluences[SampleIndex] > 0.02f ||
                  RiverBankInfluences[SampleIndex] > 0.35f) &&
-                ParallelAmount < 0.80 ? 1 : 0;
+                ParallelAmount < 0.82 ? 1 : 0;
         }
 
         // Raise the whole short crossing corridor to a smooth bank-to-bank deck,
