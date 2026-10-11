@@ -708,17 +708,19 @@ bool FSmoothVoxelMinedNodeDensityTest::RunTest(const FString& Parameters)
 	Settings.IsoLevel = 0.0f;
 
 	const float BeforeCut =
-		FSVoxelGenerator::SampleDensity(100.0, 100.0, 200.0, Settings);
+		FSVoxelGenerator::SampleDensity(125.0, 125.0, 225.0, Settings);
 	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodes =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
-	const FIntVector Node(2, 2, 4);
-	MinedNodes->Add(Node);
+	const FIntVector MinedCell(2, 2, 4);
+	MinedNodes->Add(MinedCell);
 	Settings.MinedNodes = MinedNodes;
 
-	const float AtMinedNode = FSVoxelGenerator::SampleDensity(100.0, 100.0, 200.0, Settings);
-	const float OutsideMinedNode = FSVoxelGenerator::SampleDensity(200.0, 100.0, 200.0, Settings);
-	TestTrue(TEXT("A mined grid node must become air at its exact lattice sample"), AtMinedNode < 0.0f);
-	TestTrue(TEXT("Mining one grid node must not clear distant terrain samples"), OutsideMinedNode > 0.0f);
+	const float AtMinedCellCenter =
+		FSVoxelGenerator::SampleDensity(125.0, 125.0, 225.0, Settings);
+	const float OutsideMinedCell =
+		FSVoxelGenerator::SampleDensity(225.0, 125.0, 225.0, Settings);
+	TestTrue(TEXT("A mined voxel cell must become air at its centre"), AtMinedCell < 0.0f);
+	TestTrue(TEXT("Mining one voxel cell must not clear a distant cell"), OutsideMinedCell > 0.0f);
 	TestTrue(TEXT("Fixture must be solid before applying the mined-node snapshot"), BeforeCut > 0.0f);
 	return true;
 }
@@ -728,7 +730,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"SmoothVoxel.Transvoxel.HardCubePlacementDoesNotChangeTerrainMesh",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FSmoothVoxelHardCubeCavityTrianglesTest::RunTest(const FString& Parameters)
+bool FSmoothVoxelHardCubePlacementTerrainUnchangedTest::RunTest(const FString& Parameters)
 {
 	FSVoxelGenerationSettings Settings;
 	Settings.BaseHeight = 250.0f;
