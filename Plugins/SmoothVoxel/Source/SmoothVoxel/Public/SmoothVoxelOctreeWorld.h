@@ -211,7 +211,10 @@ private:
 	bool AreDesiredChunksReady() const;
 	void RetireUndesiredChunks();
 
-	FSVoxelGenerationSettings MakeGenerationSettings(const FVector& ChunkOrigin, float VoxelSize) const;
+	FSVoxelGenerationSettings MakeGenerationSettings(
+		const FVector& ChunkOrigin,
+		const FIntVector& ChunkOriginCells,
+		float VoxelSize) const;
 
 	TMap<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*> ActiveChunks;
 	TSet<FSVoxelOctreeNode> DesiredNodes;
