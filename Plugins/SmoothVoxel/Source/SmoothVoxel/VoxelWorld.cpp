@@ -5,6 +5,7 @@
 #include "VoxelWorldSaveGame.h"
 #include "VoxelBlockLibrary.h"
 #include "VoxelInventoryComponent.h"
+#include "SmoothVoxelOctreeWorld.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -103,6 +104,23 @@ namespace
             OutDirection);
     }
 }
+
+    ASmoothVoxelOctreeWorld* FindEditableOctreeWorld(UObject* WorldContextObject)
+    {
+        if (!WorldContextObject)
+        {
+            return nullptr;
+        }
+
+        AActor* Candidate = UGameplayStatics::GetActorOfClass(
+            WorldContextObject,
+            ASmoothVoxelOctreeWorld::StaticClass());
+        ASmoothVoxelOctreeWorld* OctreeWorld = Cast<ASmoothVoxelOctreeWorld>(Candidate);
+        return IsValid(OctreeWorld) && OctreeWorld->bAutoGenerate && OctreeWorld->bEnableBlockEditing
+            ? OctreeWorld
+            : nullptr;
+    }
+
 
 
 AVoxelWorld::AVoxelWorld()
@@ -1353,6 +1371,13 @@ void AVoxelWorld::SetBlockInternal(
 void AVoxelWorld::RemoveBlockAtWorld(
     const FVector& WorldPosition)
 {
+    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    {
+        OctreeWorld->SetBlockDataTable(BlockDataTable);
+        OctreeWorld->RemoveBlockAtWorld(WorldPosition);
+        return;
+    }
+
     FIntVector WorldBlock;
 
 
@@ -1377,6 +1402,13 @@ void AVoxelWorld::SetBlockAtWorld(
     const FVector& WorldPosition,
     EVoxelBlock Block)
 {
+    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    {
+        OctreeWorld->SetBlockDataTable(BlockDataTable);
+        OctreeWorld->SetBlockAtWorld(WorldPosition, Block);
+        return;
+    }
+
     FIntVector WorldBlock;
 
 
@@ -1439,6 +1471,12 @@ void AVoxelWorld::RebuildChunkAndNeighbors(
  */
 bool AVoxelWorld::BreakBlockByRay()
 {
+    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    {
+        OctreeWorld->SetBlockDataTable(BlockDataTable);
+        return OctreeWorld->BreakBlockByRay();
+    }
+
     APlayerController* PC =
         UGameplayStatics::GetPlayerController(
             this,
@@ -1609,6 +1647,12 @@ bool AVoxelWorld::BreakBlockByRay()
  */
 bool AVoxelWorld::PlaceBlockByRay()
 {
+    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    {
+        OctreeWorld->SetBlockDataTable(BlockDataTable);
+        return OctreeWorld->PlaceBlockByRay();
+    }
+
     /*
      * Старый Blueprint-вызов остаётся совместимым.
      *
@@ -1638,6 +1682,12 @@ bool AVoxelWorld::PlaceBlockByRay()
 bool AVoxelWorld::PlaceBlockByRayWithType(
     EVoxelBlock BlockToPlace)
 {
+    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    {
+        OctreeWorld->SetBlockDataTable(BlockDataTable);
+        return OctreeWorld->PlaceBlockByRayWithType(BlockToPlace);
+    }
+
     APlayerController* PC =
         UGameplayStatics::GetPlayerController(
             this,
