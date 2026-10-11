@@ -313,10 +313,16 @@ void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 		LaunchQueuedBuilds(CameraLocation);
 		if (AreDesiredChunksReady())
 		{
-			// Commit this LOD selection atomically: retire the previous chunks
-			// first, then reveal newly built chunks. New child meshes stay hidden
-			// during async generation so they cannot z-fight with old coarse parents.
-			RetireUndesiredChunks();
+			// Switch visibility atomically, but do not destroy a potentially large
+			// set of old actors in this frame. Hide obsolete chunks, reveal the ready
+			// selection, and retire hidden actors gradually on following frames.
+			for (TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
+			{
+				if (!DesiredNodes.Contains(Pair.Key) && IsValid(Pair.Value))
+				{
+					Pair.Value->SetActorHiddenInGame(true);
+				}
+			}
 			for (const FSVoxelOctreeNode& Node : DesiredNodes)
 			{
 				if (ASmoothVoxelTransvoxelChunk* Chunk = ActiveChunks.FindRef(Node))
@@ -333,6 +339,10 @@ void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 		}
 		return;
 	}
+
+	// Actor destruction and component teardown also touch the game thread, so
+	// clean obsolete hidden chunks within the same per-frame budget.
+	RetireUndesiredChunks(FMath::Clamp(MaxChunkRequestsPerFrame, 1, 16));
 
 	TimeSinceSelection += DeltaSeconds;
 	const bool bCameraMoved =
@@ -735,17 +745,23 @@ bool ASmoothVoxelOctreeWorld::AreDesiredChunksReady() const
 	return true;
 }
 
-void ASmoothVoxelOctreeWorld::RetireUndesiredChunks()
+void ASmoothVoxelOctreeWorld::RetireUndesiredChunks(int32 MaxChunksToRetire)
 {
-	for (auto It = ActiveChunks.CreateIterator(); It; ++It)
+	int32 RetiredCount = 0;
+	const int32 Budget = FMath::Clamp(MaxChunksToRetire, 1, 16);
+
+	for (auto It = ActiveChunks.CreateIterator(); It && RetiredCount < Budget; ++It)
 	{
 		if (!DesiredNodes.Contains(It.Key()))
 		{
 			if (IsValid(It.Value()))
 			{
+				// Obsolete chunks have already been hidden at the selection swap.
+				// Spread actor/component teardown over multiple frames.
 				It.Value()->Destroy();
 			}
 			It.RemoveCurrent();
+			++RetiredCount;
 		}
 	}
 }
