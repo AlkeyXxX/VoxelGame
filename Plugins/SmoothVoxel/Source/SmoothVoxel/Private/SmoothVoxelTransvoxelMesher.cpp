@@ -66,9 +66,9 @@ namespace
 		const int32 CellY = static_cast<int32>(std::floor(WorldY / BaseStep));
 		const int32 CellZ = static_cast<int32>(std::floor(WorldZ / BaseStep));
 
-		// Mined nodes sit on lattice vertices rather than cell centres. Check
-		// them first because their sharper local curvature requires a short
-		// gradient radius even when there are no ordinary block-cell edits.
+		// Mined nodes identify whole voxel cells, whose box cuts introduce
+		// sharper local curvature. Use a short gradient radius around them even
+		// when there are no ordinary block-cell edits.
 		if (bHasMinedNodes)
 		{
 			// Edit snapshots are spatially filtered per chunk; most contain only
