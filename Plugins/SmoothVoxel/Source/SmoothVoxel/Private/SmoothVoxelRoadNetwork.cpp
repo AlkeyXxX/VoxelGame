@@ -325,7 +325,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const FVector2D NormalizedDirection = DirectionToOtherSite.GetSafeNormal();
         double BestAlignment = -2.0;
         FVector2D BestDirection = FVector2D::ZeroVector;
-        constexpr int32 RingPointCount = 16;
 
         // Match one of the generated ring vertices, not an arbitrary radial
         // point. Seed jitter can rotate the approach away from the cardinal
@@ -1109,9 +1108,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 continue;
             }
 
-            constexpr int32 RingPointCount = 16;
-            FVector2D RingPoints[RingPointCount];
-            for (int32 RingIndex = 0; RingIndex < RingPointCount; ++RingIndex)
+            FVector2D RingPoints[RoadRingPointCount];
+            for (int32 RingIndex = 0; RingIndex < RoadRingPointCount; ++RingIndex)
             {
                 const double Angle = static_cast<double>(RingIndex) *
                     (6.283185307179586 / static_cast<double>(RoadRingPointCount)); // 22.5 degrees.
@@ -1120,7 +1118,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     static_cast<float>(Site->Y + std::sin(Angle) * SiteConnectionRadius));
             }
 
-            for (int32 RingIndex = 0; RingIndex < RingPointCount; ++RingIndex)
+            for (int32 RingIndex = 0; RingIndex < RoadRingPointCount; ++RingIndex)
             {
                 const int32 NextRingIndex = (RingIndex + 1) % RoadRingPointCount;
                 BuildSegment(
