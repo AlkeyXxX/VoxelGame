@@ -1030,7 +1030,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 
 		const float Step = GetEffectiveBlockSize();
 		const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
-		const float ProbeDistance = FMath::Max(1.0f, Step * 0.2f);
+		const float ProbeDistance = FMath::Max(5.0f, Step * 0.25f);
 		const FVector ProbeAlongNormal = Hit.ImpactPoint + Normal * ProbeDistance;
 		const FVector ProbeAgainstNormal = Hit.ImpactPoint - Normal * ProbeDistance;
 		const float DensityAlong = SampleCurrentDensityAt(ProbeAlongNormal);
