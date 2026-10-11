@@ -256,11 +256,16 @@ namespace
                         }
                         else
                         {
-                            // Legacy API removals remain supported, but ray mining
-                            // no longer uses progressive -1..-5 density stages.
-                            CandidateSdfs[CandidateCount] = OctahedronSdf(
+                            // Legacy cell-removal edits use the same axis-aligned
+                            // voxel footprint as ray mining. The tiny overhang
+                            // makes the shared boundary unambiguously air for the
+                            // marching-cubes sampler without cutting into the
+                            // centre of a neighbouring cell.
+                            const double CutHalfExtent = Step * 0.5 +
+                                FMath::Max(0.05, Step * 0.005);
+                            CandidateSdfs[CandidateCount] = BoxSdf(
                                 X, Y, Z, CenterX, CenterY, CenterZ,
-                                Step * 1.02);
+                                CutHalfExtent, 0.0);
                         }
                         ++CandidateCount;
                     }
