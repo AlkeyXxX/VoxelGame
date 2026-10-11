@@ -4,7 +4,7 @@
 #include "CoreMinimal.h"
 #include "SmoothVoxelTypes.h"
 
-// Sparse, world-aligned cell overrides: +1 adds solid volume, -1 carves air.
+// Sparse world-aligned edits: +1 adds smooth Dirt/Sand, -1 carves air, +2 reserves a cell for a separately rendered cube.
 using FSVoxelBlockEditMap = TMap<FIntVector, int8>;
 
 struct FSVoxelGenerationSettings
