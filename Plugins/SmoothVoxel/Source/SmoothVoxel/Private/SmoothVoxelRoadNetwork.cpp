@@ -203,21 +203,41 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 GenerationSettings);
             GroundHeights.Add(Ground);
 
-            // A road crossing a river is lifted above the water rather than
-            // following the carved bed. The lift fades smoothly at the banks;
-            // dedicated bridge meshes can replace this simple crossing later.
+            // Water crossings are kept above their water plane instead of
+            // letting a road descend into a carved riverbed or lake basin.
+            // These are simple raised crossings for now; dedicated bridge
+            // meshes and supports can be added without changing route generation.
+            float WaterBodyInfluence = 0.0f;
+            double WaterLevel = static_cast<double>(GenerationSettings.RiverWaterLevel);
             if (GenerationSettings.bEnableRivers)
             {
-                const float RiverInfluence = FMath::Clamp(
+                WaterBodyInfluence = FMath::Clamp(
                     FSVoxelGenerator::SampleRiverInfluence(
                         static_cast<double>(Point.X),
                         static_cast<double>(Point.Y),
                         GenerationSettings),
                     0.0f, 1.0f);
-                const double BridgeBlend = SmoothStep(0.02, 0.75, RiverInfluence);
-                const double DeckHeight = static_cast<double>(GenerationSettings.RiverWaterLevel) + 100.0;
-                RoadLifts[SampleIndex] = FMath::Max(0.0, DeckHeight - Ground) * BridgeBlend;
             }
+            if (GenerationSettings.bEnableLakes)
+            {
+                float LakeInfluence = 0.0f;
+                float LakeWaterLevel = static_cast<float>(WaterLevel);
+                FSVoxelGenerator::SampleLakeMaskAndLevel(
+                    static_cast<double>(Point.X),
+                    static_cast<double>(Point.Y),
+                    GenerationSettings,
+                    LakeInfluence,
+                    LakeWaterLevel);
+                if (LakeInfluence > WaterBodyInfluence)
+                {
+                    WaterBodyInfluence = FMath::Clamp(LakeInfluence, 0.0f, 1.0f);
+                    WaterLevel = static_cast<double>(LakeWaterLevel);
+                }
+            }
+
+            const double BridgeBlend = SmoothStep(0.02, 0.75, WaterBodyInfluence);
+            const double DeckHeight = WaterLevel + 100.0;
+            RoadLifts[SampleIndex] = FMath::Max(0.0, DeckHeight - Ground) * BridgeBlend;
         }
 
         // Spread bridge elevation over a few samples to avoid a sudden vertical
