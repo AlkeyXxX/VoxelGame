@@ -276,9 +276,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
 	float DetailAmplitude = 60.0f;
 
-	/** Target flatland share outside deserts and mountain ranges. */
+	/** Target flatland share before the reduction multiplier is applied. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.2", ClampMax="0.9"))
 	float FlatlandCoverage = 0.2f;
+
+	/** Multiplies flatland coverage; 0.6 means 40% less flatland and more varied relief. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.1", ClampMax="1.0", DisplayName="Flatland Coverage Multiplier"))
+	float FlatlandCoverageMultiplier = 0.6f;
+
+	/** Broad, gentle elevation variation over flatland regions, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="3000.0", Units="cm", DisplayName="Gentle Plains Relief Height"))
+	float GentleReliefHeight = 800.0f;
 
 	/** Scale of broad flatland/hill region borders. Smaller values create larger regions. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0000001", ClampMax="0.00002"))
