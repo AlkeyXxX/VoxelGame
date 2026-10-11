@@ -269,7 +269,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 
 	const int32 SafeMaxLod = FMath::Clamp(MaxLod, 0, 4);
 	const float CoarsestVoxelStep =
-		FMath::Max(1.0f, BaseVoxelSize) * static_cast<float>(1 << SafeMaxLod);
+		FMath::Max(1.0f, EffectiveBaseVoxelSize) * static_cast<float>(1 << SafeMaxLod);
 	FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(Settings, CoarsestVoxelStep);
 	Settings.DetailAmplitude = DetailAmplitude;
 	Settings.BottomDepth = BottomDepth;
