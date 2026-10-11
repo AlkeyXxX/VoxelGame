@@ -570,16 +570,28 @@ namespace
 				continue;
 			}
 
-			const FVector ExpectedNormal = (
+			FVector ExpectedNormal = (
 				OutMesh.Normals[static_cast<int32>(GlobalA)] +
 				OutMesh.Normals[static_cast<int32>(GlobalB)] +
 				OutMesh.Normals[static_cast<int32>(GlobalC)]).GetSafeNormal();
+			const FVector FaceDirection = MeshFaceNormal.GetSafeNormal();
+			float Facing = FVector::DotProduct(FaceDirection, ExpectedNormal);
 
-			// Do not flip faces from scalar-density probes at their centroid:
-			// interpolated curved surfaces can put the planar triangle slightly
-			// to one side of the zero set. Orient by the actual surface normals.
-			if (ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
-				FVector::DotProduct(MeshFaceNormal, ExpectedNormal) > 0.0f)
+			// Near sharp SDF corners, the three smooth vertex normals can cancel
+			// or become almost tangent to a face. In that case sample the edited
+			// scalar field at the triangle centre with the local mining gradient
+			// step rather than leaving the table's potentially opposite winding.
+			if (ExpectedNormal.SizeSquared() <= SMALL_NUMBER || FMath::Abs(Facing) < 0.05f)
+			{
+				const FVector TriangleCenter = (MeshA + MeshB + MeshC) / 3.0f;
+				ExpectedNormal = SampleOutwardNormal(
+					TriangleCenter, Settings, ComputeNormalSampleStep(Settings));
+				Facing = FVector::DotProduct(FaceDirection, ExpectedNormal);
+			}
+
+			// Procedural-mesh front faces use the winding opposite our outward
+			// normal convention. A positive dot points toward air, so reverse it.
+			if (ExpectedNormal.SizeSquared() > SMALL_NUMBER && Facing > 0.0f)
 			{
 				Swap(GlobalB, GlobalC);
 			}
