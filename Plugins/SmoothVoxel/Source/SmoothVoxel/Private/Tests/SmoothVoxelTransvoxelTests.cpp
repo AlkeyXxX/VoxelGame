@@ -985,7 +985,7 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	// Reproduce the reported sequence: dig a three-cell shaft from the
 	// surface, then a 1-wide, 2-high horizontal tunnel, leaving cell Z=14 as
 	// one full voxel layer between the tunnel and the sky.
-	RoofSettings.BaseHeight = 750.0f;
+	RoofSettings.BaseHeight = 749.0f;
 	RoofSettings.HeightAmplitude = 0.0f;
 	RoofSettings.DetailAmplitude = 0.0f;
 	RoofSettings.NoiseScale = 0.0f;
