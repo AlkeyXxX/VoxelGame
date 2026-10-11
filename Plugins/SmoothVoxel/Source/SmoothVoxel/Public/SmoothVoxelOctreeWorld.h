@@ -365,8 +365,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.000001", ClampMax="0.00005"))
 	float RiverScale = 0.0000025f;
 
-	/** River half-width in centimetres. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
+	/** River half-width in centimetres. 250 cm = 2.5 m on each side, 5 m total width. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="250.0", Units="cm"))
 	float RiverHalfWidth = 2500.0f;
 
 	/** Carved river bed depth, in centimetres. */
