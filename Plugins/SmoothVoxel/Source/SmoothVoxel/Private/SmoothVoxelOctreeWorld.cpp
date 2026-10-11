@@ -656,34 +656,58 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	SeaUVs.Add(FVector2D(WorldSize / SafeTileSize, WorldSize / SafeTileSize));
 	SeaUVs.Add(FVector2D(0.0f, WorldSize / SafeTileSize));
 
-	// Continuous water sheet: all river centres share one absolute Z, so
-	// terrain noise can never produce ridges or waves along the river.
+	// Rivers and lakes are clipped as separate flat-top polygons. The wetness
+	// field combines the deterministic body mask with the actual terrain/water
+	// intersection. No geometry is generated outside the shoreline, and every
+	// visible vertex stays on one fixed elevation for its water body.
+	struct FWaterClipVertex
+	{
+		FVector2D XY;
+		float Wetness = -1.0f;
+		float WaterLevel = 0.0f;
+	};
+
 	TArray<FVector> RiverVertices;
 	TArray<int32> RiverTriangles;
 	TArray<FVector> RiverNormals;
 	TArray<FVector2D> RiverUVs;
 	TArray<FLinearColor> RiverColors;
 	TArray<FProcMeshTangent> RiverTangents;
-	RiverVertices.Reserve(VertexCount);
-	RiverNormals.Reserve(VertexCount);
-	RiverUVs.Reserve(VertexCount);
-	RiverColors.Reserve(VertexCount);
-	RiverTangents.Reserve(VertexCount);
-	RiverTriangles.Reserve(Resolution * Resolution * 6);
+	TArray<FVector> LakeVertices;
+	TArray<int32> LakeTriangles;
+	TArray<FVector> LakeNormals;
+	TArray<FVector2D> LakeUVs;
+	TArray<FLinearColor> LakeColors;
+	TArray<FProcMeshTangent> LakeTangents;
 
-	const double HiddenBelowLand = FMath::Max(
-		1500.0, std::abs(static_cast<double>(GenerationSettings.RiverDepth)) * 2.0 + 500.0);
+	RiverVertices.Reserve(Resolution * Resolution / 8);
+	RiverTriangles.Reserve(Resolution * Resolution * 2);
+	LakeVertices.Reserve(Resolution * Resolution / 32);
+	LakeTriangles.Reserve(Resolution * Resolution / 8);
+
+	TArray<float> RiverWetness;
+	TArray<float> LakeWetness;
+	TArray<float> LakeLevels;
+	RiverWetness.SetNumUninitialized(VertexCount);
+	LakeWetness.SetNumUninitialized(VertexCount);
+	LakeLevels.SetNumUninitialized(VertexCount);
+
 	const double RiverLevel = static_cast<double>(GenerationSettings.RiverWaterLevel);
+	const double RiverDepthForMask = FMath::Max(
+		100.0, std::abs(static_cast<double>(GenerationSettings.RiverDepth)));
+	const double LakeDepthForMask = FMath::Max(
+		100.0, std::abs(static_cast<double>(GenerationSettings.LakeDepth)));
 
 	for (int32 Y = 0; Y <= Resolution; ++Y)
 	{
 		for (int32 X = 0; X <= Resolution; ++X)
 		{
+			const int32 Index = Y * Side + X;
 			const double WorldX = static_cast<double>(ConfiguredWorldCenter.X) -
 				static_cast<double>(HalfExtent) + static_cast<double>(X) * Step;
 			const double WorldY = static_cast<double>(ConfiguredWorldCenter.Y) -
 				static_cast<double>(HalfExtent) + static_cast<double>(Y) * Step;
-			const double CarvedHeight = FSVoxelGenerator::SampleSurfaceHeight(
+			const double Ground = FSVoxelGenerator::SampleSurfaceHeight(
 				WorldX, WorldY, GenerationSettings);
 
 			float RiverInfluence = 0.0f;
@@ -694,6 +718,10 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 					WorldX, WorldY, GenerationSettings, RiverInfluence, SignedField);
 			}
 			RiverInfluence = FMath::Clamp(RiverInfluence, 0.0f, 1.0f);
+			const double RiverHead = (RiverLevel - Ground) / RiverDepthForMask;
+			RiverWetness[Index] = FMath::Min(
+				RiverInfluence - 0.0001f,
+				static_cast<float>(FMath::Clamp(RiverHead, -1.0, 1.0)));
 
 			float LakeInfluence = 0.0f;
 			float LakeLevel = static_cast<float>(RiverLevel);
@@ -703,59 +731,133 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 					WorldX, WorldY, GenerationSettings, LakeInfluence, LakeLevel);
 			}
 			LakeInfluence = FMath::Clamp(LakeInfluence, 0.0f, 1.0f);
-
-			const bool bLakeWins = LakeInfluence > RiverInfluence;
-			const float WaterMask = FMath::Max(RiverInfluence, LakeInfluence);
-			const double VisibleLevel = bLakeWins ? static_cast<double>(LakeLevel) : RiverLevel;
-			const float FadeT = FMath::Clamp((WaterMask - 0.72f) / 0.26f, 0.0f, 1.0f);
-			const double WaterBlend = static_cast<double>(FadeT * FadeT * (3.0f - 2.0f * FadeT));
-			const double BuriedLevel = CarvedHeight - HiddenBelowLand;
-			const double SurfaceLevel = FMath::Lerp(BuriedLevel, VisibleLevel, WaterBlend);
-
-			const float LocalX = -HalfExtent + static_cast<float>(X) * Step;
-			const float LocalY = -HalfExtent + static_cast<float>(Y) * Step;
-			RiverVertices.Add(FVector(
-				LocalX, LocalY,
-				static_cast<float>(SurfaceLevel - static_cast<double>(ConfiguredSeaLevel))));
-			RiverNormals.Add(FVector::UpVector);
-			RiverUVs.Add(FVector2D(
-				static_cast<float>(X) * Step / SafeTileSize,
-				static_cast<float>(Y) * Step / SafeTileSize));
-			RiverColors.Add(FLinearColor::White);
-			RiverTangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
+			LakeLevels[Index] = LakeLevel;
+			const double LakeHead = (static_cast<double>(LakeLevel) - Ground) / LakeDepthForMask;
+			LakeWetness[Index] = FMath::Min(
+				LakeInfluence - 0.0001f,
+				static_cast<float>(FMath::Clamp(LakeHead, -1.0, 1.0)));
 		}
 	}
 
+	const auto EmitClippedTriangle = [this, HalfExtent, SafeTileSize](
+		const FWaterClipVertex& A,
+		const FWaterClipVertex& B,
+		const FWaterClipVertex& C,
+		TArray<FVector>& OutVertices,
+		TArray<int32>& OutTriangles,
+		TArray<FVector>& OutNormals,
+		TArray<FVector2D>& OutUVs,
+		TArray<FLinearColor>& OutColors,
+		TArray<FProcMeshTangent>& OutTangents)
+	{
+		const FWaterClipVertex Input[3] = { A, B, C };
+		// Clipping one triangle against one scalar half-space yields at most
+		// a convex quad, so fixed stack storage avoids per-triangle allocations.
+		FWaterClipVertex Polygon[4];
+		int32 PolygonCount = 0;
+		FWaterClipVertex Previous = Input[2];
+		bool bPreviousInside = Previous.Wetness > 0.0f;
+
+		for (int32 Corner = 0; Corner < 3; ++Corner)
+		{
+			const FWaterClipVertex Current = Input[Corner];
+			const bool bCurrentInside = Current.Wetness > 0.0f;
+			if (bCurrentInside != bPreviousInside)
+			{
+				const float Denominator = Previous.Wetness - Current.Wetness;
+				const float T = FMath::Abs(Denominator) > SMALL_NUMBER
+					? FMath::Clamp(Previous.Wetness / Denominator, 0.0f, 1.0f)
+					: 0.5f;
+				FWaterClipVertex Crossing;
+				Crossing.XY = Previous.XY + (Current.XY - Previous.XY) * T;
+				Crossing.WaterLevel = bPreviousInside
+					? Previous.WaterLevel
+					: Current.WaterLevel;
+				Crossing.Wetness = 0.0f;
+				Polygon[PolygonCount++] = Crossing;
+			}
+			if (bCurrentInside)
+			{
+				Polygon[PolygonCount++] = Current;
+			}
+			Previous = Current;
+			bPreviousInside = bCurrentInside;
+		}
+
+		if (PolygonCount < 3)
+		{
+			return;
+		}
+		for (int32 FanIndex = 1; FanIndex + 1 < PolygonCount; ++FanIndex)
+		{
+			const FWaterClipVertex TriangleVertices[3] =
+			{
+				Polygon[0], Polygon[FanIndex], Polygon[FanIndex + 1]
+			};
+			const int32 FirstVertex = OutVertices.Num();
+			for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
+			{
+				const FWaterClipVertex& Vertex = TriangleVertices[VertexIndex];
+				OutVertices.Add(FVector(
+					Vertex.XY.X,
+					Vertex.XY.Y,
+					Vertex.WaterLevel - ConfiguredSeaLevel));
+				OutNormals.Add(FVector::UpVector);
+				OutUVs.Add(FVector2D(
+					(Vertex.XY.X + HalfExtent) / SafeTileSize,
+					(Vertex.XY.Y + HalfExtent) / SafeTileSize));
+				OutColors.Add(FLinearColor::White);
+				OutTangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
+			}
+			OutTriangles.Add(FirstVertex);
+			OutTriangles.Add(FirstVertex + 1);
+			OutTriangles.Add(FirstVertex + 2);
+		}
+	};
+
+	const auto MakeClipVertex = [HalfExtent, Step, Side](
+		int32 X, int32 Y, const TArray<float>& Wetness, const TArray<float>& Levels)
+	{
+		const int32 Index = Y * Side + X;
+		FWaterClipVertex V;
+		V.XY = FVector2D(
+			-HalfExtent + static_cast<float>(X) * Step,
+			-HalfExtent + static_cast<float>(Y) * Step);
+		V.Wetness = Wetness[Index];
+		V.WaterLevel = Levels[Index];
+		return V;
+	};
+
+	TArray<float> RiverLevels;
+	RiverLevels.Init(static_cast<float>(RiverLevel), VertexCount);
 	for (int32 Y = 0; Y < Resolution; ++Y)
 	{
 		for (int32 X = 0; X < Resolution; ++X)
 		{
-			const int32 A = Y * Side + X;
-			const int32 B = A + 1;
-			const int32 D = (Y + 1) * Side + X;
-			const int32 C = D + 1;
-			RiverTriangles.Add(A);
-			RiverTriangles.Add(C);
-			RiverTriangles.Add(B);
-			RiverTriangles.Add(A);
-			RiverTriangles.Add(D);
-			RiverTriangles.Add(C);
-		}
-	}
+			const FWaterClipVertex A_R = MakeClipVertex(X, Y, RiverWetness, RiverLevels);
+			const FWaterClipVertex B_R = MakeClipVertex(X + 1, Y, RiverWetness, RiverLevels);
+			const FWaterClipVertex C_R = MakeClipVertex(X + 1, Y + 1, RiverWetness, RiverLevels);
+			const FWaterClipVertex D_R = MakeClipVertex(X, Y + 1, RiverWetness, RiverLevels);
 
-	for (int32 Y = 0; Y <= Resolution; ++Y)
-	{
-		for (int32 X = 0; X <= Resolution; ++X)
-		{
-			const int32 Left = Y * Side + FMath::Max(0, X - 1);
-			const int32 Right = Y * Side + FMath::Min(Resolution, X + 1);
-			const int32 Down = FMath::Max(0, Y - 1) * Side + X;
-			const int32 Up = FMath::Min(Resolution, Y + 1) * Side + X;
-			const float DX = (X == 0 || X == Resolution) ? Step : Step * 2.0f;
-			const float DY = (Y == 0 || Y == Resolution) ? Step : Step * 2.0f;
-			const float SlopeX = (RiverVertices[Right].Z - RiverVertices[Left].Z) / DX;
-			const float SlopeY = (RiverVertices[Up].Z - RiverVertices[Down].Z) / DY;
-			RiverNormals[Y * Side + X] = FVector(-SlopeX, -SlopeY, 1.0f).GetSafeNormal();
+			if (GenerationSettings.bEnableRivers)
+			{
+				EmitClippedTriangle(A_R, C_R, B_R,
+					RiverVertices, RiverTriangles, RiverNormals, RiverUVs, RiverColors, RiverTangents);
+				EmitClippedTriangle(A_R, D_R, C_R,
+					RiverVertices, RiverTriangles, RiverNormals, RiverUVs, RiverColors, RiverTangents);
+			}
+
+			if (GenerationSettings.bEnableLakes)
+			{
+				const FWaterClipVertex A_L = MakeClipVertex(X, Y, LakeWetness, LakeLevels);
+				const FWaterClipVertex B_L = MakeClipVertex(X + 1, Y, LakeWetness, LakeLevels);
+				const FWaterClipVertex C_L = MakeClipVertex(X + 1, Y + 1, LakeWetness, LakeLevels);
+				const FWaterClipVertex D_L = MakeClipVertex(X, Y + 1, LakeWetness, LakeLevels);
+				EmitClippedTriangle(A_L, C_L, B_L,
+					LakeVertices, LakeTriangles, LakeNormals, LakeUVs, LakeColors, LakeTangents);
+				EmitClippedTriangle(A_L, D_L, C_L,
+					LakeVertices, LakeTriangles, LakeNormals, LakeUVs, LakeColors, LakeTangents);
+			}
 		}
 	}
 
@@ -772,29 +874,32 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 		SeaColors,
 		SeaTangents,
 		bEnableCollision);
-	if ((GenerationSettings.bEnableRivers || GenerationSettings.bEnableLakes) && RiverTriangles.Num() > 0)
+	if (GenerationSettings.bEnableRivers && RiverTriangles.Num() > 0)
 	{
 		Mesh->CreateMeshSection_LinearColor(
-			1,
-			RiverVertices,
-			RiverTriangles,
-			RiverNormals,
-			RiverUVs,
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			RiverColors,
-			RiverTangents,
-			bEnableCollision);
+			1, RiverVertices, RiverTriangles, RiverNormals, RiverUVs,
+			TArray<FVector2D>(), TArray<FVector2D>(), TArray<FVector2D>(),
+			RiverColors, RiverTangents, bEnableCollision);
+	}
+	if (GenerationSettings.bEnableLakes && LakeTriangles.Num() > 0)
+	{
+		Mesh->CreateMeshSection_LinearColor(
+			2, LakeVertices, LakeTriangles, LakeNormals, LakeUVs,
+			TArray<FVector2D>(), TArray<FVector2D>(), TArray<FVector2D>(),
+			LakeColors, LakeTangents, bEnableCollision);
 	}
 	if (ActiveMaterial)
 	{
 		Mesh->SetMaterial(0, ActiveMaterial);
-		if ((GenerationSettings.bEnableRivers || GenerationSettings.bEnableLakes) && RiverTriangles.Num() > 0)
+		if (GenerationSettings.bEnableRivers && RiverTriangles.Num() > 0)
 		{
 			Mesh->SetMaterial(1, ActiveMaterial);
 		}
-	}
+		if (GenerationSettings.bEnableLakes && LakeTriangles.Num() > 0)
+		{
+			Mesh->SetMaterial(2, ActiveMaterial);
+		}
+}
 	Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
 	Mesh->SetCollisionEnabled(
 		bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
