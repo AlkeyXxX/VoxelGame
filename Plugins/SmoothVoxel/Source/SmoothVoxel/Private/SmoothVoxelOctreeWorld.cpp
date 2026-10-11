@@ -257,8 +257,18 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.Seed = Seed;
 	Settings.BaseHeight = BaseHeight;
 	Settings.HeightAmplitude = HeightAmplitude;
-	Settings.NoiseScale = NoiseScale;
-	Settings.DetailScale = DetailScale;
+
+	// The height field uses 3 FBM octaves with frequency multipliers 1, 2 and
+	// 4. Keep the highest octave below 0.35 lattice units per coarsest sample.
+	// This is a global cap (not per-LOD filtering): every chunk and transition
+	// still samples the same scalar function, avoiding density discontinuities at
+	// LOD boundaries while preventing distant coarse cells from aliasing noise.
+	const int32 SafeMaxLod = FMath::Clamp(MaxLod, 0, 3);
+	const float CoarsestVoxelStep =
+		FMath::Max(1.0f, BaseVoxelSize) * static_cast<float>(1 << SafeMaxLod);
+	const float MaxNoiseScale = 0.35f / (CoarsestVoxelStep * 4.0f);
+	Settings.NoiseScale = FMath::Min(FMath::Max(0.0f, NoiseScale), MaxNoiseScale);
+	Settings.DetailScale = FMath::Min(FMath::Max(0.0f, DetailScale), MaxNoiseScale * 0.75f);
 	Settings.DetailAmplitude = DetailAmplitude;
 	Settings.BottomDepth = BottomDepth;
 	Settings.bEnableCaves = bEnableCaves;
@@ -346,7 +356,10 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	FSVoxelOctreeSelectionSettings SelectionSettings;
 	SelectionSettings.CellsPerAxis = FMath::Clamp(CellsPerAxis, 4, 128);
 	SelectionSettings.BaseVoxelSize = FMath::Max(1.0f, BaseVoxelSize);
-	SelectionSettings.MaxLod = FMath::Clamp(MaxLod, 0, 8);
+	// Keep the largest cell spacing within the noise bandwidth used by
+	// MakeGenerationSettings. Serialized actor instances cannot re-enable the
+	// previous very coarse LODs that aliased the terrain into stripes.
+	SelectionSettings.MaxLod = FMath::Clamp(MaxLod, 0, 3);
 	SelectionSettings.SplitDistanceMultiplier = FMath::Clamp(SplitDistanceMultiplier, 0.05f, 4.0f);
 	SelectionSettings.MaxLeafCount = FMath::Max(32, MaxLeafCount);
 
