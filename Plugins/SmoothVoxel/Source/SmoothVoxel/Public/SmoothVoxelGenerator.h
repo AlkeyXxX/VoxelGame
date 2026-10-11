@@ -4,6 +4,9 @@
 #include "CoreMinimal.h"
 #include "SmoothVoxelTypes.h"
 
+// Sparse, world-aligned cell overrides: +1 adds solid volume, -1 carves air.
+using FSVoxelBlockEditMap = TMap<FIntVector, int8>;
+
 struct FSVoxelGenerationSettings
 {
 	int32 CellsPerAxis = 32;
@@ -47,6 +50,9 @@ struct FSVoxelGenerationSettings
 	// World position of this chunk.
 	// Allows neighboring chunks to use the same continuous noise field.
 	FVector ChunkWorldOrigin = FVector::ZeroVector;
+
+	// Immutable snapshot shared safely with asynchronous mesh workers.
+	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEdits;
 };
 
 class FSVoxelGenerator
