@@ -558,6 +558,7 @@ namespace
 		OutMesh.Vertices.Add(LocalPosition);
 		OutMesh.Normals.Add(Normal);
 		OutMesh.UV0.Add(UV);
+		OutMesh.VertexColors.Add(FSVoxelGenerator::GetBiomeTint(WorldX, WorldY, Settings));
 		OutMesh.Tangents.Add(FProcMeshTangent(Tangent, bFlipTangentY));
 		return NewIndex;
 	}
@@ -755,6 +756,7 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 	const bool bHasNormals = Mesh.Normals.Num() == OriginalVertexCount;
 	const bool bHasUV0 = Mesh.UV0.Num() == OriginalVertexCount;
 	const bool bHasTangents = Mesh.Tangents.Num() == OriginalVertexCount;
+	const bool bHasVertexColors = Mesh.VertexColors.Num() == OriginalVertexCount;
 
 	const TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodes = Settings.MinedNodes;
 	TSet<FIntVector> EditedNeighborhood;
@@ -819,6 +821,9 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 		const FProcMeshTangent Tangent = bHasTangents
 			? Mesh.Tangents[SourceIndex]
 			: FProcMeshTangent();
+		const FLinearColor VertexColor = bHasVertexColors
+			? Mesh.VertexColors[SourceIndex]
+			: FLinearColor::White;
 
 		const int32 NewIndex = Mesh.Vertices.Num();
 		Mesh.Vertices.Add(Position);
@@ -836,6 +841,10 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 		if (bHasTangents)
 		{
 			Mesh.Tangents.Add(Tangent);
+		}
+		if (bHasVertexColors)
+		{
+			Mesh.VertexColors.Add(VertexColor);
 		}
 		return NewIndex;
 	};
