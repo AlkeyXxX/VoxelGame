@@ -11,6 +11,7 @@
 #include "../VoxelInventoryComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "Components/InputComponent.h"
 #include "InputCoreTypes.h"
 #include "Engine/World.h"
 #include "CollisionShape.h"
@@ -630,6 +631,48 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 ASmoothVoxelOctreeWorld::ASmoothVoxelOctreeWorld()
 {
 	PrimaryActorTick.bCanEverTick = true;
+}
+
+void ASmoothVoxelOctreeWorld::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (!bEnableBlockEditing || !bBindPlayerInteractionInput || !GetWorld())
+	{
+		return;
+	}
+
+	APlayerController* PlayerController =
+		UGameplayStatics::GetPlayerController(this, 0);
+	if (!IsValid(PlayerController))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("SmoothVoxelOctreeWorld: no player controller available to bind terrain interaction input."));
+		return;
+	}
+
+	// The Octree world binds the project's existing action mappings itself.
+	// This keeps mining/placement independent from the deprecated AVoxelWorld.
+	EnableInput(PlayerController);
+	if (InputComponent)
+	{
+		InputComponent->BindAction(
+			FName(TEXT("BreakBlock")), IE_Pressed,
+			this, &ASmoothVoxelOctreeWorld::HandleBreakBlockInput);
+		InputComponent->BindAction(
+			FName(TEXT("PlaceBlock")), IE_Pressed,
+			this, &ASmoothVoxelOctreeWorld::HandlePlaceBlockInput);
+	}
+}
+
+void ASmoothVoxelOctreeWorld::HandleBreakBlockInput()
+{
+	(void)BreakBlockByRay();
+}
+
+void ASmoothVoxelOctreeWorld::HandlePlaceBlockInput()
+{
+	(void)PlaceBlockByRay();
 }
 
 void ASmoothVoxelOctreeWorld::EndPlay(const EEndPlayReason::Type EndPlayReason)

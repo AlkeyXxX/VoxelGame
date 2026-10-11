@@ -5,7 +5,6 @@
 #include "VoxelWorldSaveGame.h"
 #include "VoxelBlockLibrary.h"
 #include "VoxelInventoryComponent.h"
-#include "SmoothVoxelOctreeWorld.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -105,23 +104,6 @@ namespace
     }
 }
 
-    ASmoothVoxelOctreeWorld* FindEditableOctreeWorld(UObject* WorldContextObject)
-    {
-        if (!WorldContextObject)
-        {
-            return nullptr;
-        }
-
-        AActor* Candidate = UGameplayStatics::GetActorOfClass(
-            WorldContextObject,
-            ASmoothVoxelOctreeWorld::StaticClass());
-        ASmoothVoxelOctreeWorld* OctreeWorld = Cast<ASmoothVoxelOctreeWorld>(Candidate);
-        return IsValid(OctreeWorld) && OctreeWorld->bAutoGenerate && OctreeWorld->bEnableBlockEditing
-            ? OctreeWorld
-            : nullptr;
-    }
-
-
 
 AVoxelWorld::AVoxelWorld()
 {
@@ -139,6 +121,13 @@ void AVoxelWorld::BeginPlay()
 {
     Super::BeginPlay();
 
+    if (!bEnableLegacyWorld)
+    {
+        // Do not generate a second world alongside ASmoothVoxelOctreeWorld.
+        SetActorTickEnabled(false);
+        return;
+    }
+
     GenerateWorld();
 }
 
@@ -146,12 +135,10 @@ void AVoxelWorld::BeginPlay()
 void AVoxelWorld::EndPlay(
     const EEndPlayReason::Type EndPlayReason)
 {
-    /*
-     * Перед выходом из мира сохраняем накопленные изменения.
-     * SaveGame содержит только delta-данные, поэтому для текущего
-     * этапа это маленькая операция.
-     */
-    SaveWorld();
+    if (bEnableLegacyWorld)
+    {
+        SaveWorld();
+    }
 
     Super::EndPlay(EndPlayReason);
 }
@@ -161,6 +148,11 @@ void AVoxelWorld::Tick(
     float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+
+    if (!bEnableLegacyWorld)
+    {
+        return;
+    }
 
     UpdateChunkStreaming();
 
@@ -194,6 +186,11 @@ void AVoxelWorld::ConfigureWorldGenerator()
 
 void AVoxelWorld::GenerateWorld()
 {
+    if (!bEnableLegacyWorld)
+    {
+        return;
+    }
+
     /*
      * Синхронизируем параметры генератора.
      */
@@ -887,7 +884,7 @@ void AVoxelWorld::GenerateChunkBlocks(
 
 void AVoxelWorld::SaveWorld()
 {
-    if (SaveSlotName.IsEmpty())
+    if (!bEnableLegacyWorld || SaveSlotName.IsEmpty())
     {
         return;
     }
@@ -950,7 +947,7 @@ void AVoxelWorld::SaveWorld()
 
 bool AVoxelWorld::LoadWorld()
 {
-    if (SaveSlotName.IsEmpty() ||
+    if (!bEnableLegacyWorld || SaveSlotName.IsEmpty() ||
         !UGameplayStatics::DoesSaveGameExist(
             SaveSlotName,
             SaveUserIndex))
@@ -1096,6 +1093,11 @@ void AVoxelWorld::SetPersistentObjectState(
     int64 ObjectId,
     uint8 State)
 {
+    if (!bEnableLegacyWorld)
+    {
+        return;
+    }
+
     SetPersistentObjectStateInternal(
         ObjectId,
         State);
@@ -1116,6 +1118,12 @@ bool AVoxelWorld::GetPersistentObjectState(
     int64 ObjectId,
     uint8& OutState) const
 {
+    if (!bEnableLegacyWorld)
+    {
+        OutState = 0;
+        return false;
+    }
+
     if (const uint8* State =
         PersistentObjectStates.Find(ObjectId))
     {
@@ -1371,10 +1379,8 @@ void AVoxelWorld::SetBlockInternal(
 void AVoxelWorld::RemoveBlockAtWorld(
     const FVector& WorldPosition)
 {
-    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    if (!bEnableLegacyWorld)
     {
-        OctreeWorld->SetBlockDataTable(BlockDataTable);
-        OctreeWorld->RemoveBlockAtWorld(WorldPosition);
         return;
     }
 
@@ -1402,10 +1408,8 @@ void AVoxelWorld::SetBlockAtWorld(
     const FVector& WorldPosition,
     EVoxelBlock Block)
 {
-    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    if (!bEnableLegacyWorld)
     {
-        OctreeWorld->SetBlockDataTable(BlockDataTable);
-        OctreeWorld->SetBlockAtWorld(WorldPosition, Block);
         return;
     }
 
@@ -1471,10 +1475,9 @@ void AVoxelWorld::RebuildChunkAndNeighbors(
  */
 bool AVoxelWorld::BreakBlockByRay()
 {
-    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    if (!bEnableLegacyWorld)
     {
-        OctreeWorld->SetBlockDataTable(BlockDataTable);
-        return OctreeWorld->BreakBlockByRay();
+        return false;
     }
 
     APlayerController* PC =
@@ -1647,10 +1650,9 @@ bool AVoxelWorld::BreakBlockByRay()
  */
 bool AVoxelWorld::PlaceBlockByRay()
 {
-    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    if (!bEnableLegacyWorld)
     {
-        OctreeWorld->SetBlockDataTable(BlockDataTable);
-        return OctreeWorld->PlaceBlockByRay();
+        return false;
     }
 
     /*
@@ -1682,10 +1684,9 @@ bool AVoxelWorld::PlaceBlockByRay()
 bool AVoxelWorld::PlaceBlockByRayWithType(
     EVoxelBlock BlockToPlace)
 {
-    if (ASmoothVoxelOctreeWorld* OctreeWorld = FindEditableOctreeWorld(this))
+    if (!bEnableLegacyWorld)
     {
-        OctreeWorld->SetBlockDataTable(BlockDataTable);
-        return OctreeWorld->PlaceBlockByRayWithType(BlockToPlace);
+        return false;
     }
 
     APlayerController* PC =

@@ -29,6 +29,10 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+    /** Deprecated block-world backend. Disabled by default; the active world is ASmoothVoxelOctreeWorld. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Legacy")
+    bool bEnableLegacyWorld = false;
+
 
     /*
      * Создание мира.

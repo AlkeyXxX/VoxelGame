@@ -155,6 +155,7 @@ class SMOOTHVOXEL_API ASmoothVoxelOctreeWorld : public AActor
 public:
 	ASmoothVoxelOctreeWorld();
 
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -313,6 +314,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
 	bool bEnableBlockEditing = true;
 
+	/** Bind BreakBlock/PlaceBlock input actions directly to this Octree world. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
+	bool bBindPlayerInteractionInput = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
 	UDataTable* BlockDataTable = nullptr;
 
@@ -350,6 +355,8 @@ public:
 	void EnqueueCompletedChunk(ASmoothVoxelTransvoxelChunk* Chunk);
 
 private:
+	void HandleBreakBlockInput();
+	void HandlePlaceBlockInput();
 	void RebuildForCamera(const FVector& CameraLocation);
 	void PrepareDesiredChunks(const FVector& CameraLocation);
 	void LaunchQueuedBuilds(const FVector& CameraLocation);
