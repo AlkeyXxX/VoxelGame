@@ -744,12 +744,15 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 			const double NaturalHeight = NaturalHeights[Index];
 			const double BedHeight = CarvedBedHeights[Index];
 
-			// Rivers sit below the local uncarved ground and above the carved
-			// bed. If the smoothed profile would float above a bank, cap it below
-			// that bank; if it lies below the bed, that segment is naturally hidden.
+			// The smoothed target removes small terrain undulations. Clamp it
+			// between the carved bed and a safety margin below the uncarved bank:
+			// this prevents floating water and makes the centre of a channel fill.
 			const double SmoothedWaterHeight = SmoothedHeights[Index] - RiverDepth * 0.35;
 			const double BelowBankHeight = NaturalHeight - FMath::Max(75.0, RiverDepth * 0.12);
-			const double RiverSurfaceHeight = FMath::Min(SmoothedWaterHeight, BelowBankHeight);
+			const double AboveBedHeight = BedHeight + RiverDepth * 0.10 * RiverInfluence;
+			const double RiverSurfaceHeight = FMath::Min(
+				FMath::Max(SmoothedWaterHeight, AboveBedHeight),
+				BelowBankHeight);
 
 			RiverVertices.Add(FVector(
 				LocalX,
@@ -761,11 +764,6 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 				static_cast<float>(Y) * Step / SafeTileSize));
 			RiverColors.Add(FLinearColor::White);
 			RiverTangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
-
-			// Keep these values used explicitly: the generated water level must
-			// be above its bed to be visible and must never rise above terrain.
-			(void)BedHeight;
-			(void)RiverInfluence;
 		}
 	}
 
