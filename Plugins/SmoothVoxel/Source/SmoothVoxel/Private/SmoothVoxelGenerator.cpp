@@ -497,7 +497,7 @@ float FSVoxelGenerator::SampleFlatlandInfluence(
         0.0f, 1.0f);
     const float HillCoverage = Biome == ESVoxelBiome::Desert
         ? FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f)
-        : FMath::Clamp(1.0f - S.FlatlandCoverage, 0.0f, 0.9f);
+        : FMath::Clamp(1.0f - FMath::Clamp(S.FlatlandCoverage, 0.5f, 0.9f), 0.0f, 0.5f);
     const float BorderWidth = Biome == ESVoxelBiome::Desert ? 0.025f : 0.075f;
     const float T = FMath::Clamp(
         (Region01 - (1.0f - HillCoverage - BorderWidth)) /
@@ -531,7 +531,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
 
     const float HillCoverage = Biome == ESVoxelBiome::Desert
         ? FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f)
-        : FMath::Clamp(1.0f - S.FlatlandCoverage, 0.0f, 0.9f);
+        : FMath::Clamp(1.0f - FMath::Clamp(S.FlatlandCoverage, 0.5f, 0.9f), 0.0f, 0.5f);
     const float BorderWidth = Biome == ESVoxelBiome::Desert ? 0.025f : 0.075f;
     const float HillBlend = SmoothStep(
         1.0f - HillCoverage - BorderWidth,
@@ -540,7 +540,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
 
     const float MountainThreshold = FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f);
     float MountainBlend = S.bEnableBiomes
-        ? SmoothStep(MountainThreshold - 0.10f, MountainThreshold + 0.12f, MountainSignal)
+        ? SmoothStep(MountainThreshold, MountainThreshold + 0.20f, MountainSignal)
         : 0.0f;
     if (Biome == ESVoxelBiome::Desert)
     {
@@ -733,7 +733,7 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
 
     // Convert world-space channel width into a dimensionless band around the
     // field's zero-contour. Smooth falloff avoids hard cliffs at the carved banks.
-    const double Threshold = FMath::Clamp(HalfWidth * Scale * 0.48, 0.008, 0.20);
+    const double Threshold = FMath::Clamp(HalfWidth * Scale * 0.48, 0.0001, 0.20);
     const float T = FMath::Clamp(
         static_cast<float>(std::abs(Field) / Threshold),
         0.0f,
@@ -880,7 +880,7 @@ double FSVoxelGenerator::SampleSurfaceHeight(
     if (LakeInfluence > 0.0f)
     {
         const double LakeBedLevel = static_cast<double>(LakeWaterLevel) -
-            std::abs(static_cast<double>(S.LakeDepth));
+            FMath::Min(500.0, std::abs(static_cast<double>(S.LakeDepth)));
         SurfaceHeight = FMath::Lerp(
             SurfaceHeight, LakeBedLevel, static_cast<double>(LakeInfluence));
     }
