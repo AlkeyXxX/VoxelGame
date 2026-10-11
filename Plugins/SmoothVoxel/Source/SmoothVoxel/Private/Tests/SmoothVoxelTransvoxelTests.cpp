@@ -124,6 +124,76 @@ bool FSmoothVoxelWorldConfigurationDeterminismTest::RunTest(const FString& Param
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelBiomesAndPOIPlateausTest,
+	"SmoothVoxel.WorldGeneration.BiomesAndPOIPlateausAreDeterministic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelBiomesAndPOIPlateausTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.Seed = 1337;
+	Settings.BaseHeight = 900.0f;
+	Settings.HeightAmplitude = 2500.0f;
+	Settings.DetailAmplitude = 60.0f;
+	Settings.BiomeScale = 0.00000065f;
+	Settings.bEnableBiomes = true;
+	Settings.bEnablePOIPlateaus = true;
+	Settings.POISiteSpacing = 65000.0f;
+	Settings.POIPlateauRadius = 6500.0f;
+	Settings.POIPlateauBlendDistance = 5000.0f;
+
+	TSet<uint8> FoundBiomes;
+	bool bDifferentSeedChangedBiome = false;
+	FSVoxelGenerationSettings DifferentSeedSettings = Settings;
+	DifferentSeedSettings.Seed += 1;
+	for (double X = -350000.0; X <= 350000.0; X += 25000.0)
+	{
+		for (double Y = -350000.0; Y <= 350000.0; Y += 25000.0)
+		{
+			const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(X, Y, Settings);
+			const ESVoxelBiome RepeatedBiome = FSVoxelGenerator::SampleBiome(X, Y, Settings);
+			TestEqual(TEXT("Biome type is deterministic for a fixed seed and coordinate"),
+				static_cast<uint8>(Biome), static_cast<uint8>(RepeatedBiome));
+			FoundBiomes.Add(static_cast<uint8>(Biome));
+			bDifferentSeedChangedBiome |= Biome != FSVoxelGenerator::SampleBiome(X, Y, DifferentSeedSettings);
+		}
+	}
+	TestTrue(TEXT("The map should contain several distinct biome regions"), FoundBiomes.Num() >= 3);
+	TestTrue(TEXT("Changing the seed should change at least one biome sample"), bDifferentSeedChangedBiome);
+
+	double PlateauX = 0.0;
+	double PlateauY = 0.0;
+	bool bFoundStableCore = false;
+	for (double X = -150000.0; X <= 150000.0 && !bFoundStableCore; X += 2500.0)
+	{
+		for (double Y = -150000.0; Y <= 150000.0; Y += 2500.0)
+		{
+			if (FSVoxelGenerator::SamplePOISuitability(X, Y, Settings) > 0.99f &&
+				FSVoxelGenerator::SamplePOISuitability(X + 500.0, Y, Settings) > 0.99f &&
+				FSVoxelGenerator::SamplePOISuitability(X - 500.0, Y, Settings) > 0.99f &&
+				FSVoxelGenerator::SamplePOISuitability(X, Y + 500.0, Settings) > 0.99f &&
+				FSVoxelGenerator::SamplePOISuitability(X, Y - 500.0, Settings) > 0.99f)
+			{
+				PlateauX = X;
+				PlateauY = Y;
+				bFoundStableCore = true;
+				break;
+			}
+		}
+	}
+	TestTrue(TEXT("A generated map should expose stable flat clearing candidates"), bFoundStableCore);
+	if (bFoundStableCore)
+	{
+		const double CenterHeight = FSVoxelGenerator::SampleSurfaceHeight(PlateauX, PlateauY, Settings);
+		TestTrue(TEXT("The clearing core remains level across X"),
+			FMath::IsNearlyEqual(CenterHeight, FSVoxelGenerator::SampleSurfaceHeight(PlateauX + 500.0, PlateauY, Settings), 0.001));
+		TestTrue(TEXT("The clearing core remains level across Y"),
+			FMath::IsNearlyEqual(CenterHeight, FSVoxelGenerator::SampleSurfaceHeight(PlateauX, PlateauY - 500.0, Settings), 0.001));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelCachedSurfaceHeightDensityTest,
 	"SmoothVoxel.Transvoxel.CachedSurfaceHeightMatchesDensity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -203,6 +273,7 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Every output vertex has a normal"), RegularMesh.Normals.Num(), RegularMesh.Vertices.Num());
 	TestEqual(TEXT("Every output vertex has UVs"), RegularMesh.UV0.Num(), RegularMesh.Vertices.Num());
 	TestEqual(TEXT("Every output vertex has tangents"), RegularMesh.Tangents.Num(), RegularMesh.Vertices.Num());
+	TestEqual(TEXT("Every output vertex has a biome tint"), RegularMesh.VertexColors.Num(), RegularMesh.Vertices.Num());
 
 	for (const FVector& Normal : RegularMesh.Normals)
 	{
@@ -255,6 +326,7 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Transition output normals match vertices"), TransitionMesh.Normals.Num(), TransitionMesh.Vertices.Num());
 		TestEqual(TEXT("Transition output UVs match vertices"), TransitionMesh.UV0.Num(), TransitionMesh.Vertices.Num());
 		TestEqual(TEXT("Transition output tangents match vertices"), TransitionMesh.Tangents.Num(), TransitionMesh.Vertices.Num());
+		TestEqual(TEXT("Transition output biome tints match vertices"), TransitionMesh.VertexColors.Num(), TransitionMesh.Vertices.Num());
 
 		for (const int32 Index : TransitionMesh.Triangles)
 		{
