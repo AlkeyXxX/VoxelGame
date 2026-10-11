@@ -701,12 +701,12 @@ bool FSmoothVoxelTransvoxelBlockEditDensityTest::RunTest(const FString& Paramete
 	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
 	Edits->Add(FIntVector(0, 0, 0), int8(1));   // Place one solid cell above the surface.
-	Edits->Add(FIntVector(1, 0, 0), int8(1));   // Touching edited volume overlaps the grid boundary slightly.
+	Edits->Add(FIntVector(1, 1, 1), int8(1));   // Must be found just across the +X cell boundary.
 	Edits->Add(FIntVector(0, 0, -1), int8(-1)); // Carve one cell below the surface.
 	Settings.BlockEdits = Edits;
 
 	const float PlacedCellDensity = FSVoxelGenerator::SampleDensity(50.0, 50.0, 50.0, Settings);
-	const float AdjacentCellBoundaryDensity = FSVoxelGenerator::SampleDensity(96.0, 50.0, 50.0, Settings);
+	const float AdjacentCellBoundaryDensity = FSVoxelGenerator::SampleDensity(96.0, 150.0, 150.0, Settings);
 	const float RemovedCellDensity = FSVoxelGenerator::SampleDensity(50.0, 50.0, -50.0, Settings);
 	const float UnmodifiedDensity = FSVoxelGenerator::SampleDensity(250.0, 250.0, 50.0, Settings);
 
