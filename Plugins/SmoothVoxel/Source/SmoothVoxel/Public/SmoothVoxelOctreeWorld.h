@@ -269,8 +269,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
 	float NoiseScale = 0.00005f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
-	float DetailScale = 0.0000125f;
+	/** World-space scale of surface detail. Higher values produce smaller, more visible undulations (still LOD-clamped). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.000001", ClampMax="0.0001"))
+	float DetailScale = 0.000035f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
 	float DetailAmplitude = 60.0f;
