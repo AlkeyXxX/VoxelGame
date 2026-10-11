@@ -195,9 +195,18 @@ namespace
                         continue;
                     }
 
-                    const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
-                    const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
-                    const double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
+                    double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
+                    double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
+                    double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
+                    if (Settings.BlockEditCenters.IsValid())
+                    {
+                        if (const FVector* EditCenter = Settings.BlockEditCenters->Find(Cell))
+                        {
+                            CenterX = static_cast<double>(EditCenter->X);
+                            CenterY = static_cast<double>(EditCenter->Y);
+                            CenterZ = static_cast<double>(EditCenter->Z);
+                        }
+                    }
 
                     CandidateStates[CandidateCount] = *EditState;
                     if (*EditState == 1)
