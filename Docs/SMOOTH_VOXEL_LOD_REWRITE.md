@@ -94,6 +94,18 @@ winding separately from the stored outward normals.
   repeated hash patterns as absolute world coordinates grow. Mesh vertices remain
   chunk-local. UE4.27 still uses float actor/component transforms, so truly huge
   worlds may additionally need world-origin rebasing.
+
+- `HeightAmplitude` is measured in Unreal centimetres and is a signed
+  amplitude around `BaseHeight`. A value of 200 means only ±2 m; for obvious hills,
+  start around 1500–3000 (±15–30 m) and place the PlayerStart above
+  `BaseHeight + HeightAmplitude` with clearance. Existing Blueprint instances may
+  have serialized overrides, so changing the C++ default does not overwrite
+  their Details-panel values.
+- Chunk streaming work is spread across frames: at most `MaxChunkRequestsPerFrame`
+  chunks are spawned/reconfigured per frame, obsolete chunks are retired in
+  batches, and terrain normals are cached by local vertex position. Regular
+  vertices that are not moved by a Transvoxel transition no longer calculate an
+  extra density gradient. This reduces hitches but still needs profiling in UE4.27.
 - This intentionally trades some fine geometric noise for stable distant terrain.
   Add high-frequency albedo/normal detail in the material rather than raising the
   geometry noise scales beyond the supported sampling bandwidth.
