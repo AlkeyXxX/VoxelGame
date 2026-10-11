@@ -160,7 +160,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
 	float BaseHeight = 900.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
+	/** Terrain relief amplitude in centimetres. 200 means only 2 m either side of BaseHeight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
 	float HeightAmplitude = 2500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
