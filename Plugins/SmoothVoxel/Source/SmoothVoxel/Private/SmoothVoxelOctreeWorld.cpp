@@ -880,7 +880,9 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	{
 		if (const int8* ExistingEdit = EditedBlockCells.Find(Cell))
 		{
-			NextMiningState = FMath::Max<int32>(-5, static_cast<int32>(*ExistingEdit) - 1);
+			NextMiningState = *ExistingEdit < 0
+				? static_cast<int8>(FMath::Max<int32>(-5, static_cast<int32>(*ExistingEdit) - 1))
+				: int8(-1);
 		}
 	}
 
