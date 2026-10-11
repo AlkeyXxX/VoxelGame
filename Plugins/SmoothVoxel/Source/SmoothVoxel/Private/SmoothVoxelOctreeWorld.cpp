@@ -871,7 +871,8 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		// mesh. State +2 is intentionally ignored by the terrain density sampler,
 		// so placing a cube cannot excavate soil underneath it.
 		ASmoothVoxelPlacedCubeBlock* Cube = ExistingCube;
-		if (!IsValid(Cube))
+		const bool bCreatedCube = !IsValid(Cube);
+		if (bCreatedCube)
 		{
 			if (!GetWorld())
 			{
@@ -917,11 +918,11 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 			}
 		}
 
-		const FVector ExistingCubeOrigin = IsValid(Cube)
+		const FVector ExistingCubeOrigin = !bCreatedCube
 			? Cube->GetActorLocation()
 			: FVector::ZeroVector;
 		const FVector* EffectiveCubeOrigin = CubeWorldOriginOverride;
-		if (!EffectiveCubeOrigin && IsValid(Cube))
+		if (!EffectiveCubeOrigin && !bCreatedCube)
 		{
 			EffectiveCubeOrigin = &ExistingCubeOrigin;
 		}
