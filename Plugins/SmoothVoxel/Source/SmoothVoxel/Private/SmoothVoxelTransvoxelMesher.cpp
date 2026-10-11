@@ -52,10 +52,14 @@ namespace
 		const double HeightYM = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
 			LocalPosition - FVector(0.0f, H, 0.0f), Settings);
 
-		// With a height field D(x,y,z)=H(x,y)-z, its exact finite-difference
-		// gradient can be derived from just four 2D height samples. This avoids
-		// six full 3D density evaluations for every surface vertex.
-		if (!Settings.bEnableCaves || Settings.CaveStrength <= 0.0f)
+		const bool bHasBlockEdits =
+			Settings.BlockEdits.IsValid() && Settings.BlockEdits->Num() > 0;
+
+		// A plain height field has an inexpensive analytical finite-difference
+		// normal. Once mining/placement has modified the SDF, that shortcut is
+		// no longer valid: it ignores the cut walls and made freshly exposed
+		// triangles shade as if the original hill were still present.
+		if ((!Settings.bEnableCaves || Settings.CaveStrength <= 0.0f) && !bHasBlockEdits)
 		{
 			return FVector(
 				-static_cast<float>(HeightXP - HeightXM),
@@ -63,8 +67,9 @@ namespace
 				2.0f * H).GetSafeNormal();
 		}
 
-		// Caves add a true 3D field. Reuse the surface-height samples so the
-		// gradient only evaluates cave noise at the six offset positions.
+		// Caves and block edits alter the actual 3D density field. Reuse the
+		// surface-height samples and compute the normal from that same field,
+		// including the immutable block-edit snapshot captured for this chunk.
 		const double HeightHere =
 			FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(LocalPosition, Settings);
 		const float Dx =
@@ -437,21 +442,40 @@ namespace
 				Swap(B, C);
 			}
 
-			const FVector EdgeA = CellLocalVertices[B] - CellLocalVertices[A];
-			const FVector EdgeB = CellLocalVertices[C] - CellLocalVertices[A];
-			const FVector FaceNormal = FVector::CrossProduct(EdgeA, EdgeB);
-			if (FaceNormal.SizeSquared() <= SMALL_NUMBER)
+			const uint32 GlobalA = CellGlobalIndices[A];
+			const uint32 GlobalB = CellGlobalIndices[B];
+			const uint32 GlobalC = CellGlobalIndices[C];
+
+			// Position caching can merge almost coincident edge intersections.
+			// Do not upload a triangle whose final mesh indices collapse to one
+			// or two vertices; such zero-area faces show up as tiny cracks in
+			// render meshes and produce unreliable collision.
+			if (GlobalA == GlobalB || GlobalB == GlobalC || GlobalC == GlobalA)
 			{
 				continue;
 			}
 
-			const FVector ExpectedNormal = (CellNormals[A] + CellNormals[B] + CellNormals[C]).GetSafeNormal();
+			const FVector& MeshA = OutMesh.Vertices[static_cast<int32>(GlobalA)];
+			const FVector& MeshB = OutMesh.Vertices[static_cast<int32>(GlobalB)];
+			const FVector& MeshC = OutMesh.Vertices[static_cast<int32>(GlobalC)];
+			const FVector MeshFaceNormal = FVector::CrossProduct(MeshB - MeshA, MeshC - MeshA);
+			if (MeshFaceNormal.SizeSquared() <= SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const FVector FaceNormal = FVector::CrossProduct(
+				CellLocalVertices[B] - CellLocalVertices[A],
+				CellLocalVertices[C] - CellLocalVertices[A]);
+			const FVector ExpectedNormal =
+				(CellNormals[A] + CellNormals[B] + CellNormals[C]).GetSafeNormal();
 
 			// Unreal's front-face convention for procedural triangles is opposite
-			// to the conventional cross-product direction. Keep the supplied
-			// shading normals pointing outward, but wind the indices for UE's
-			// front-face culling and one-sided triangle-mesh collision.
-			if (FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f)
+			// to the conventional cross-product direction. Keep supplied shading
+			// normals outward, but only use them for winding when the gradient is
+			// well-defined; an edited SDF can have a zero gradient at a corner.
+			if (ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
+				FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f)
 			{
 				Swap(B, C);
 			}
