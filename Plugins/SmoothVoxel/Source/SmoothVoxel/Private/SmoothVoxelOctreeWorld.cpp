@@ -533,7 +533,14 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 
 	const float SafeWorldSize = FMath::Max(100.0f, WorldSize);
 	const float SafeTileSize = FMath::Max(100.0f, InTileSize);
-	const int32 SafeResolution = FMath::Clamp(InResolution, 16, 512);
+	const int32 RequestedResolution = FMath::Clamp(InResolution, 16, 512);
+	const float RiverHalfWidthForGrid = FMath::Max(
+		250.0f, FMath::Abs(InGenerationSettings.RiverHalfWidth));
+	const int32 ResolutionForRiverWidth = InGenerationSettings.bEnableRivers
+		? FMath::CeilToInt(SafeWorldSize / RiverHalfWidthForGrid)
+		: 16;
+	const int32 SafeResolution = FMath::Clamp(
+		FMath::Max(RequestedResolution, ResolutionForRiverWidth), 16, 4096);
 	UMaterialInterface* EffectiveMaterial = InMaterial
 		? InMaterial
 		: FallbackWaterMaterial;
@@ -617,7 +624,7 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 		return;
 	}
 
-	const int32 Resolution = FMath::Clamp(InResolution, 16, 512);
+	const int32 Resolution = FMath::Clamp(InResolution, 16, 4096);
 	const int32 Side = Resolution + 1;
 	const float HalfExtent = FMath::Max(100.0f, WorldSize) * 0.5f;
 	const float Step = (HalfExtent * 2.0f) / static_cast<float>(Resolution);
@@ -680,10 +687,10 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	TArray<FLinearColor> LakeColors;
 	TArray<FProcMeshTangent> LakeTangents;
 
-	RiverVertices.Reserve(Resolution * Resolution / 8);
-	RiverTriangles.Reserve(Resolution * Resolution * 2);
-	LakeVertices.Reserve(Resolution * Resolution / 32);
-	LakeTriangles.Reserve(Resolution * Resolution / 8);
+	RiverVertices.Reserve(FMath::Min(Resolution * Resolution / 8, 1000000));
+	RiverTriangles.Reserve(FMath::Min(Resolution * Resolution * 2, 4000000));
+	LakeVertices.Reserve(FMath::Min(Resolution * Resolution / 32, 250000));
+	LakeTriangles.Reserve(FMath::Min(Resolution * Resolution / 8, 1000000));
 
 	TArray<float> RiverWetness;
 	TArray<float> LakeWetness;
@@ -707,9 +714,6 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 				static_cast<double>(HalfExtent) + static_cast<double>(X) * Step;
 			const double WorldY = static_cast<double>(ConfiguredWorldCenter.Y) -
 				static_cast<double>(HalfExtent) + static_cast<double>(Y) * Step;
-			const double Ground = FSVoxelGenerator::SampleSurfaceHeight(
-				WorldX, WorldY, GenerationSettings);
-
 			float RiverInfluence = 0.0f;
 			float SignedField = 0.0f;
 			if (GenerationSettings.bEnableRivers)
@@ -718,10 +722,6 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 					WorldX, WorldY, GenerationSettings, RiverInfluence, SignedField);
 			}
 			RiverInfluence = FMath::Clamp(RiverInfluence, 0.0f, 1.0f);
-			const double RiverHead = (RiverLevel - Ground) / RiverDepthForMask;
-			RiverWetness[Index] = FMath::Min(
-				RiverInfluence - 0.0001f,
-				static_cast<float>(FMath::Clamp(RiverHead, -1.0, 1.0)));
 
 			float LakeInfluence = 0.0f;
 			float LakeLevel = static_cast<float>(RiverLevel);
@@ -732,6 +732,22 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 			}
 			LakeInfluence = FMath::Clamp(LakeInfluence, 0.0f, 1.0f);
 			LakeLevels[Index] = LakeLevel;
+
+			// The water is dry whenever its body mask is zero, regardless of terrain height.
+			// Sampling surface height only under candidate water avoids evaluating complex
+			// terrain FBM across millions of dry grid points at adaptive river resolutions.
+			double Ground = 0.0;
+			if (RiverInfluence > 0.0001f || LakeInfluence > 0.0001f)
+			{
+				Ground = FSVoxelGenerator::SampleSurfaceHeight(
+					WorldX, WorldY, GenerationSettings);
+			}
+
+			const double RiverHead = (RiverLevel - Ground) / RiverDepthForMask;
+			RiverWetness[Index] = FMath::Min(
+				RiverInfluence - 0.0001f,
+				static_cast<float>(FMath::Clamp(RiverHead, -1.0, 1.0)));
+
 			const double LakeHead = (static_cast<double>(LakeLevel) - Ground) / LakeDepthForMask;
 			LakeWetness[Index] = FMath::Min(
 				LakeInfluence - 0.0001f,
