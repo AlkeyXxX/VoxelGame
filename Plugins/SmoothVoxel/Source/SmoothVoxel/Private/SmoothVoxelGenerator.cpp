@@ -654,26 +654,30 @@ FLinearColor FSVoxelGenerator::GetBiomeTint(
     return FMath::Lerp(Tint, BareEarth, ClearingWeight * 0.45f);
 }
 
-float FSVoxelGenerator::SampleRiverInfluence(
+void FSVoxelGenerator::SampleRiverMaskAndField(
     double X,
     double Y,
-    const FSVoxelGenerationSettings& S)
+    const FSVoxelGenerationSettings& S,
+    float& OutInfluence,
+    float& OutSignedField)
 {
+    OutInfluence = 0.0f;
+    OutSignedField = 0.0f;
     if (!S.bEnableRivers)
     {
-        return 0.0f;
+        return;
     }
 
     const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.RiverScale)));
     const double HalfWidth = FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
     if (HalfWidth <= 0.0)
     {
-        return 0.0f;
+        return;
     }
 
     // Domain warp makes the zero-contours meander instead of looking like a
-    // repeated grid. A low-frequency scalar field creates a deterministic,
-    // connected network whose samples are identical in every Octree chunk.
+    // repeated grid. The signed field also provides a stable local channel
+    // normal, allowing river water to stay level across the width of its bed.
     const double WarpScale = Scale * 0.37;
     const double WarpX = FBM2D(X * WarpScale, Y * WarpScale, S.Seed + 8111);
     const double WarpY = FBM2D(X * WarpScale + 19.7, Y * WarpScale - 31.3, S.Seed + 8231);
@@ -683,15 +687,27 @@ float FSVoxelGenerator::SampleRiverInfluence(
         (Y + WarpY * WarpDistance) * Scale,
         S.Seed + 8329);
 
-    // Convert the world-space river half-width into the field's dimensionless
-    // band width. The smooth falloff keeps the carved banks watertight across LOD.
+    // Convert world-space channel width into a dimensionless band around the
+    // field's zero-contour. Smooth falloff avoids hard cliffs at the carved banks.
     const double Threshold = FMath::Clamp(HalfWidth * Scale * 0.48, 0.008, 0.20);
     const float T = FMath::Clamp(
         static_cast<float>(std::abs(Field) / Threshold),
         0.0f,
         1.0f);
     const float SmoothT = T * T * (3.0f - 2.0f * T);
-    return 1.0f - SmoothT;
+    OutInfluence = 1.0f - SmoothT;
+    OutSignedField = static_cast<float>(Field);
+}
+
+float FSVoxelGenerator::SampleRiverInfluence(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    float Influence = 0.0f;
+    float SignedField = 0.0f;
+    SampleRiverMaskAndField(X, Y, S, Influence, SignedField);
+    return Influence;
 }
 
 double FSVoxelGenerator::SampleSurfaceHeight(
