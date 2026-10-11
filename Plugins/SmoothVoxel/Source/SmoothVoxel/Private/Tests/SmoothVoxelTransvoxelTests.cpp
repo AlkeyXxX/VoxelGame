@@ -702,7 +702,7 @@ bool FSmoothVoxelTransvoxelBlockEditDensityTest::RunTest(const FString& Paramete
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
 	Edits->Add(FIntVector(1, 0, 0), int8(1));   // Smooth soil cell above the surface.
 	Edits->Add(FIntVector(1, 1, 1), int8(1));   // Smooth cell must be found near its boundary.
-	Edits->Add(FIntVector(0, 0, 0), int8(-1)); // Carve wins where it overlaps a smooth addition.
+	Edits->Add(FIntVector(0, 0, 0), int8(-5)); // Fully mined octahedron wins where it overlaps a smooth addition.
 	Edits->Add(FIntVector(0, 0, -1), int8(-1)); // Carve one cell below the surface.
 	Edits->Add(FIntVector(2, 0, 1), int8(2));   // A hard cube reserves air in the terrain SDF.
 	Settings.BlockEdits = Edits;
