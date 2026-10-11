@@ -303,8 +303,7 @@ private:
 		const FIntVector& Cell,
 		EVoxelBlock Block,
 		int8 EditStateOverride = 0,
-		const FVector* EditCenterOverride = nullptr,
-		const FVector* CubeWorldOriginOverride = nullptr);
+		const FVector* EditCenterOverride = nullptr);
 	void RebuildChunksNearEditedCell(const FIntVector& Cell, bool bGridNode = false);
 
 	FSVoxelGenerationSettings MakeGenerationSettings(
