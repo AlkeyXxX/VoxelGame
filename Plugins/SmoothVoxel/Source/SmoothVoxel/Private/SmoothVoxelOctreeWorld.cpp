@@ -3,6 +3,7 @@
 #include "Async/Async.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/Material.h"
 #include "ProceduralMeshComponent.h"
 #include "SmoothVoxelTransvoxelMesher.h"
 #include "SmoothVoxelGenerator.h"
@@ -491,6 +492,171 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	bBuildFailed = false;
 }
 
+ASmoothVoxelWaterSurface::ASmoothVoxelWaterSurface()
+{
+	PrimaryActorTick.bCanEverTick = false;
+
+	Mesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("WaterSurfaceMesh"));
+	RootComponent = Mesh;
+	Mesh->bUseAsyncCooking = false;
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetCollisionObjectType(ECC_WorldStatic);
+	Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetCanEverAffectNavigation(false);
+
+	// Starter Content's lake material provides an out-of-box water appearance.
+	// Projects can override it per world instance through WaterMaterial.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WaterAsset(
+		TEXT("/Game/StarterContent/Materials/M_Water_Lake.M_Water_Lake"));
+	if (WaterAsset.Succeeded())
+	{
+		FallbackWaterMaterial = WaterAsset.Object;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("SmoothVoxel water: Starter Content M_Water_Lake was not found. Assign WaterMaterial on BP_OctreeWorld."));
+	}
+}
+
+void ASmoothVoxelWaterSurface::ConfigureSurface(
+	const FVector& WorldCenter,
+	float WorldSize,
+	float InSeaLevel,
+	float InTileSize,
+	int32 InResolution,
+	UMaterialInterface* InMaterial,
+	bool bEnableCollision)
+{
+	check(IsInGameThread());
+
+	const float SafeWorldSize = FMath::Max(100.0f, WorldSize);
+	const float SafeTileSize = FMath::Max(100.0f, InTileSize);
+	const int32 SafeResolution = FMath::Clamp(InResolution, 16, 512);
+	UMaterialInterface* EffectiveMaterial = InMaterial
+		? InMaterial
+		: FallbackWaterMaterial;
+	if (!EffectiveMaterial)
+	{
+		EffectiveMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
+	}
+
+	const bool bUnchanged = bHasConfiguration &&
+		ConfiguredWorldCenter.Equals(WorldCenter, KINDA_SMALL_NUMBER) &&
+		FMath::IsNearlyEqual(ConfiguredWorldSize, SafeWorldSize) &&
+		FMath::IsNearlyEqual(ConfiguredSeaLevel, InSeaLevel) &&
+		FMath::IsNearlyEqual(ConfiguredTileSize, SafeTileSize) &&
+		ConfiguredResolution == SafeResolution &&
+		ActiveMaterial == EffectiveMaterial &&
+		bConfiguredCollision == bEnableCollision;
+	if (bUnchanged)
+	{
+		return;
+	}
+
+	ConfiguredWorldCenter = WorldCenter;
+	ConfiguredWorldSize = SafeWorldSize;
+	ConfiguredSeaLevel = InSeaLevel;
+	ConfiguredTileSize = SafeTileSize;
+	ConfiguredResolution = SafeResolution;
+	bConfiguredCollision = bEnableCollision;
+	bHasConfiguration = true;
+	ActiveMaterial = EffectiveMaterial;
+
+	SetActorLocation(FVector(WorldCenter.X, WorldCenter.Y, InSeaLevel));
+	BuildSurfaceMesh(SafeWorldSize, SafeTileSize, SafeResolution, bEnableCollision);
+}
+
+void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
+	float WorldSize,
+	float InTileSize,
+	int32 InResolution,
+	bool bEnableCollision)
+{
+	if (!Mesh)
+	{
+		return;
+	}
+
+	const int32 Resolution = FMath::Clamp(InResolution, 16, 512);
+	const int32 Side = Resolution + 1;
+	const float HalfExtent = FMath::Max(100.0f, WorldSize) * 0.5f;
+	const float Step = (HalfExtent * 2.0f) / static_cast<float>(Resolution);
+	const float SafeTileSize = FMath::Max(100.0f, InTileSize);
+
+	TArray<FVector> Vertices;
+	TArray<int32> Triangles;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UV0;
+	TArray<FLinearColor> Colors;
+	TArray<FProcMeshTangent> Tangents;
+	const int32 VertexCount = Side * Side;
+	Vertices.Reserve(VertexCount);
+	Normals.Reserve(VertexCount);
+	UV0.Reserve(VertexCount);
+	Colors.Reserve(VertexCount);
+	Tangents.Reserve(VertexCount);
+	Triangles.Reserve(Resolution * Resolution * 6);
+
+	for (int32 Y = 0; Y <= Resolution; ++Y)
+	{
+		for (int32 X = 0; X <= Resolution; ++X)
+		{
+			const float LocalX = -HalfExtent + static_cast<float>(X) * Step;
+			const float LocalY = -HalfExtent + static_cast<float>(Y) * Step;
+			Vertices.Add(FVector(LocalX, LocalY, 0.0f));
+			Normals.Add(FVector::UpVector);
+			UV0.Add(FVector2D(
+				static_cast<float>(X) * Step / SafeTileSize,
+				static_cast<float>(Y) * Step / SafeTileSize));
+			Colors.Add(FLinearColor::White);
+			Tangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
+		}
+	}
+
+	// Match the ProceduralMeshComponent winding used by the voxel blocks while
+	// retaining upward normals. Every water vertex is derived from the same
+	// global XY bounds, so the sheet never shifts as Octree LODs stream.
+	for (int32 Y = 0; Y < Resolution; ++Y)
+	{
+		for (int32 X = 0; X < Resolution; ++X)
+		{
+			const int32 A = Y * Side + X;
+			const int32 B = A + 1;
+			const int32 D = (Y + 1) * Side + X;
+			const int32 C = D + 1;
+			Triangles.Add(A);
+			Triangles.Add(C);
+			Triangles.Add(B);
+			Triangles.Add(A);
+			Triangles.Add(D);
+			Triangles.Add(C);
+		}
+	}
+
+	Mesh->ClearAllMeshSections();
+	Mesh->CreateMeshSection_LinearColor(
+		0,
+		Vertices,
+		Triangles,
+		Normals,
+		UV0,
+		TArray<FVector2D>(),
+		TArray<FVector2D>(),
+		TArray<FVector2D>(),
+		Colors,
+		Tangents,
+		bEnableCollision);
+	if (ActiveMaterial)
+	{
+		Mesh->SetMaterial(0, ActiveMaterial);
+	}
+	Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
+	Mesh->SetCollisionEnabled(
+		bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+}
+
 ASmoothVoxelPlacedCubeBlock::ASmoothVoxelPlacedCubeBlock()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -647,6 +813,52 @@ void ASmoothVoxelOctreeWorld::BeginPlay()
 {
 	Super::BeginPlay();
 	TryBindPlayerInteractionInput();
+	UpdateWaterSurface();
+}
+
+void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
+{
+	check(IsInGameThread());
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (!bEnableWater)
+	{
+		if (IsValid(WaterSurfaceActor))
+		{
+			WaterSurfaceActor->SetActorHiddenInGame(true);
+		}
+		return;
+	}
+
+	if (!IsValid(WaterSurfaceActor))
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		WaterSurfaceActor = GetWorld()->SpawnActor<ASmoothVoxelWaterSurface>(
+			FVector(RootWorldCenter.X, RootWorldCenter.Y, SeaLevel),
+			FRotator::ZeroRotator,
+			SpawnParams);
+		if (!IsValid(WaterSurfaceActor))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SmoothVoxelOctreeWorld: failed to spawn the water surface actor."));
+			return;
+		}
+	}
+
+	WaterSurfaceActor->SetActorHiddenInGame(false);
+	WaterSurfaceActor->ConfigureSurface(
+		RootWorldCenter,
+		GetWorldSizeCentimeters(),
+		SeaLevel,
+		WaterTileSize,
+		WaterGridResolution,
+		WaterMaterial,
+		bWaterCollision);
 }
 
 void ASmoothVoxelOctreeWorld::TryBindPlayerInteractionInput()
@@ -735,6 +947,12 @@ void ASmoothVoxelOctreeWorld::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 	PlacedCubeBlocks.Reset();
+
+	if (IsValid(WaterSurfaceActor))
+	{
+		WaterSurfaceActor->Destroy();
+	}
+	WaterSurfaceActor = nullptr;
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -2045,6 +2263,10 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	// Water is an independent world-owned surface; keep it in sync even when
+	// terrain auto-generation is paused or the Octree selection is unchanged.
+	UpdateWaterSurface();
 
 	// Bind player input independently from mesh generation so startup ordering
 	// cannot make the world permanently miss the first PlayerController.
