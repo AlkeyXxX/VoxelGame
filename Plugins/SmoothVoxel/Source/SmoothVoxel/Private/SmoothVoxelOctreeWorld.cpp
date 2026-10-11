@@ -1275,6 +1275,35 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		Cell = WorldPositionToBlockCell(CubeWorldOrigin);
 	}
 
+	// Cell keys alone cannot detect overlap when the first block is offset
+	// from the terrain hit point. Reject positive-volume cube intersections,
+	// while allowing exact face-to-face contact for stacking.
+	const FVector TargetMin = CubeWorldOrigin;
+	const FVector TargetMax = TargetMin + FVector(Step);
+	const float OverlapTolerance = FMath::Max(0.05f, Step * 0.001f);
+	for (const TPair<FIntVector, ASmoothVoxelPlacedCubeBlock*>& Pair : PlacedCubeBlocks)
+	{
+		ASmoothVoxelPlacedCubeBlock* ExistingCube = Pair.Value;
+		if (!IsValid(ExistingCube))
+		{
+			continue;
+			}
+		const FVector ExistingMin = ExistingCube->GetActorLocation();
+		const FVector ExistingMax = ExistingMin + FVector(Step);
+		const float OverlapX = FMath::Min(TargetMax.X, ExistingMax.X) -
+			FMath::Max(TargetMin.X, ExistingMin.X);
+		const float OverlapY = FMath::Min(TargetMax.Y, ExistingMax.Y) -
+			FMath::Max(TargetMin.Y, ExistingMin.Y);
+		const float OverlapZ = FMath::Min(TargetMax.Z, ExistingMax.Z) -
+			FMath::Max(TargetMin.Z, ExistingMin.Z);
+		if (OverlapX > OverlapTolerance &&
+			OverlapY > OverlapTolerance &&
+			OverlapZ > OverlapTolerance)
+		{
+			return false;
+		}
+	}
+
 	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
 	if (ExistingEdit && *ExistingEdit > 0)
 	{
