@@ -58,7 +58,7 @@ struct FSVoxelGenerationSettings
 	float DetailAmplitude = 60.0f;
 
 	bool bEnableRivers = true;
-	float RiverScale = 0.0000045f;
+	float RiverScale = 0.0000025f;
 	float RiverHalfWidth = 2500.0f;
 	float RiverDepth = 600.0f;
 	float RiverWaterLevel = 850.0f;
