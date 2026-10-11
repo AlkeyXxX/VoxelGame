@@ -276,7 +276,7 @@ public:
 	float DetailAmplitude = 60.0f;
 
 	/** Target flatland share outside deserts and mountain ranges. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.1", ClampMax="0.9"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.5", ClampMax="0.9"))
 	float FlatlandCoverage = 0.62f;
 
 	/** Scale of broad flatland/hill region borders. Smaller values create larger regions. */
@@ -391,7 +391,7 @@ public:
 	float LakeShoreBlendDistance = 1800.0f;
 
 	/** Lake depth; default 500 cm is about five one-metre blocks. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", Units="cm"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", ClampMax="500.0", Units="cm"))
 	float LakeDepth = 500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.0", ClampMax="1.0"))
