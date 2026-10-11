@@ -390,6 +390,21 @@ float FSVoxelGenerator::SampleDensity(
     return Density(WorldX, WorldY, WorldZ, Settings);
 }
 
+void FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(
+    FSVoxelGenerationSettings& Settings,
+    float CoarsestVoxelStep)
+{
+    // FBM2D uses three octaves with frequency multipliers 1, 2 and 4.
+    // Keep the highest octave below 0.35 noise-lattice units per coarsest
+    // sample. Use the same clamped scales for every LOD so this remains one
+    // deterministic world-space density field instead of different fields
+    // which could disagree along transition seams.
+    const float MaxNoiseScale =
+        0.35f / (FMath::Max(1.0f, CoarsestVoxelStep) * 4.0f);
+    Settings.NoiseScale = FMath::Min(FMath::Max(0.0f, Settings.NoiseScale), MaxNoiseScale);
+    Settings.DetailScale = FMath::Min(FMath::Max(0.0f, Settings.DetailScale), MaxNoiseScale * 0.75f);
+}
+
 
 // ============================================================
 // INTERPOLATION
