@@ -523,8 +523,6 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     float Moisture = 0.0f;
     float MountainSignal = 0.0f;
     SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
-    const ESVoxelBiome Biome = SampleBiome(X, Y, S);
-
     const auto SmoothStep = [](float Edge0, float Edge1, float Value)
     {
         const float T = FMath::Clamp(
@@ -532,10 +530,22 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         return T * T * (3.0f - 2.0f * T);
     };
 
-    const float HillCoverage = Biome == ESVoxelBiome::Desert
-        ? FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f)
-        : FMath::Clamp(1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
-    const float BorderWidth = Biome == ESVoxelBiome::Desert ? 0.025f : 0.075f;
+    // Biome classification remains discrete for labels/materials, but it must
+    // not select height terms through a hard branch. A binary desert switch
+    // used to remove up to MountainHeight in one step, making broad deserts
+    // look like craters surrounded by abrupt mountain walls. Blend desert
+    // climate continuously so terrain relief fades through a broad transition.
+    const float DesertBlend = S.bEnableBiomes
+        ? SmoothStep(0.08f, 0.28f, Temperature) *
+            (1.0f - SmoothStep(-0.10f, 0.18f, Moisture))
+        : 0.0f;
+
+    const float NonDesertHillCoverage = FMath::Clamp(
+        1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
+    const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f);
+    const float HillCoverage = FMath::Lerp(
+        NonDesertHillCoverage, DesertHillCoverage, DesertBlend);
+    const float BorderWidth = FMath::Lerp(0.075f, 0.025f, DesertBlend);
     const float HillBlend = SmoothStep(
         1.0f - HillCoverage - BorderWidth,
         1.0f - HillCoverage + BorderWidth,
@@ -545,10 +555,8 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     float MountainBlend = S.bEnableBiomes
         ? SmoothStep(MountainThreshold, MountainThreshold + 0.20f, MountainSignal)
         : 0.0f;
-    if (Biome == ESVoxelBiome::Desert)
-    {
-        MountainBlend = 0.0f;
-    }
+    // Never remove mountain relief abruptly when climate crosses into desert.
+    MountainBlend *= (1.0f - DesertBlend);
 
     const double HillNoise = FBM2D(
         X * static_cast<double>(S.HillScale),
@@ -577,16 +585,13 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     const double MountainLift = MountainShape * static_cast<double>(FMath::Abs(S.MountainHeight)) *
         static_cast<double>(MountainBlend);
 
-    double DuneLift = 0.0;
-    if (Biome == ESVoxelBiome::Desert)
-    {
-        const float Dune = FMath::Abs(HashNoise2D(
-            X * RegionScale * 1.35,
-            Y * RegionScale * 1.35,
-            S.Seed + 4909));
-        DuneLift = static_cast<double>(Dune) *
-            static_cast<double>(FMath::Abs(S.FlatlandNoiseAmplitude)) * 1.5;
-    }
+    const float Dune = FMath::Abs(HashNoise2D(
+        X * RegionScale * 1.35,
+        Y * RegionScale * 1.35,
+        S.Seed + 4909));
+    const double DuneLift = static_cast<double>(Dune) *
+        static_cast<double>(FMath::Abs(S.FlatlandNoiseAmplitude)) *
+        1.5 * static_cast<double>(DesertBlend);
 
     return static_cast<double>(S.BaseHeight) + MicroRelief + HillRelief + MountainLift + DuneLift;
 }
