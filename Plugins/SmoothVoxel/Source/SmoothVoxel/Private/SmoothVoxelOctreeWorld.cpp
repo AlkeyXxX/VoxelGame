@@ -714,25 +714,10 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 			return true;
 		}
 
-		// Async mesh collision can lag one or more mining edits. Accept the
-		// physical terrain hit only if its normal crosses the current density
-		// isosurface. Otherwise ignore the stale face and ray-march the current
-		// immutable edit snapshot below, so rapid hits cannot mine through old
-		// collision or become stuck on an already-air triangle.
-		const FVector ProbeNormal = PhysicalHit.ImpactNormal.GetSafeNormal();
-		const float ProbeDistance = FMath::Max(5.0f, GetEffectiveBlockSize() * 0.25f);
-		const float DensityPlus = SampleRayDensity(
-			PhysicalHit.ImpactPoint + ProbeNormal * ProbeDistance);
-		const float DensityMinus = SampleRayDensity(
-			PhysicalHit.ImpactPoint - ProbeNormal * ProbeDistance);
-		const bool bCurrentSurfaceCrossing =
-			(DensityPlus > DensitySettings.IsoLevel) !=
-			(DensityMinus > DensitySettings.IsoLevel);
-		if (bCurrentSurfaceCrossing)
-		{
-			OutHit = PhysicalHit;
-			return true;
-		}
+		// Do not trust terrain triangles as the authoritative mining target:
+		// async collision can be stale, and transition-mesh seams can expose a
+		// farther triangle through a gap. Continue below and select the first
+		// crossing of the current immutable density snapshot instead.
 	}
 
 	// Physics missed or reported a stale face: ray-march the exact same density
