@@ -16,11 +16,11 @@ struct FSVoxelGenerationSettings
 	float BaseHeight = 900.0f;
 	float HeightAmplitude = 850.0f;
 
-	// Frequencies are in inverse centimetres. These defaults are sampled
-	// on a 100 cm grid; substantially higher values alias into sharp spikes.
-	float NoiseScale = 0.0001f;
+	// Frequencies are in inverse centimetres. The values stay representable
+	// up to the 16 m maximum cell size supported by the streaming world.
+	float NoiseScale = 0.00005f;
 
-	float DetailScale = 0.000075f;
+	float DetailScale = 0.0000375f;
 	float DetailAmplitude = 60.0f;
 
 	// Solid bottom
