@@ -1184,15 +1184,45 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	{
 		return false;
 	}
-	ASmoothVoxelTransvoxelChunk* HitChunk = Cast<ASmoothVoxelTransvoxelChunk>(Hit.GetActor());
-	if (!HitChunk || HitChunk->GetOwner() != this)
-	{
-		return false;
-	}
-
 	const float Step = GetEffectiveBlockSize();
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
-	const FIntVector Cell = WorldPositionToBlockCell(Hit.ImpactPoint + Normal * (Step * 0.51f));
+	FIntVector Cell = FIntVector::ZeroValue;
+
+	// Placed cubes are valid placement surfaces too. Use their exact logical
+	// cell plus the dominant hit-face axis instead of requiring a terrain chunk.
+	if (ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor()))
+	{
+		if (HitCube->GetOwner() != this)
+		{
+			return false;
+		}
+
+		FIntVector FaceStep = FIntVector::ZeroValue;
+		const FVector AbsNormal(FMath::Abs(Normal.X), FMath::Abs(Normal.Y), FMath::Abs(Normal.Z));
+		if (AbsNormal.X >= AbsNormal.Y && AbsNormal.X >= AbsNormal.Z)
+		{
+			FaceStep.X = Normal.X >= 0.0f ? 1 : -1;
+		}
+		else if (AbsNormal.Y >= AbsNormal.Z)
+		{
+			FaceStep.Y = Normal.Y >= 0.0f ? 1 : -1;
+		}
+		else
+		{
+			FaceStep.Z = Normal.Z >= 0.0f ? 1 : -1;
+		}
+		Cell = HitCube->BlockCell + FaceStep;
+	}
+	else
+	{
+		ASmoothVoxelTransvoxelChunk* HitChunk = Cast<ASmoothVoxelTransvoxelChunk>(Hit.GetActor());
+		if (!HitChunk || HitChunk->GetOwner() != this)
+		{
+			return false;
+		}
+		Cell = WorldPositionToBlockCell(Hit.ImpactPoint + Normal * (Step * 0.51f));
+	}
+
 	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
 	if (ExistingEdit && *ExistingEdit > 0)
 	{
