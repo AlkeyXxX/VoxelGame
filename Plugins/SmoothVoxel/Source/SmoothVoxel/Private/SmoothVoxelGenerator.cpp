@@ -780,8 +780,8 @@ FVector2D FSVoxelGenerator::SamplePOISitePosition(
     const double JitterY =
         (static_cast<double>((SiteHash >> 12) & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
     return FVector2D(
-        static_cast<double>(GridX) * Spacing + JitterX * Spacing,
-        static_cast<double>(GridY) * Spacing + JitterY * Spacing);
+        static_cast<float>(static_cast<double>(GridX) * Spacing + JitterX * Spacing),
+        static_cast<float>(static_cast<double>(GridY) * Spacing + JitterY * Spacing));
 }
 
 float FSVoxelGenerator::SamplePOISuitability(
