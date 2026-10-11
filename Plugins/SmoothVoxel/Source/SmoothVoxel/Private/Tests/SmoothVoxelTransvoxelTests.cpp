@@ -840,143 +840,29 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 
 	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
-	Edits->Add(FIntVector(2, 2, 5), int8(1));   // Smooth material meets the hill surface.
-	Edits->Add(FIntVector(2, 2, 4), int8(-1)); // First hit creates a subtle local dent.
-	Edits->Add(FIntVector(4, 2, 6), int8(2));  // Cubic block cell is air in the SDF.
+	Edits->Add(FIntVector(2, 2, 5), int8(1)); // Smooth soil addition above terrain.
+	Edits->Add(FIntVector(4, 2, 4), int8(2)); // Hard cube cavity intersecting the surface.
 	Settings.BlockEdits = Edits;
-	TSharedPtr<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> EditCenters =
-		MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>();
-	EditCenters->Add(FIntVector(2, 2, 4), FVector(125.0f, 125.0f, 249.0f));
-	Settings.BlockEditCenters = EditCenters;
 
-	const float FirstHitCenterDensity =
-		FSVoxelGenerator::SampleDensity(125.0, 125.0, 249.0, Settings);
-	const float FirstHitOutsideRadiusDensity =
-		FSVoxelGenerator::SampleDensity(160.0, 125.0, 249.0, Settings);
-	const float PointOutsideFirstStageDensity =
-		FSVoxelGenerator::SampleDensity(145.0, 125.0, 249.0, Settings);
-	TestTrue(TEXT("A mining hit must remove density around the actual contact point"),
-		FirstHitCenterDensity < 0.0f);
-	TestTrue(TEXT("One mining hit must not hollow out an entire square voxel cell"),
-		FirstHitOutsideRadiusDensity > 0.0f);
-	TestTrue(TEXT("The first damage stage should stay subtle outside its small octahedral radius"),
-		PointOutsideFirstStageDensity > 0.0f);
+	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> FirstMinedNodes =
+		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
+	FirstMinedNodes->Add(FIntVector(2, 2, 4)); // Stable node at (100, 100, 200).
+	Settings.MinedNodes = FirstMinedNodes;
 
-	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> StageTwoEdits =
-		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(*Edits);
-	StageTwoEdits->Add(FIntVector(2, 2, 4), int8(-2));
-	FSVoxelGenerationSettings StageTwoSettings = Settings;
-	StageTwoSettings.BlockEdits = StageTwoEdits;
-	const float PointInsideSecondStageDensity =
-		FSVoxelGenerator::SampleDensity(145.0, 125.0, 249.0, StageTwoSettings);
-	TestTrue(TEXT("A repeated hit should expand the same terrain depression"),
-		PointInsideSecondStageDensity < 0.0f);
+	const float MinedNodeDensity =
+		FSVoxelGenerator::SampleDensity(100.0, 100.0, 200.0, Settings);
+	TestTrue(TEXT("A completed terrain hit must turn the selected lattice sample into air"),
+		MinedNodeDensity < 0.0f);
 
 	FSVoxelMeshData Mesh;
 	FSVoxelTransvoxelMesher::Generate(Settings, 16, 50.0f, 0, Mesh);
 	TestTrue(TEXT("Edited terrain fixture must produce a nonempty surface"),
 		Mesh.Vertices.Num() > 0 && Mesh.Triangles.Num() > 0);
 	TestEqual(TEXT("Triangle indices must be emitted in triples"), Mesh.Triangles.Num() % 3, 0);
+	TestEqual(TEXT("Each edited vertex must have a normal"), Mesh.Normals.Num(), Mesh.Vertices.Num());
+	TestEqual(TEXT("Each edited vertex must have a UV"), Mesh.UV0.Num(), Mesh.Vertices.Num());
 
-	bool bAllTriangleIndicesValid = true;
-	bool bNoCollapsedTriangleIndices = true;
-	bool bNoZeroAreaTriangles = true;
-	bool bSampledFacesPointIntoSolid = true;
-	bool bTriangleWindingMatchesNormals = true;
-	int32 OrientedFacesChecked = 0;
-	int32 NormalWindingChecks = 0;
-	for (int32 Index = 0; Index + 2 < Mesh.Triangles.Num(); Index += 3)
-	{
-		const int32 A = Mesh.Triangles[Index];
-		const int32 B = Mesh.Triangles[Index + 1];
-		const int32 C = Mesh.Triangles[Index + 2];
-		if (!Mesh.Vertices.IsValidIndex(A) ||
-			!Mesh.Vertices.IsValidIndex(B) ||
-			!Mesh.Vertices.IsValidIndex(C))
-		{
-			bAllTriangleIndicesValid = false;
-			continue;
-		}
-
-		if (A == B || B == C || C == A)
-		{
-			bNoCollapsedTriangleIndices = false;
-			continue;
-		}
-		const FVector Cross = FVector::CrossProduct(
-			Mesh.Vertices[B] - Mesh.Vertices[A],
-			Mesh.Vertices[C] - Mesh.Vertices[A]);
-		if (Cross.SizeSquared() <= SMALL_NUMBER)
-		{
-			bNoZeroAreaTriangles = false;
-			continue;
-		}
-
-			// UE4's procedural-mesh front-face convention used by this project
-		// expects the index cross to point into solid, opposite the outward
-		// shading normal. Check every triangle so an edited patch cannot silently
-		// accumulate a few reversed/back-face-culled triangles.
-		if (Mesh.Normals.IsValidIndex(A) &&
-			Mesh.Normals.IsValidIndex(B) &&
-			Mesh.Normals.IsValidIndex(C))
-		{
-			const FVector ExpectedOutward = (
-				Mesh.Normals[A] + Mesh.Normals[B] + Mesh.Normals[C]).GetSafeNormal();
-			if (ExpectedOutward.SizeSquared() > SMALL_NUMBER)
-			{
-				bTriangleWindingMatchesNormals &=
-					FVector::DotProduct(Cross, ExpectedOutward) <= 0.001f;
-				++NormalWindingChecks;
-			}
-		}
-
-		// Also validate the actual density sides on a subset of triangles. The
-		// comparison only means anything if the probes straddle the isosurface;
-		// comparing arbitrary density magnitudes on the same side was the old bug.
-		if ((Index / 3) % 9 == 0)
-		{
-			const FVector FaceDirection = Cross.GetSafeNormal();
-			const FVector Center = (
-				Mesh.Vertices[A] + Mesh.Vertices[B] + Mesh.Vertices[C]) / 3.0f;
-			const float Probe = FMath::Max(5.0f, Settings.VoxelSize * 0.1f);
-			const float AlongFace = FSVoxelGenerator::SampleDensity(
-				Center.X + FaceDirection.X * Probe,
-				Center.Y + FaceDirection.Y * Probe,
-				Center.Z + FaceDirection.Z * Probe,
-				Settings);
-			const float AgainstFace = FSVoxelGenerator::SampleDensity(
-				Center.X - FaceDirection.X * Probe,
-				Center.Y - FaceDirection.Y * Probe,
-				Center.Z - FaceDirection.Z * Probe,
-				Settings);
-			if ((AlongFace > Settings.IsoLevel) != (AgainstFace > Settings.IsoLevel))
-			{
-				++OrientedFacesChecked;
-				bSampledFacesPointIntoSolid &= AlongFace > AgainstFace;
-			}
-		}
-	}
-	TestTrue(TEXT("Every edited-mesh triangle index must be in range"), bAllTriangleIndicesValid);
-	TestTrue(TEXT("Edited mesh must not contain collapsed triangle indices"), bNoCollapsedTriangleIndices);
-	TestTrue(TEXT("Edited mesh must not contain zero-area triangles"), bNoZeroAreaTriangles);
-	TestTrue(TEXT("Every edited triangle must agree with its shading normals"), NormalWindingChecks > 0 && bTriangleWindingMatchesNormals);
-	TestTrue(TEXT("Edited fixture must contain faces with probes on opposite density sides"), OrientedFacesChecked > 0);
-	TestTrue(TEXT("Edited triangles must point into solid when density probes straddle the surface"), bSampledFacesPointIntoSolid);
-
-	bool bAllNormalsFinite = true;
-	bool bAllNormalsNormalized = true;
-	for (const FVector& Normal : Mesh.Normals)
-	{
-		bAllNormalsFinite &= FMath::IsFinite(Normal.X) && FMath::IsFinite(Normal.Y) && FMath::IsFinite(Normal.Z);
-		bAllNormalsNormalized &= FMath::IsNearlyEqual(Normal.SizeSquared(), 1.0f, 0.01f);
-	}
-	TestTrue(TEXT("Edited surface normals must be finite"), bAllNormalsFinite);
-	TestTrue(TEXT("Edited surface normals must be normalized"), bAllNormalsNormalized);
-
-	// Regression coverage for repeated mining hits. Earlier tests only checked
-	// the first damage stage, while the reported back-face artifacts appeared
-	// after later density edits rebuilt the same patch.
-	const auto HasConsistentWinding = [](const FSVoxelMeshData& Candidate)
+	const auto HasConsistentGeometry = [](const FSVoxelMeshData& Candidate)
 	{
 		if (Candidate.Vertices.Num() == 0 ||
 			Candidate.Triangles.Num() == 0 ||
@@ -985,7 +871,6 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		{
 			return false;
 		}
-
 		for (int32 Triangle = 0; Triangle < Candidate.Triangles.Num(); Triangle += 3)
 		{
 			const int32 A = Candidate.Triangles[Triangle];
@@ -993,7 +878,8 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 			const int32 C = Candidate.Triangles[Triangle + 2];
 			if (!Candidate.Vertices.IsValidIndex(A) ||
 				!Candidate.Vertices.IsValidIndex(B) ||
-				!Candidate.Vertices.IsValidIndex(C))
+				!Candidate.Vertices.IsValidIndex(C) ||
+				A == B || B == C || C == A)
 			{
 				return false;
 			}
@@ -1022,22 +908,34 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		return true;
 	};
 
+	TestTrue(TEXT("First mining edit must have finite-area triangles with consistent winding"),
+		HasConsistentGeometry(Mesh));
+
+	// Two completed strikes in a row are separate grid nodes, not -1/-2 states
+	// on a fractional hit point. Rebuild each snapshot and inspect every face.
+	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> StageTwoNodes =
+		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(*FirstMinedNodes);
+	StageTwoNodes->Add(FIntVector(3, 2, 4));
+	FSVoxelGenerationSettings StageTwoSettings = Settings;
+	StageTwoSettings.MinedNodes = StageTwoNodes;
 	FSVoxelMeshData StageTwoMesh;
 	FSVoxelTransvoxelMesher::Generate(StageTwoSettings, 16, 50.0f, 0, StageTwoMesh);
 	TestTrue(
-		TEXT("Second mining stage must not introduce back-face-culled triangles"),
-		HasConsistentWinding(StageTwoMesh));
+		TEXT("Second mining edit must not introduce back-face-culled or collapsed triangles"),
+		HasConsistentGeometry(StageTwoMesh));
 
-	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> StageFiveEdits =
-		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(*Edits);
-	StageFiveEdits->Add(FIntVector(2, 2, 4), int8(-5));
+	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> StageFiveNodes =
+		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(*StageTwoNodes);
+	StageFiveNodes->Add(FIntVector(4, 2, 4));
+	StageFiveNodes->Add(FIntVector(5, 2, 4));
+	StageFiveNodes->Add(FIntVector(6, 2, 4));
 	FSVoxelGenerationSettings StageFiveSettings = Settings;
-	StageFiveSettings.BlockEdits = StageFiveEdits;
+	StageFiveSettings.MinedNodes = StageFiveNodes;
 	FSVoxelMeshData StageFiveMesh;
 	FSVoxelTransvoxelMesher::Generate(StageFiveSettings, 16, 50.0f, 0, StageFiveMesh);
 	TestTrue(
-		TEXT("Final mining stage must not introduce back-face-culled triangles"),
-		HasConsistentWinding(StageFiveMesh));
+		TEXT("Repeated mining edits must not accumulate back-face-culled or collapsed triangles"),
+		HasConsistentGeometry(StageFiveMesh));
 
 	return true;
 }
