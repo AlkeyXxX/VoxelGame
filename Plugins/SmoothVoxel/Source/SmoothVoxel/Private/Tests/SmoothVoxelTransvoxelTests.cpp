@@ -700,23 +700,91 @@ bool FSmoothVoxelTransvoxelBlockEditDensityTest::RunTest(const FString& Paramete
 
 	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
-	Edits->Add(FIntVector(1, 0, 0), int8(1));   // Place a solid cell above the surface.
-	Edits->Add(FIntVector(1, 1, 1), int8(1));   // Must be found just across the +X cell boundary.
-	Edits->Add(FIntVector(0, 0, 0), int8(-1)); // Carve wins where it overlaps the adjacent placed block.
+	Edits->Add(FIntVector(1, 0, 0), int8(1));   // Smooth soil cell above the surface.
+	Edits->Add(FIntVector(1, 1, 1), int8(1));   // Smooth cell must be found near its boundary.
+	Edits->Add(FIntVector(0, 0, 0), int8(-1)); // Carve wins where it overlaps a smooth addition.
 	Edits->Add(FIntVector(0, 0, -1), int8(-1)); // Carve one cell below the surface.
+	Edits->Add(FIntVector(2, 0, 1), int8(2));   // A hard cube reserves air in the terrain SDF.
 	Settings.BlockEdits = Edits;
 
 	const float PlacedCellDensity = FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, Settings);
-	const float AdjacentCellBoundaryDensity = FSVoxelGenerator::SampleDensity(96.0, 150.0, 150.0, Settings);
+	const float SmoothCellBoundaryDensity = FSVoxelGenerator::SampleDensity(101.0, 150.0, 150.0, Settings);
 	const float OverlapCarveWinsDensity = FSVoxelGenerator::SampleDensity(100.0, 50.0, 50.0, Settings);
 	const float RemovedCellDensity = FSVoxelGenerator::SampleDensity(50.0, 50.0, -50.0, Settings);
+	const float HardCubeCellDensity = FSVoxelGenerator::SampleDensity(250.0, 50.0, 150.0, Settings);
 	const float UnmodifiedDensity = FSVoxelGenerator::SampleDensity(250.0, 250.0, 50.0, Settings);
 
-	TestTrue(TEXT("A solid block edit must add positive density inside its cell"), PlacedCellDensity > 0.0f);
-	TestTrue(TEXT("An adjacent edited volume must affect samples near its overlapping cell boundary"), AdjacentCellBoundaryDensity > 0.0f);
-	TestTrue(TEXT("A carved cell must remain air even where it overlaps a neighbouring placed block"), OverlapCarveWinsDensity < 0.0f);
-	TestTrue(TEXT("An air block edit must carve negative density out of solid terrain"), RemovedCellDensity < 0.0f);
+	TestTrue(TEXT("A smooth soil edit must add positive density inside its cell"), PlacedCellDensity > 0.0f);
+	TestTrue(TEXT("The rounded smooth edit must remain continuous near its cell boundary"), SmoothCellBoundaryDensity > 0.0f);
+	TestTrue(TEXT("A carved cell must remain air even where it overlaps a neighbouring smooth addition"), OverlapCarveWinsDensity < 0.0f);
+	TestTrue(TEXT("An air edit must carve negative density out of solid terrain"), RemovedCellDensity < 0.0f);
+	TestTrue(TEXT("A hard-cube cell must stay air in the terrain field; its cube is rendered separately"), HardCubeCellDensity < 0.0f);
 	TestTrue(TEXT("Samples outside edited cells must preserve the procedural density field"), UnmodifiedDensity < 0.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelEditedMeshTrianglesTest,
+	"SmoothVoxel.Transvoxel.BlockEditsProduceValidTrianglesAndNormals",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.BaseHeight = 250.0f;
+	Settings.HeightAmplitude = 0.0f;
+	Settings.DetailAmplitude = 0.0f;
+	Settings.NoiseScale = 0.0f;
+	Settings.DetailScale = 0.0f;
+	Settings.BaseVoxelSize = 50.0f;
+	Settings.NormalSampleStep = 25.0f;
+	Settings.BottomDepth = 1000.0f;
+	Settings.bEnableCaves = false;
+
+	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
+		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
+	Edits->Add(FIntVector(2, 2, 6), int8(1));   // Smooth material above the hill.
+	Edits->Add(FIntVector(2, 2, 4), int8(-1)); // Cut into the solid side of the hill.
+	Edits->Add(FIntVector(4, 2, 6), int8(2));  // Cubic block cell is air in the SDF.
+	Settings.BlockEdits = Edits;
+
+	FSVoxelMeshData Mesh;
+	FSVoxelTransvoxelMesher::Generate(Settings, 16, 50.0f, 0, Mesh);
+	TestTrue(TEXT("Edited terrain fixture must produce a nonempty surface"),
+		Mesh.Vertices.Num() > 0 && Mesh.Triangles.Num() > 0);
+	TestEqual(TEXT("Triangle indices must be emitted in triples"), Mesh.Triangles.Num() % 3, 0);
+
+	for (int32 Index = 0; Index + 2 < Mesh.Triangles.Num(); Index += 3)
+	{
+		const int32 A = Mesh.Triangles[Index];
+		const int32 B = Mesh.Triangles[Index + 1];
+		const int32 C = Mesh.Triangles[Index + 2];
+		TestTrue(TEXT("Triangle index must be in range"),
+			Mesh.Vertices.IsValidIndex(A) && Mesh.Vertices.IsValidIndex(B) && Mesh.Vertices.IsValidIndex(C));
+		if (!Mesh.Vertices.IsValidIndex(A) ||
+			!Mesh.Vertices.IsValidIndex(B) ||
+			!Mesh.Vertices.IsValidIndex(C))
+		{
+			continue;
+		}
+
+		TestTrue(TEXT("Edited mesh must not contain collapsed triangle indices"),
+			A != B && B != C && C != A);
+		const FVector Cross = FVector::CrossProduct(
+			Mesh.Vertices[B] - Mesh.Vertices[A],
+			Mesh.Vertices[C] - Mesh.Vertices[A]);
+		TestTrue(TEXT("Edited mesh must not contain zero-area triangles"),
+			Cross.SizeSquared() > SMALL_NUMBER);
+	}
+
+	for (const FVector& Normal : Mesh.Normals)
+	{
+		TestTrue(TEXT("Edited surface normal must be finite"),
+			FMath::IsFinite(Normal.X) && FMath::IsFinite(Normal.Y) && FMath::IsFinite(Normal.Z));
+		TestTrue(TEXT("Edited surface normal must be normalized"),
+			FMath::IsNearlyEqual(Normal.SizeSquared(), 1.0f, 0.01f));
+	}
+
 	return true;
 }
 
