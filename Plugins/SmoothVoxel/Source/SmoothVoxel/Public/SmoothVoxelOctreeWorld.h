@@ -145,6 +145,50 @@ public:
 };
 
 /**
+ * A single world-aligned water surface owned by ASmoothVoxelOctreeWorld.
+ * The terrain remains the source of shoreline shape: opaque terrain above the
+ * sea level naturally occludes this surface, while low terrain is flooded.
+ */
+UCLASS()
+class SMOOTHVOXEL_API ASmoothVoxelWaterSurface : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASmoothVoxelWaterSurface();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Water")
+	UProceduralMeshComponent* Mesh = nullptr;
+
+	/** Rebuilds only when the map bounds, sea level, tiling, or material changes. */
+	void ConfigureSurface(
+		const FVector& WorldCenter,
+		float WorldSize,
+		float InSeaLevel,
+		float InTileSize,
+		int32 InResolution,
+		UMaterialInterface* InMaterial,
+		bool bEnableCollision);
+
+private:
+	void BuildSurfaceMesh(float WorldSize, float InTileSize, int32 InResolution, bool bEnableCollision);
+
+	UPROPERTY()
+	UMaterialInterface* FallbackWaterMaterial = nullptr;
+
+	UPROPERTY()
+	UMaterialInterface* ActiveMaterial = nullptr;
+
+	FVector ConfiguredWorldCenter = FVector::ZeroVector;
+	float ConfiguredWorldSize = -1.0f;
+	float ConfiguredSeaLevel = 0.0f;
+	float ConfiguredTileSize = 5000.0f;
+	int32 ConfiguredResolution = 0;
+	bool bConfiguredCollision = false;
+	bool bHasConfiguration = false;
+};
+
+/**
  * Primary procedural world. Owns Octree selection, Transvoxel mesh streaming,
  * biome sampling, and block editing without depending on the legacy AVoxelWorld.
  */
@@ -252,6 +296,30 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Rendering")
 	UMaterialInterface* TerrainMaterial = nullptr;
+
+	/** Enables the single sea-level water sheet for this finite Octree world. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	bool bEnableWater = true;
+
+	/** Absolute world-space Z for oceans and any low basin intersecting this plane. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(Units="cm"))
+	float SeaLevel = 0.0f;
+
+	/** World-space size represented by one full water-material UV tile. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="100.0", Units="cm"))
+	float WaterTileSize = 5000.0f;
+
+	/** Grid density allows vertex-displaced water materials to render smoothly. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="16", ClampMax="512"))
+	int32 WaterGridResolution = 256;
+
+	/** Off by default so the water does not behave like a solid floor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	bool bWaterCollision = false;
+
+	/** Assign a project water material here. Starter Content water is used if available. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	UMaterialInterface* WaterMaterial = nullptr;
 
 	/** Enables deterministic forest/plains/desert/mountain/snow terrain masks. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
@@ -387,6 +455,7 @@ public:
 	void EnqueueCompletedChunk(ASmoothVoxelTransvoxelChunk* Chunk);
 
 private:
+	void UpdateWaterSurface();
 	void TryBindPlayerInteractionInput();
 	void HandleBreakBlockInput();
 	void HandlePlaceBlockInput();
@@ -463,6 +532,9 @@ private:
 
 	UPROPERTY()
 	TMap<FIntVector, ASmoothVoxelPlacedCubeBlock*> PlacedCubeBlocks;
+
+	UPROPERTY(Transient)
+	ASmoothVoxelWaterSurface* WaterSurfaceActor = nullptr;
 
 	int32 DesiredCellsPerAxis = 32;
 	float DesiredBaseVoxelSize = 97.65625f;
