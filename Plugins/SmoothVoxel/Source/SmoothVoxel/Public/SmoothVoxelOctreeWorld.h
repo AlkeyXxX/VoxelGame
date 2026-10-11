@@ -120,10 +120,14 @@ public:
 	float UpdateIntervalSeconds = 0.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1.0"))
-	float UpdateDistance = 1000.0f;
+	float UpdateDistance = 2000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="2"))
 	int32 MaxConcurrentBuilds = 2;
+
+	/** Limit actor creation/reconfiguration work per frame to avoid streaming hitches. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="16"))
+	int32 MaxChunkRequestsPerFrame = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="32", ClampMax="8192"))
 	int32 MaxLeafCount = 2048;
@@ -157,7 +161,7 @@ public:
 	float BaseHeight = 900.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
-	float HeightAmplitude = 850.0f;
+	float HeightAmplitude = 2500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
 	// Frequencies are in inverse centimetres. These defaults keep the third
@@ -205,6 +209,7 @@ public:
 
 private:
 	void RebuildForCamera(const FVector& CameraLocation);
+	void PrepareDesiredChunks(const FVector& CameraLocation);
 	void LaunchQueuedBuilds(const FVector& CameraLocation);
 	void ApplyOneCompletedBuild(const FVector& CameraLocation);
 	bool AreDesiredChunksReady() const;
@@ -222,7 +227,10 @@ private:
 	TMap<FSVoxelOctreeNode, FVector> DesiredChunkOrigins;
 	TMap<FSVoxelOctreeNode, float> DesiredVoxelSizes;
 	TMap<FSVoxelOctreeNode, bool> DesiredCollisionFlags;
+	TSet<FSVoxelOctreeNode> PreparedDesiredNodes;
 	int32 DesiredCellsPerAxis = 32;
+	float DesiredBaseVoxelSize = 100.0f;
+	bool bForceBuildDesiredSelection = false;
 
 	FVector SelectionCameraLocation = FVector::ZeroVector;
 	FVector LastCompletedCameraLocation = FVector::ZeroVector;
