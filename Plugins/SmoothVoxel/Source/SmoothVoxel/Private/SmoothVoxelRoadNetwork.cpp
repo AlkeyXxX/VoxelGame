@@ -264,9 +264,21 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
         if (StartCell == GoalCell)
         {
+            const FRoadGridSample& SiteSample = GetRouteGridSample(StartCell);
+            if (!SiteSample.bAllowed)
+            {
+                return false;
+            }
             OutRoute.Add(Start);
             OutRoute.Add(End);
             return true;
+        }
+
+        // Never let a road terminate inside a lake or its shoreline mask.
+        if (!GetRouteGridSample(StartCell).bAllowed ||
+            !GetRouteGridSample(GoalCell).bAllowed)
+        {
+            return false;
         }
 
         // First search locally; if a river valley or ridge blocks the corridor,
