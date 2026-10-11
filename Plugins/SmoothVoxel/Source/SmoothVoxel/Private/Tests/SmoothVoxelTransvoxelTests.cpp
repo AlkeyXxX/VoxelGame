@@ -135,7 +135,7 @@ bool FSmoothVoxelBiomesAndPOIPlateausTest::RunTest(const FString& Parameters)
 	Settings.BaseHeight = 900.0f;
 	Settings.HeightAmplitude = 2500.0f;
 	Settings.DetailAmplitude = 60.0f;
-	Settings.BiomeScale = 0.00000065f;
+	Settings.BiomeScale = 0.00001f;
 	Settings.bEnableBiomes = true;
 	Settings.bEnablePOIPlateaus = true;
 	Settings.POISiteSpacing = 65000.0f;
