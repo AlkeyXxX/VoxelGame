@@ -209,6 +209,11 @@ public:
 	UFUNCTION(BlueprintPure, Category="Voxel|Streaming")
 	int32 GetActiveChunkCount() const { return ActiveChunks.Num(); }
 
+	/** Called by chunk workers so idle ticks do not scan every active actor. */
+	void NotifyWorkerBuildFinished();
+	void EnqueueChunkBuild(ASmoothVoxelTransvoxelChunk* Chunk);
+	void EnqueueCompletedChunk(ASmoothVoxelTransvoxelChunk* Chunk);
+
 private:
 	void RebuildForCamera(const FVector& CameraLocation);
 	void PrepareDesiredChunks(const FVector& CameraLocation);
@@ -224,6 +229,9 @@ private:
 		float VoxelSize) const;
 
 	TMap<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*> ActiveChunks;
+	TArray<TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>> QueuedChunkBuilds;
+	TArray<TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>> CompletedChunkBuilds;
+	int32 InFlightMeshBuildCount = 0;
 	TSet<FSVoxelOctreeNode> DesiredNodes;
 	TMap<FSVoxelOctreeNode, uint8> DesiredFaceMasks;
 	TMap<FSVoxelOctreeNode, FVector> DesiredChunkOrigins;
