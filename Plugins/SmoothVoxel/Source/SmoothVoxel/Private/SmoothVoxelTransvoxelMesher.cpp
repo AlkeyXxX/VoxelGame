@@ -224,6 +224,72 @@ namespace
 		return FMath::Lerp(FineNormalStep, CoarseNormalStep, Blend);
 	}
 
+	FVector ComputeTransitionSecondaryPosition(
+		const FVector& PrimaryPosition,
+		const FVector& SurfaceNormal,
+		uint8 TransitionFaceMask,
+		float ChunkSize,
+		float VoxelSize)
+	{
+		// The transition mesh occupies a strip inside the coarse chunk. The
+		// regular surface in the same boundary cells must be moved to a secondary
+		// position; simply moving the sampled cube corners before interpolation
+		// deforms the isosurface and creates long, overlapping diagonal triangles.
+		// This mirrors the secondary-position idea used by established
+		// Transvoxel implementations, with a quarter-cell border offset.
+		const float Step = FMath::Max(1.0f, VoxelSize);
+		const float BorderWidth = Step;
+		const float BorderOffset = Step * 0.25f;
+		FVector Delta = FVector::ZeroVector;
+
+		if ((TransitionFaceMask & SVoxelTransitionFace_NegativeX) &&
+			PrimaryPosition.X < BorderWidth)
+		{
+			const float Alpha = FMath::Clamp(1.0f - PrimaryPosition.X / BorderWidth, 0.0f, 1.0f);
+			Delta.X += Alpha * BorderOffset;
+		}
+		if ((TransitionFaceMask & SVoxelTransitionFace_PositiveX) &&
+			PrimaryPosition.X > ChunkSize - BorderWidth)
+		{
+			const float Alpha = FMath::Clamp(
+				(PrimaryPosition.X - (ChunkSize - BorderWidth)) / BorderWidth, 0.0f, 1.0f);
+			Delta.X -= Alpha * BorderOffset;
+		}
+		if ((TransitionFaceMask & SVoxelTransitionFace_NegativeY) &&
+			PrimaryPosition.Y < BorderWidth)
+		{
+			const float Alpha = FMath::Clamp(1.0f - PrimaryPosition.Y / BorderWidth, 0.0f, 1.0f);
+			Delta.Y += Alpha * BorderOffset;
+		}
+		if ((TransitionFaceMask & SVoxelTransitionFace_PositiveY) &&
+			PrimaryPosition.Y > ChunkSize - BorderWidth)
+		{
+			const float Alpha = FMath::Clamp(
+				(PrimaryPosition.Y - (ChunkSize - BorderWidth)) / BorderWidth, 0.0f, 1.0f);
+			Delta.Y -= Alpha * BorderOffset;
+		}
+		if ((TransitionFaceMask & SVoxelTransitionFace_NegativeZ) &&
+			PrimaryPosition.Z < BorderWidth)
+		{
+			const float Alpha = FMath::Clamp(1.0f - PrimaryPosition.Z / BorderWidth, 0.0f, 1.0f);
+			Delta.Z += Alpha * BorderOffset;
+		}
+		if ((TransitionFaceMask & SVoxelTransitionFace_PositiveZ) &&
+			PrimaryPosition.Z > ChunkSize - BorderWidth)
+		{
+			const float Alpha = FMath::Clamp(
+				(PrimaryPosition.Z - (ChunkSize - BorderWidth)) / BorderWidth, 0.0f, 1.0f);
+			Delta.Z -= Alpha * BorderOffset;
+		}
+
+		// Project the displacement into the local tangent plane, following the
+		// standard secondary-position approach so movement is along the surface
+		// rather than simply pushing vertices off the isosurface normal.
+		const FVector Normal = SurfaceNormal.GetSafeNormal();
+		const FVector TangentialDelta = Delta - Normal * FVector::DotProduct(Normal, Delta);
+		return PrimaryPosition + TangentialDelta;
+	}
+
 	void DecodeEdge(uint16 EdgeCode, int32& OutSampleA, int32& OutSampleB)
 	{
 		// The low byte stores the endpoint indices; the high byte is the
@@ -547,19 +613,26 @@ void FSVoxelTransvoxelMesher::Generate(
 					const float T = FMath::IsNearlyZero(Denominator)
 						? 0.5f
 						: FMath::Clamp((Settings.IsoLevel - Samples[A]) / Denominator, 0.0f, 1.0f);
-					const FVector PA = AdjustBoundaryCorner(
-						FVector(
-							static_cast<float>(X + RegularCornerOffsets[A][0]) * VoxelSize,
-							static_cast<float>(Y + RegularCornerOffsets[A][1]) * VoxelSize,
-							static_cast<float>(Z + RegularCornerOffsets[A][2]) * VoxelSize),
-						TransitionFaceMask, 0, ChunkSize, VoxelSize * 0.5f);
-					const FVector PB = AdjustBoundaryCorner(
-						FVector(
-							static_cast<float>(X + RegularCornerOffsets[B][0]) * VoxelSize,
-							static_cast<float>(Y + RegularCornerOffsets[B][1]) * VoxelSize,
-							static_cast<float>(Z + RegularCornerOffsets[B][2]) * VoxelSize),
-						TransitionFaceMask, 0, ChunkSize, VoxelSize * 0.5f);
-					CellVertices[V] = FMath::Lerp(PA, PB, T);
+					const FVector PA(
+						static_cast<float>(X + RegularCornerOffsets[A][0]) * VoxelSize,
+						static_cast<float>(Y + RegularCornerOffsets[A][1]) * VoxelSize,
+						static_cast<float>(Z + RegularCornerOffsets[A][2]) * VoxelSize);
+					const FVector PB(
+						static_cast<float>(X + RegularCornerOffsets[B][0]) * VoxelSize,
+						static_cast<float>(Y + RegularCornerOffsets[B][1]) * VoxelSize,
+						static_cast<float>(Z + RegularCornerOffsets[B][2]) * VoxelSize);
+					const FVector PrimaryPosition = FMath::Lerp(PA, PB, T);
+					const FVector PrimaryWorldPosition = MeshSettings.ChunkWorldOrigin + PrimaryPosition;
+					const FVector PrimaryNormal = SampleOutwardNormal(
+						PrimaryWorldPosition,
+						MeshSettings,
+						FMath::Max(5.0f, VoxelSize * 0.25f));
+					CellVertices[V] = ComputeTransitionSecondaryPosition(
+						PrimaryPosition,
+						PrimaryNormal,
+						TransitionFaceMask,
+						ChunkSize,
+						VoxelSize);
 				}
 
 				AppendCellToMesh(
