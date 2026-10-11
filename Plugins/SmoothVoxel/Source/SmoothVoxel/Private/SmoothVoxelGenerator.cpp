@@ -545,21 +545,30 @@ float FSVoxelGenerator::SampleFlatlandInfluence(
     float Moisture = 0.0f;
     float MountainSignal = 0.0f;
     SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
-    if (MountainSignal >= FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f) ||
-        SampleBiome(X, Y, S) == ESVoxelBiome::Mountain)
+    (void)Temperature;
+    (void)Moisture;
+    if (MountainSignal >= FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f))
     {
         return 0.0f;
     }
 
-    const ESVoxelBiome Biome = SampleBiome(X, Y, S);
     const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.FlatlandRegionScale)));
     const float Region01 = FMath::Clamp(
         HashNoise2D(X * Scale, Y * Scale, S.Seed + 5549) * 0.5f + 0.5f,
         0.0f, 1.0f);
-    const float HillCoverage = Biome == ESVoxelBiome::Desert
-        ? FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f)
-        : FMath::Clamp(1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
-    const float BorderWidth = Biome == ESVoxelBiome::Desert ? 0.025f : 0.075f;
+    float DesertWeight = 0.0f;
+    float WinterWeight = 0.0f;
+    float TemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
+    const float NonDesertHillCoverage = FMath::Clamp(
+        1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
+    const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f);
+    const float HillCoverage = FMath::Lerp(
+        NonDesertHillCoverage, DesertHillCoverage, DesertWeight);
+    const float BorderWidth = FMath::Lerp(0.075f, 0.025f, DesertWeight);
+    (void)WinterWeight;
+    (void)TemperateWeight;
     const float T = FMath::Clamp(
         (Region01 - (1.0f - HillCoverage - BorderWidth)) /
         FMath::Max(0.0001f, BorderWidth * 2.0f), 0.0f, 1.0f);
@@ -785,7 +794,10 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
         return;
     }
 
-    const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.RiverScale)));
+    // Slight global density boost also affects already-placed world actors whose
+    // serialized RiverScale predates the denser network default.
+    const double Scale = FMath::Max(
+        0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 1.25);
     const double HalfWidth = FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
     if (HalfWidth <= 0.0)
     {
@@ -815,12 +827,15 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     OutInfluence = 1.0f - SmoothT;
     OutSignedField = static_cast<float>(Field);
 
-    const ESVoxelBiome Biome = SampleBiome(X, Y, S);
-    if (Biome == ESVoxelBiome::Desert || Biome == ESVoxelBiome::Mountain)
-    {
-        OutInfluence = 0.0f;
-        return;
-    }
+    float DesertWeight = 0.0f;
+    float WinterWeight = 0.0f;
+    float TemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
+    // Fade candidates through the same broad desert transition as terrain height,
+    // instead of cutting the river mesh off at a categorical biome edge.
+    OutInfluence *= (1.0f - DesertWeight);
+
     // Rivers are gated to clearly low-relief areas, not the shoulders of hills.
     const float Flatness = SampleFlatlandInfluence(X, Y, S);
     if (Flatness <= 0.72f)
