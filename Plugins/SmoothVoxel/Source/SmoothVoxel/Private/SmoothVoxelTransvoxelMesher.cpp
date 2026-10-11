@@ -400,10 +400,9 @@ namespace
 		const double ChunkOriginWorldY = Settings.bUseChunkLatticeCoordinates
 			? static_cast<double>(Settings.ChunkOriginCells.Y) * static_cast<double>(Settings.BaseVoxelSize)
 			: static_cast<double>(Settings.ChunkWorldOrigin.Y);
-		const double UvOffsetU = static_cast<double>(FMath::FloorToInt(
-			static_cast<float>(ChunkOriginWorldX * UVWorldScale)));
-		const double UvOffsetV = static_cast<double>(FMath::FloorToInt(
-			static_cast<float>(ChunkOriginWorldY * UVWorldScale)));
+		const double ChunkOriginWorldZ = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Z) * static_cast<double>(Settings.BaseVoxelSize)
+			: static_cast<double>(Settings.ChunkWorldOrigin.Z);
 
 		TArray<FVector> CellNormals;
 		CellNormals.SetNumUninitialized(VertexCount);
@@ -441,33 +440,63 @@ namespace
 			double WorldX = 0.0;
 			double WorldY = 0.0;
 			GetWorldXYForUV(LocalPosition, Settings, WorldX, WorldY);
-			OutMesh.UV0.Add(FVector2D(
-				static_cast<float>(WorldX * UVWorldScale - UvOffsetU),
-				static_cast<float>(WorldY * UVWorldScale - UvOffsetV)));
+			const double WorldZ = Settings.bUseChunkLatticeCoordinates
+				? static_cast<double>(Settings.ChunkOriginCells.Z) * static_cast<double>(Settings.BaseVoxelSize) + LocalPosition.Z
+				: static_cast<double>(Settings.ChunkWorldOrigin.Z) + LocalPosition.Z;
 
-			// UV0 follows a fixed-scale world-XY projection within this chunk.
-			// Subtracting a constant integer tile offset preserves its derivatives.
+			// Use dominant-axis planar mapping. World-XY alone makes UVs constant
+			// across X-facing walls and therefore stretches the terrain texture into
+			// long stripes when the player looks into a pit or a cliff.
 			const FVector Normal = CellNormals[I].GetSafeNormal();
-			FVector Tangent;
-			FVector Bitangent;
-			if (FMath::Abs(Normal.Z) > 0.1f)
+			const float AbsX = FMath::Abs(Normal.X);
+			const float AbsY = FMath::Abs(Normal.Y);
+			const float AbsZ = FMath::Abs(Normal.Z);
+			double U = WorldX;
+			double V = WorldY;
+			double UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * UVWorldScale)));
+			double UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * UVWorldScale)));
+		FVector WorldU(1.0f, 0.0f, 0.0f);
+		FVector WorldV(0.0f, 1.0f, 0.0f);
+
+			if (AbsX >= AbsY && AbsX >= AbsZ)
 			{
-				Tangent = FVector(1.0f, 0.0f, -Normal.X / Normal.Z).GetSafeNormal();
-				Bitangent = FVector(0.0f, 1.0f, -Normal.Y / Normal.Z).GetSafeNormal();
+				// X-facing wall: project onto YZ.
+				U = WorldY;
+				V = WorldZ;
+				UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * UVWorldScale)));
+				UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * UVWorldScale)));
+				WorldU = FVector(0.0f, 1.0f, 0.0f);
+				WorldV = FVector(0.0f, 0.0f, 1.0f);
+			}
+			else if (AbsY >= AbsZ)
+			{
+				// Y-facing wall: project onto XZ.
+				U = WorldX;
+				V = WorldZ;
+				UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * UVWorldScale)));
+				UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * UVWorldScale)));
+				WorldU = FVector(1.0f, 0.0f, 0.0f);
+				WorldV = FVector(0.0f, 0.0f, 1.0f);
 			}
 			else
 			{
-				// A height-field projection is singular on near-vertical walls;
-				// use a stable fallback there and let cliffs/caves use triplanar UVs.
-				const FVector WorldU(1.0f, 0.0f, 0.0f);
-				const FVector WorldV(0.0f, 1.0f, 0.0f);
-				Tangent = WorldU - Normal * FVector::DotProduct(Normal, WorldU);
-				if (!Tangent.Normalize())
-				{
-					Tangent = (WorldV - Normal * FVector::DotProduct(Normal, WorldV)).GetSafeNormal();
-				}
-				Bitangent = WorldV - Normal * FVector::DotProduct(Normal, WorldV);
+				// Horizontal / floor surface: project onto XY.
+				WorldU = FVector(1.0f, 0.0f, 0.0f);
+				WorldV = FVector(0.0f, 1.0f, 0.0f);
 			}
+
+			OutMesh.UV0.Add(FVector2D(
+				static_cast<float>(U * UVWorldScale - UvOffsetU),
+				static_cast<float>(V * UVWorldScale - UvOffsetV)));
+
+			// Build the tangent basis from the same planar projection as UV0.
+			FVector Tangent = WorldU - Normal * FVector::DotProduct(Normal, WorldU);
+			if (!Tangent.Normalize())
+			{
+				Tangent = (WorldV - Normal * FVector::DotProduct(Normal, WorldV)).GetSafeNormal();
+			}
+			FVector Bitangent = WorldV - Normal * FVector::DotProduct(Normal, WorldV);
+			Bitangent.Normalize();
 			const bool bFlipTangentY =
 				FVector::DotProduct(FVector::CrossProduct(Normal, Tangent), Bitangent) < 0.0f;
 			OutMesh.Tangents.Add(FProcMeshTangent(Tangent, bFlipTangentY));
