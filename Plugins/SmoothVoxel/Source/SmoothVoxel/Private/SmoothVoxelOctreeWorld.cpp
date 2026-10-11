@@ -568,7 +568,9 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	const float Step = GetEffectiveBlockSize();
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
 	const FVector InsidePoint = Hit.ImpactPoint - Normal * (Step * 0.2f);
-	const FIntVector Cell = WorldPositionToBlockCell(Hit.ImpactPoint - Normal * (Step * 0.51f));
+	// Choose the cell touching the surface rather than shifting a half-cell
+	// inward; the latter can leave the carved box just below the visible surface.
+	const FIntVector Cell = WorldPositionToBlockCell(Hit.ImpactPoint - Normal * (Step * 0.05f));
 	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
 	if (ExistingEdit && *ExistingEdit < 0)
 	{
