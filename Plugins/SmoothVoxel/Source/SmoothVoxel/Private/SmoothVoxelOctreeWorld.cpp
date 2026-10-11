@@ -340,12 +340,14 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 			Colors.Add(FLinearColor::White);
 			Tangents.Add(FProcMeshTangent(FaceTangent, false));
 		}
+		// ProceduralMeshComponent uses the opposite triangle winding from the
+		// outward normal convention used by our terrain mesher.
 		Triangles.Add(First);
+		Triangles.Add(First + 2);
 		Triangles.Add(First + 1);
-		Triangles.Add(First + 2);
 		Triangles.Add(First);
-		Triangles.Add(First + 2);
 		Triangles.Add(First + 3);
+		Triangles.Add(First + 2);
 	};
 
 	// Every face owns its four vertices: this is deliberate. Reusing shared
