@@ -1,4 +1,5 @@
 #include "SmoothVoxelOctreeWorld.h"
+#include "SmoothVoxelRoadNetwork.h"
 
 #include "Async/Async.h"
 #include "Kismet/GameplayStatics.h"
@@ -1080,6 +1081,7 @@ void ASmoothVoxelOctreeWorld::BeginPlay()
 	Super::BeginPlay();
 	TryBindPlayerInteractionInput();
 	UpdateWaterSurface();
+	UpdateRoadNetwork();
 }
 
 void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
@@ -1140,6 +1142,67 @@ void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
 		WaterMaterial,
 		WaterGenerationSettings,
 		bWaterCollision);
+}
+
+void ASmoothVoxelOctreeWorld::UpdateRoadNetwork()
+{
+	check(IsInGameThread());
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (!bEnableRoads)
+	{
+		if (IsValid(RoadNetworkActor))
+		{
+			RoadNetworkActor->Destroy();
+		}
+		RoadNetworkActor = nullptr;
+		return;
+	}
+
+	if (!IsValid(RoadNetworkActor))
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		RoadNetworkActor = GetWorld()->SpawnActor<ASmoothVoxelRoadNetwork>(
+			FVector(RootWorldCenter.X, RootWorldCenter.Y, 0.0f),
+			FRotator::ZeroRotator,
+			SpawnParams);
+		if (!IsValid(RoadNetworkActor))
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("SmoothVoxelOctreeWorld: failed to spawn the procedural road network."));
+			return;
+		}
+	}
+
+	const int32 RoadCellsPerAxis = FMath::Clamp(CellsPerAxis, 4, 128);
+	const int32 RoadRootLod = GetRootLodForWorldSize();
+	const float RoadSettingsStep = FMath::Max(
+		1.0f,
+		GetWorldSizeCentimeters() /
+			(static_cast<float>(RoadCellsPerAxis) * static_cast<float>(1 << RoadRootLod)));
+	const FSVoxelGenerationSettings RoadGenerationSettings = MakeGenerationSettings(
+		FVector::ZeroVector,
+		FIntVector::ZeroValue,
+		RoadSettingsStep,
+		RoadSettingsStep,
+		false);
+
+	RoadNetworkActor->ConfigureRoadNetwork(
+		RootWorldCenter,
+		GetWorldSizeCentimeters(),
+		POISiteSpacing,
+		RoadWidth,
+		RoadSampleSpacing,
+		RoadSurfaceOffset,
+		RoadMaterial,
+		RoadGenerationSettings,
+		bRoadCollision);
 }
 
 void ASmoothVoxelOctreeWorld::TryBindPlayerInteractionInput()
@@ -1235,6 +1298,12 @@ void ASmoothVoxelOctreeWorld::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	WaterSurfaceActor = nullptr;
 
+	if (IsValid(RoadNetworkActor))
+	{
+		RoadNetworkActor->Destroy();
+	}
+	RoadNetworkActor = nullptr;
+
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -1244,6 +1313,7 @@ void ASmoothVoxelOctreeWorld::RegenerateWorld()
 	// mesh from the same fresh settings before regenerating terrain chunks;
 	// otherwise the old water surface can be buried by the new terrain.
 	UpdateWaterSurface();
+	UpdateRoadNetwork();
 	bForceUpdate = true;
 }
 
@@ -1272,6 +1342,8 @@ void ASmoothVoxelOctreeWorld::StartNewGame()
 	BlockEditCenterSnapshot.Reset();
 	MinedNodeSnapshot.Reset();
 
+	UpdateWaterSurface();
+	UpdateRoadNetwork();
 	bForceUpdate = true;
 }
 
