@@ -316,9 +316,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="100.0", Units="cm"))
 	float WaterTileSize = 5000.0f;
 
-	/** Grid density allows vertex-displaced water materials to render smoothly. */
+	/** Higher density keeps the river mask coherent on large maps; the ocean itself uses only two triangles. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="16", ClampMax="512"))
-	int32 WaterGridResolution = 256;
+	int32 WaterGridResolution = 512;
 
 	/** Off by default so the water does not behave like a solid floor. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
@@ -335,12 +335,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.000001", ClampMax="0.00005"))
 	float RiverScale = 0.00001f;
 
-	/** Approximate river half-width in centimetres. */
+	/** Approximate river half-width in centimetres. Keep channels narrow relative to the map. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
-	float RiverHalfWidth = 7500.0f;
+	float RiverHalfWidth = 3000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", Units="cm"))
-	float RiverDepth = 350.0f;
+	float RiverDepth = 600.0f;
 
 	/** Enables deterministic forest/plains/desert/mountain/snow terrain masks. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
