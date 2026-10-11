@@ -695,7 +695,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     }
                 }
             }
-            if (!Tangent2D.Normalize())
+            const float TangentLengthSquared = Tangent2D.SizeSquared();
+            if (TangentLengthSquared > 0.001f)
+            {
+                Tangent2D *= FMath::InvSqrt(TangentLengthSquared);
+            }
+            else
             {
                 Tangent2D = FVector2D(1.0f, 0.0f);
             }
