@@ -23,7 +23,7 @@ namespace
 		return false;
 	}
 
-	bool IsNearEditedVoxelCell(
+	FIntVector LocalPositionToVoxelCell(
 		const FVector& LocalPosition,
 		const FSVoxelGenerationSettings& Settings)
 	{
@@ -37,46 +37,10 @@ namespace
 		const double WorldZ = Settings.bUseChunkLatticeCoordinates
 			? static_cast<double>(Settings.ChunkOriginCells.Z) * BaseStep + LocalPosition.Z
 			: static_cast<double>(Settings.ChunkWorldOrigin.Z) + LocalPosition.Z;
-		const FIntVector Cell(
+		return FIntVector(
 			FMath::FloorToInt(WorldX / BaseStep),
 			FMath::FloorToInt(WorldY / BaseStep),
 			FMath::FloorToInt(WorldZ / BaseStep));
-
-		if ((!Settings.MinedNodes.IsValid() || Settings.MinedNodes->Num() == 0) &&
-			(!Settings.BlockEdits.IsValid() || Settings.BlockEdits->Num() == 0))
-		{
-			return false;
-		}
-
-		// The terrain generator samples edits within two base cells of a point.
-		// Use the same neighbourhood for the commit-time winding repair.
-		for (int32 DZ = -2; DZ <= 2; ++DZ)
-		{
-			for (int32 DY = -2; DY <= 2; ++DY)
-			{
-				for (int32 DX = -2; DX <= 2; ++DX)
-				{
-					const FIntVector Candidate = Cell + FIntVector(DX, DY, DZ);
-					if (Settings.MinedNodes.IsValid() &&
-						Settings.MinedNodes->Contains(Candidate))
-					{
-						return true;
-					}
-					if (Settings.BlockEdits.IsValid())
-					{
-						if (const int8* State = Settings.BlockEdits->Find(Candidate))
-						{
-							// +2 only reserves a separately rendered hard cube.
-							if (*State != 0 && *State != 2)
-							{
-								return true;
-							}
-						}
-					}
-				}
-			}
-		}
-		return false;
 	}
 
 	int32 RepairEditedTriangleWinding(
@@ -102,6 +66,42 @@ namespace
 			FMath::Max(1.0f, LodStep * 0.5f)
 		};
 
+		TSet<FIntVector> EditedNeighborhood;
+		const auto AddEditedNeighborhood = [&EditedNeighborhood](const FIntVector& Cell)
+		{
+			for (int32 DZ = -2; DZ <= 2; ++DZ)
+			{
+				for (int32 DY = -2; DY <= 2; ++DY)
+				{
+					for (int32 DX = -2; DX <= 2; ++DX)
+					{
+						EditedNeighborhood.Add(Cell + FIntVector(DX, DY, DZ));
+					}
+				}
+			}
+		};
+		if (Settings.MinedNodes.IsValid())
+		{
+			for (const FIntVector& Cell : *Settings.MinedNodes)
+			{
+				AddEditedNeighborhood(Cell);
+			}
+		}
+		if (Settings.BlockEdits.IsValid())
+		{
+			for (const TPair<FIntVector, int8>& Edit : *Settings.BlockEdits)
+			{
+				if (Edit.Value != 0 && Edit.Value != 2)
+				{
+					AddEditedNeighborhood(Edit.Key);
+				}
+			}
+		}
+		if (EditedNeighborhood.Num() == 0)
+		{
+			return 0;
+		}
+
 		int32 CorrectedTriangles = 0;
 		for (int32 Index = 0; Index + 2 < Data.Triangles.Num(); Index += 3)
 		{
@@ -126,7 +126,7 @@ namespace
 			}
 
 			const FVector Center = (PositionA + PositionB + PositionC) / 3.0f;
-			if (!IsNearEditedVoxelCell(Center, Settings))
+			if (!EditedNeighborhood.Contains(LocalPositionToVoxelCell(Center, Settings)))
 			{
 				continue;
 			}
