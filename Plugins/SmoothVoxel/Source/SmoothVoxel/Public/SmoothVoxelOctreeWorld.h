@@ -257,6 +257,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="Voxel|World")
 	float GetWorldSizeCentimeters() const;
 
+	UFUNCTION(BlueprintPure, Category="Voxel|World")
+	static float GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize InWorldSize);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
 	bool bEnableBlockEditing = true;
 
@@ -364,7 +367,7 @@ private:
 	TMap<FIntVector, ASmoothVoxelPlacedCubeBlock*> PlacedCubeBlocks;
 
 	int32 DesiredCellsPerAxis = 32;
-	float DesiredBaseVoxelSize = 100.0f;
+	float DesiredBaseVoxelSize = 97.65625f;
 	bool bForceBuildDesiredSelection = false;
 
 	FVector SelectionCameraLocation = FVector::ZeroVector;
