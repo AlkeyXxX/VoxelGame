@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "SmoothVoxelGenerator.h"
 #include "SmoothVoxelTransvoxelMesher.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
