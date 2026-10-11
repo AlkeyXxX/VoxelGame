@@ -4,6 +4,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+#include <cmath>
 
 ASmoothVoxelRoadNetwork::ASmoothVoxelRoadNetwork()
 {
@@ -128,8 +129,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     int32 RoadSegmentCount = 0;
     int32 TotalRoadSamples = 0;
+    const int32 SamplesPerRoad = FMath::Max(
+        2, FMath::CeilToInt(static_cast<float>(Spacing / SafeSampleSpacing)));
     const int32 ExpectedSamples = FMath::Clamp(
-        FMath::CeilToInt(static_cast<float>(SafeWorldSize / SafeSampleSpacing)) * Sites.Num(),
+        SamplesPerRoad * Sites.Num() * 2,
         0, 300000);
     Vertices.Reserve(ExpectedSamples * 2);
     Triangles.Reserve(ExpectedSamples * 6);
