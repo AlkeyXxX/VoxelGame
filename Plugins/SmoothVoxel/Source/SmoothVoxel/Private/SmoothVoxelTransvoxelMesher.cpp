@@ -2,6 +2,7 @@
 
 #include "SmoothVoxelOctree.h"
 #include "Math/UnrealMathUtility.h"
+#include <cmath>
 
 // The upstream file is table data with its original copyright notice intact.
 // Keep it isolated in this translation unit to avoid duplicate external symbols.
