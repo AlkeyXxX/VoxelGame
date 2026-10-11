@@ -824,7 +824,10 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 		Mesh.Vertices.Add(Position);
 		if (bHasNormals)
 		{
-			Mesh.Normals.Add(-Normal);
+			// Reverse triangle indices for visibility, but keep the original
+			// outward shading normal. Inverting normals here made the thin roof
+			// receive lighting opposite to every neighbouring terrain triangle.
+			Mesh.Normals.Add(Normal);
 		}
 		if (bHasUV0)
 		{
@@ -832,17 +835,15 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 		}
 		if (bHasTangents)
 		{
-			// Flip the tangent-frame handedness along with the back-face normal.
-			Mesh.Tangents.Add(FProcMeshTangent(
-				Tangent.TangentX, !Tangent.bFlipTangentY));
+			Mesh.Tangents.Add(Tangent);
 		}
 		return NewIndex;
 	};
 
 	int32 DuplicatedTriangles = 0;
-	// Iterate only the original triangles; appended back faces must not be
-	// duplicated again. The duplicate vertices have their normals reversed too,
-	// so the thin roof shades correctly when viewed from inside the tunnel.
+	// Iterate only the original triangles; appended reverse-wound copies must
+	// not be duplicated again. Keep their shading normals unchanged so they
+	// match the neighbouring terrain's lighting instead of appearing inverted.
 	for (int32 Index = 0; Index + 2 < OriginalIndexCount; Index += 3)
 	{
 		const int32 A = Mesh.Triangles[Index];
