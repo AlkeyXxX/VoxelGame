@@ -44,7 +44,7 @@ struct FSVoxelGenerationSettings
 	// Large-scale landscape layout; flatness is shared by terrain and water masks.
 	float FlatlandRegionScale = 0.0000045f;
 	float FlatlandCoverage = 0.62f;
-	float FlatlandNoiseAmplitude = 35.0f;
+	float FlatlandNoiseAmplitude = 0.0f;
 	float HillScale = 0.0000035f;
 	float HillHeight = 3500.0f;
 	float DesertHillCoverage = 0.06f;
