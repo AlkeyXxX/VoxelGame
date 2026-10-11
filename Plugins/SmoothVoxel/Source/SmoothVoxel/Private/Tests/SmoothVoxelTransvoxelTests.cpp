@@ -744,9 +744,22 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
 	Edits->Add(FIntVector(2, 2, 5), int8(1));   // Smooth material meets the hill surface.
-	Edits->Add(FIntVector(2, 2, 4), int8(-1)); // Cut into the solid side of the hill.
+	Edits->Add(FIntVector(2, 2, 4), int8(-1)); // First hit creates a subtle local dent.
 	Edits->Add(FIntVector(4, 2, 6), int8(2));  // Cubic block cell is air in the SDF.
 	Settings.BlockEdits = Edits;
+	TSharedPtr<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> EditCenters =
+		MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>();
+	EditCenters->Add(FIntVector(2, 2, 4), FVector(125.0f, 125.0f, 249.0f));
+	Settings.BlockEditCenters = EditCenters;
+
+	const float FirstHitCenterDensity =
+		FSVoxelGenerator::SampleDensity(125.0, 125.0, 249.0, Settings);
+	const float FirstHitOutsideRadiusDensity =
+		FSVoxelGenerator::SampleDensity(160.0, 125.0, 249.0, Settings);
+	TestTrue(TEXT("A mining hit must remove density around the actual contact point"),
+		FirstHitCenterDensity < 0.0f);
+	TestTrue(TEXT("One mining hit must not hollow out an entire square voxel cell"),
+		FirstHitOutsideRadiusDensity > 0.0f);
 
 	FSVoxelMeshData Mesh;
 	FSVoxelTransvoxelMesher::Generate(Settings, 16, 50.0f, 0, Mesh);
