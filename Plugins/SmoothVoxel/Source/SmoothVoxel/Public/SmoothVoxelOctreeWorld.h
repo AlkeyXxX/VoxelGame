@@ -305,7 +305,8 @@ private:
 		const FVector& ChunkOrigin,
 		const FIntVector& ChunkOriginCells,
 		float EffectiveBaseVoxelSize,
-		float VoxelSize) const;
+		float VoxelSize,
+		bool bFilterBlockEdits = true) const;
 
 	TMap<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*> ActiveChunks;
 	TArray<TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>> QueuedChunkBuilds;
