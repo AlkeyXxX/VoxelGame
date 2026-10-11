@@ -4,8 +4,9 @@
 #include "CoreMinimal.h"
 #include "SmoothVoxelTypes.h"
 
-// Sparse world-aligned edits: +1 adds smooth Dirt/Sand, -1 carves air, +2 reserves a cell for a separately rendered cube.
+// Sparse world-aligned edits: +1 adds smooth Dirt/Sand, -1..-5 are progressive terrain-mining stages, +2 reserves a separately rendered cube.
 using FSVoxelBlockEditMap = TMap<FIntVector, int8>;
+using FSVoxelBlockEditCenterMap = TMap<FIntVector, FVector>;
 
 struct FSVoxelGenerationSettings
 {
@@ -51,8 +52,12 @@ struct FSVoxelGenerationSettings
 	// Allows neighboring chunks to use the same continuous noise field.
 	FVector ChunkWorldOrigin = FVector::ZeroVector;
 
-	// Immutable snapshot shared safely with asynchronous mesh workers.
+	// Immutable snapshots shared safely with asynchronous mesh workers.
 	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEdits;
+	// Terrain mining edits are centred at the hit point; placed blocks default
+	// to their grid-cell centre. Keeping this beside the edit snapshot avoids
+	// a first mining hit being lost because a centred diamond misses a cell edge.
+	TSharedPtr<const FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> BlockEditCenters;
 };
 
 class FSVoxelGenerator
