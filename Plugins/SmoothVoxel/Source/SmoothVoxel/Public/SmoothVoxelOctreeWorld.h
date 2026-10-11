@@ -5,10 +5,12 @@
 #include "SmoothVoxelGenerator.h"
 #include "SmoothVoxelOctree.h"
 #include "SmoothVoxelTypes.h"
+#include "VoxelTypes.h"
 #include "SmoothVoxelOctreeWorld.generated.h"
 
 class UProceduralMeshComponent;
 class UMaterialInterface;
+class UDataTable;
 
 /**
  * One independently streamed chunk rendered with the new experimental
@@ -206,6 +208,33 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Voxel|Streaming")
 	void RegenerateWorld();
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
+	bool bEnableBlockEditing = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
+	UDataTable* BlockDataTable = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks", meta=(ClampMin="100.0"))
+	float InteractionDistance = 600.0f;
+
+	// Compatible with the existing player/Blueprint interaction calls.
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	bool BreakBlockByRay();
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	bool PlaceBlockByRay();
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	bool PlaceBlockByRayWithType(EVoxelBlock BlockToPlace);
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	void RemoveBlockAtWorld(const FVector& WorldPosition);
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	void SetBlockAtWorld(const FVector& WorldPosition, EVoxelBlock Block);
+
+	void SetBlockDataTable(UDataTable* InDataTable) { BlockDataTable = InDataTable; }
+
 	UFUNCTION(BlueprintPure, Category="Voxel|Streaming")
 	int32 GetActiveChunkCount() const { return ActiveChunks.Num(); }
 
@@ -221,6 +250,16 @@ private:
 	void ApplyOneCompletedBuild(const FVector& CameraLocation);
 	bool AreDesiredChunksReady() const;
 	void RetireUndesiredChunks(int32 MaxChunksToRetire);
+
+	bool TraceInteractionRay(FHitResult& OutHit) const;
+	float GetEffectiveBlockSize() const;
+	FIntVector WorldPositionToBlockCell(const FVector& WorldPosition) const;
+	FVector BlockCellCenter(const FIntVector& Cell) const;
+	FSVoxelGenerationSettings MakeBlockQuerySettings() const;
+	float SampleCurrentDensityAt(const FVector& WorldPosition) const;
+	EVoxelBlock GetBlockTypeForCell(const FIntVector& Cell) const;
+	void ApplyBlockCellEdit(const FIntVector& Cell, EVoxelBlock Block);
+	void RebuildChunksNearEditedCell(const FIntVector& Cell);
 
 	FSVoxelGenerationSettings MakeGenerationSettings(
 		const FVector& ChunkOrigin,
@@ -238,6 +277,14 @@ private:
 	TMap<FSVoxelOctreeNode, float> DesiredVoxelSizes;
 	TMap<FSVoxelOctreeNode, bool> DesiredCollisionFlags;
 	TSet<FSVoxelOctreeNode> PreparedDesiredNodes;
+
+	// Edits live for the lifetime of this world actor and are copied into an
+	// immutable snapshot before async mesh generation, so workers never read a
+	// TMap that the game thread is mutating.
+	FSVoxelBlockEditMap EditedBlockCells;
+	TMap<FIntVector, EVoxelBlock> EditedBlockTypes;
+	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEditSnapshot;
+
 	int32 DesiredCellsPerAxis = 32;
 	float DesiredBaseVoxelSize = 100.0f;
 	bool bForceBuildDesiredSelection = false;
