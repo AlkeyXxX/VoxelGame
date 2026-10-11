@@ -654,6 +654,46 @@ FLinearColor FSVoxelGenerator::GetBiomeTint(
     return FMath::Lerp(Tint, BareEarth, ClearingWeight * 0.45f);
 }
 
+float FSVoxelGenerator::SampleRiverInfluence(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    if (!S.bEnableRivers)
+    {
+        return 0.0f;
+    }
+
+    const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.RiverScale)));
+    const double HalfWidth = FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
+    if (HalfWidth <= 0.0)
+    {
+        return 0.0f;
+    }
+
+    // Domain warp makes the zero-contours meander instead of looking like a
+    // repeated grid. A low-frequency scalar field creates a deterministic,
+    // connected network whose samples are identical in every Octree chunk.
+    const double WarpScale = Scale * 0.37;
+    const double WarpX = FBM2D(X * WarpScale, Y * WarpScale, S.Seed + 8111);
+    const double WarpY = FBM2D(X * WarpScale + 19.7, Y * WarpScale - 31.3, S.Seed + 8231);
+    const double WarpDistance = HalfWidth * 2.0;
+    const double Field = FBM2D(
+        (X + WarpX * WarpDistance) * Scale,
+        (Y + WarpY * WarpDistance) * Scale,
+        S.Seed + 8329);
+
+    // Convert the world-space river half-width into the field's dimensionless
+    // band width. The smooth falloff keeps the carved banks watertight across LOD.
+    const double Threshold = FMath::Clamp(HalfWidth * Scale * 0.48, 0.008, 0.20);
+    const float T = FMath::Clamp(
+        static_cast<float>(std::abs(Field) / Threshold),
+        0.0f,
+        1.0f);
+    const float SmoothT = T * T * (3.0f - 2.0f * T);
+    return 1.0f - SmoothT;
+}
+
 double FSVoxelGenerator::SampleSurfaceHeight(
     double X,
     double Y,
@@ -663,15 +703,28 @@ double FSVoxelGenerator::SampleSurfaceHeight(
     double SiteX = X;
     double SiteY = Y;
     const float PlateauWeight = GetPOIPlateauInfluence(X, Y, S, SiteX, SiteY);
-    if (PlateauWeight <= 0.0f)
+
+    double SurfaceHeight = NaturalHeight;
+    if (PlateauWeight > 0.0f)
     {
-        return NaturalHeight;
+        // Keep the clearing at the terrain's natural centre height, with a smooth
+        // falloff into surrounding ground. Interior samples are exactly planar.
+        const double PlateauHeight = SampleUnflattenedSurfaceHeight(SiteX, SiteY, S);
+        SurfaceHeight = FMath::Lerp(
+            NaturalHeight,
+            PlateauHeight,
+            static_cast<double>(PlateauWeight));
     }
 
-    // Keep the clearing at the terrain's natural centre height, with a smooth
-    // falloff into surrounding ground. Interior samples are exactly planar.
-    const double PlateauHeight = SampleUnflattenedSurfaceHeight(SiteX, SiteY, S);
-    return FMath::Lerp(NaturalHeight, PlateauHeight, static_cast<double>(PlateauWeight));
+    // Carve the same deterministic river SDF into every terrain sample. This is
+    // applied after POI flattening so riverbeds remain continuous through all LODs.
+    if (S.bEnableRivers)
+    {
+        const float RiverInfluence = SampleRiverInfluence(X, Y, S);
+        SurfaceHeight -= std::abs(static_cast<double>(S.RiverDepth)) *
+            static_cast<double>(RiverInfluence);
+    }
+    return SurfaceHeight;
 }
 
 double FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
