@@ -75,8 +75,8 @@ struct FSVoxelOctreeSelectionSettings
 	/** Size of a single LOD-0 cell in Unreal units (UE centimetres by default). */
 	float BaseVoxelSize = 100.0f;
 
-	/** Root window LOD. At 3 and 32 cells, the root spans 256 metres at 1 m/cell. */
-	int32 MaxLod = 3;
+	/** Root window LOD. At 4 and 32 cells, the root spans 512 metres at 1 m/cell. */
+	int32 MaxLod = 4;
 
 	/** Camera-to-node distance threshold, measured in node side lengths. */
 	float SplitDistanceMultiplier = 0.75f;
