@@ -134,8 +134,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="1.0"))
 	float BaseVoxelSize = 100.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0", ClampMax="8"))
-	int32 MaxLod = 6;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0", ClampMax="3"))
+	int32 MaxLod = 3;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0.05", ClampMax="4.0"))
 	float SplitDistanceMultiplier = 0.75f;
@@ -157,12 +157,12 @@ public:
 	float HeightAmplitude = 850.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
-	// Frequencies are in inverse centimetres. Keep the highest FBM octave
-	// comfortably below the Nyquist limit of 100 cm terrain samples.
-	float NoiseScale = 0.0008f;
+	// Frequencies are in inverse centimetres. These defaults keep the third
+	// FBM octave representable up to the supported 8 m cell spacing.
+	float NoiseScale = 0.0001f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
-	float DetailScale = 0.0006f;
+	float DetailScale = 0.000075f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
 	float DetailAmplitude = 60.0f;
