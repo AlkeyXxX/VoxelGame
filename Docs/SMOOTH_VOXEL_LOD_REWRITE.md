@@ -77,26 +77,37 @@ at all six face orientations and edge/corner combinations.
 ## Mining and block placement in the smooth-world path
 
 The opt-in `ASmoothVoxelOctreeWorld` has its own sparse runtime edit overlay; it
-does not reuse the legacy world's block save format. Mining subtracts a bounded
-cell volume from the same density field used by Transvoxel. Normal sampling near
-an edit now uses that edited field (rather than the untouched hill's height-field
-normal), and mesh emission rejects triangles that collapse after vertex-index
-deduplication. This specifically targets incorrectly oriented cut-wall triangles
-and degenerate faces that can appear as gaps after digging downward.
+does not reuse the legacy world's block save format. Mining uses a hit-centred
+octahedral density edit instead of carving a whole axis-aligned cell. Repeated
+hits expand the diamond-shaped recess through five stages, so a single hit creates
+a small dent rather than an immediate square pit. The edit center is stored with
+the immutable worker snapshot so chunk rebuilds and LOD transitions reproduce the
+same excavation. The interaction probes both sides of the collision normal and
+chooses the side whose signed density says it is solid, fixing underside mining
+when collision winding is ambiguous.
+
+Triangles next to edited density are oriented by probing solid/air density on
+both sides of their centroid; ordinary terrain retains the faster averaged-normal
+path. Mesh emission also rejects triangles that collapse after index deduplication.
+Terrain UVs use dominant-axis planar projection (XY on floors, XZ/YZ on walls)
+instead of projecting every surface onto XY, which previously stretched textures
+into long stripes on vertical pit walls.
 
 Placed `Dirt` and `Sand` are rounded, blended SDF additions to the smooth
 landscape. Other placeable block types (for example `Grass`, `Stone`, and
 `Wood`) reserve an air cell in the terrain mesh and render as separate six-face
-cubes with per-face normals and collision. This distinction is deliberate: hard
-blocks do not pass through the terrain's smooth normal field. The current edit
-overlay lasts for the lifetime of the octree world actor; SaveGame persistence
-and per-block material assignment are not part of this change.
+cubes with flat per-face normals and collision. Each cube takes multiple hits
+based on its block durability; its silhouette remains cubic while a small inset
+shows accumulating damage, and the procedural terrain under the cube is restored
+when it is finally removed. The current edit overlay lasts for the lifetime of the
+octree world actor; SaveGame persistence and per-block material assignment are
+not part of this change.
 
 The new mining/cube path and edited-mesh regression tests have **not** been built
-or executed in UE4.27 in this environment. Check LMB mining on a vertical face,
-dig several cells downward, place/remove Grass and Stone, then place Dirt and
-Sand to verify the intended smooth blend before treating the change as runtime
-validated.
+or executed in UE4.27 in this environment. Check LMB mining from both above and
+below, repeated hits at one point, texture scale on vertical walls, and place /
+damage / remove Grass and Stone. Also check that Dirt/Sand still blend naturally
+into the landscape before treating the change as runtime validated.
 
 ## Triangle winding and collision
 
@@ -156,13 +167,13 @@ winding separately from the stored outward normals.
   workers, and a one-mesh-section-per-frame commit budget. These safeguards
   reduce repeated rebuilds and completion bursts but cannot guarantee zero
   frame-time cost for every terrain/material configuration.
-- UVs use a stable world-XY projection at fixed world scale, reconstructed from
-  the chunk's integer lattice origin in double precision. Before writing the
-  procedural mesh, one shared integer tile offset is removed from all UVs in a
-  chunk. This keeps the coordinates bounded while remaining continuous across
-  marching-cubes cell boundaries. Adjacent chunks differ only by whole texture
-  repeats, so seam continuity assumes the material preserves repeating-UV
-  semantics. Near-vertical cliffs can stretch; use triplanar mapping there.
+- UVs use dominant-axis world-space planar projection at a fixed world scale:
+  XY for horizontal faces, XZ for Y-facing walls and YZ for X-facing walls.
+  Coordinates are reconstructed from the chunk's integer lattice origin in
+  double precision and rebased by integer tile offsets. This avoids the severe
+  stretch caused by the previous world-XY-only mapping on vertical pit walls.
+  Axis changes on strongly sloped surfaces can still produce projection seams;
+  true material-level triplanar blending remains the better long-term solution.
 - Tangents are derived from the UV0 world-XY projection and the smoothed surface
   normal, rather than accumulated independently from each cell's triangle list.
   Duplicate vertices at adjacent cells therefore get the same tangent frame,
