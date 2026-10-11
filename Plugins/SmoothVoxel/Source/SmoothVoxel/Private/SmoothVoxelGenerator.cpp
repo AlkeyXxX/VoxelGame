@@ -732,13 +732,20 @@ double FSVoxelGenerator::SampleSurfaceHeight(
             static_cast<double>(PlateauWeight));
     }
 
-    // Carve the same deterministic river SDF into every terrain sample. This is
-    // applied after POI flattening so riverbeds remain continuous through all LODs.
+    // Rivers do not own a second, sloped water mesh. Instead, carve a smooth
+    // channel down to a shared absolute water elevation. The globally level sea
+    // plane then fills every channel, exactly like a lake; terrain above that
+    // plane naturally masks the water and no river triangles can tear or float.
     if (S.bEnableRivers)
     {
-        const float RiverInfluence = SampleRiverInfluence(X, Y, S);
-        SurfaceHeight -= std::abs(static_cast<double>(S.RiverDepth)) *
-            static_cast<double>(RiverInfluence);
+        const double RiverInfluence = FMath::Clamp(
+            static_cast<double>(SampleRiverInfluence(X, Y, S)),
+            0.0,
+            1.0);
+        const double RiverBedTarget = static_cast<double>(S.RiverWaterLevel) -
+            std::abs(static_cast<double>(S.RiverDepth));
+        const double CarvedTarget = FMath::Min(SurfaceHeight, RiverBedTarget);
+        SurfaceHeight = FMath::Lerp(SurfaceHeight, CarvedTarget, RiverInfluence);
     }
     return SurfaceHeight;
 }
