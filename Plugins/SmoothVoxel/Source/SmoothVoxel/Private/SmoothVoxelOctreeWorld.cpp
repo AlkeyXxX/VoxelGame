@@ -527,6 +527,7 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 	float InTileSize,
 	int32 InResolution,
 	UMaterialInterface* InMaterial,
+	const FSVoxelGenerationSettings& InGenerationSettings,
 	bool bEnableCollision)
 {
 	check(IsInGameThread());
@@ -542,6 +543,25 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 		EffectiveMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
 	}
 
+	const FSVoxelGenerationSettings& OldSettings = ConfiguredGenerationSettings;
+	const bool bSameGeneratorSettings =
+		OldSettings.Seed == InGenerationSettings.Seed &&
+		OldSettings.bEnableBiomes == InGenerationSettings.bEnableBiomes &&
+		FMath::IsNearlyEqual(OldSettings.BiomeScale, InGenerationSettings.BiomeScale) &&
+		OldSettings.bEnablePOIPlateaus == InGenerationSettings.bEnablePOIPlateaus &&
+		FMath::IsNearlyEqual(OldSettings.POISiteSpacing, InGenerationSettings.POISiteSpacing) &&
+		FMath::IsNearlyEqual(OldSettings.POIPlateauRadius, InGenerationSettings.POIPlateauRadius) &&
+		FMath::IsNearlyEqual(OldSettings.POIPlateauBlendDistance, InGenerationSettings.POIPlateauBlendDistance) &&
+		FMath::IsNearlyEqual(OldSettings.BaseHeight, InGenerationSettings.BaseHeight) &&
+		FMath::IsNearlyEqual(OldSettings.HeightAmplitude, InGenerationSettings.HeightAmplitude) &&
+		FMath::IsNearlyEqual(OldSettings.NoiseScale, InGenerationSettings.NoiseScale) &&
+		FMath::IsNearlyEqual(OldSettings.DetailScale, InGenerationSettings.DetailScale) &&
+		FMath::IsNearlyEqual(OldSettings.DetailAmplitude, InGenerationSettings.DetailAmplitude) &&
+		OldSettings.bEnableRivers == InGenerationSettings.bEnableRivers &&
+		FMath::IsNearlyEqual(OldSettings.RiverScale, InGenerationSettings.RiverScale) &&
+		FMath::IsNearlyEqual(OldSettings.RiverHalfWidth, InGenerationSettings.RiverHalfWidth) &&
+		FMath::IsNearlyEqual(OldSettings.RiverDepth, InGenerationSettings.RiverDepth);
+
 	const bool bUnchanged = bHasConfiguration &&
 		ConfiguredWorldCenter.Equals(WorldCenter, KINDA_SMALL_NUMBER) &&
 		FMath::IsNearlyEqual(ConfiguredWorldSize, SafeWorldSize) &&
@@ -549,7 +569,8 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 		FMath::IsNearlyEqual(ConfiguredTileSize, SafeTileSize) &&
 		ConfiguredResolution == SafeResolution &&
 		ActiveMaterial == EffectiveMaterial &&
-		bConfiguredCollision == bEnableCollision;
+		bConfiguredCollision == bEnableCollision &&
+		bSameGeneratorSettings;
 	if (bUnchanged)
 	{
 		return;
@@ -560,18 +581,25 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 	ConfiguredSeaLevel = InSeaLevel;
 	ConfiguredTileSize = SafeTileSize;
 	ConfiguredResolution = SafeResolution;
+	ConfiguredGenerationSettings = InGenerationSettings;
 	bConfiguredCollision = bEnableCollision;
 	bHasConfiguration = true;
 	ActiveMaterial = EffectiveMaterial;
 
 	SetActorLocation(FVector(WorldCenter.X, WorldCenter.Y, InSeaLevel));
-	BuildSurfaceMesh(SafeWorldSize, SafeTileSize, SafeResolution, bEnableCollision);
+	BuildSurfaceMesh(
+		SafeWorldSize,
+		SafeTileSize,
+		SafeResolution,
+		InGenerationSettings,
+		bEnableCollision);
 }
 
 void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	float WorldSize,
 	float InTileSize,
 	int32 InResolution,
+	const FSVoxelGenerationSettings& GenerationSettings,
 	bool bEnableCollision)
 {
 	if (!Mesh)
@@ -584,20 +612,33 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	const float HalfExtent = FMath::Max(100.0f, WorldSize) * 0.5f;
 	const float Step = (HalfExtent * 2.0f) / static_cast<float>(Resolution);
 	const float SafeTileSize = FMath::Max(100.0f, InTileSize);
-
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
-	TArray<FVector> Normals;
-	TArray<FVector2D> UV0;
-	TArray<FLinearColor> Colors;
-	TArray<FProcMeshTangent> Tangents;
 	const int32 VertexCount = Side * Side;
-	Vertices.Reserve(VertexCount);
-	Normals.Reserve(VertexCount);
+
+	TArray<FVector> SeaVertices;
+	TArray<int32> SeaTriangles;
+	TArray<FVector> SeaNormals;
+	TArray<FVector2D> UV0;
+	TArray<FLinearColor> SeaColors;
+	TArray<FProcMeshTangent> SeaTangents;
+	TArray<FVector> RiverVertices;
+	TArray<FVector> RiverNormals;
+	TArray<FLinearColor> RiverColors;
+	TArray<FProcMeshTangent> RiverTangents;
+	TArray<float> RiverWeights;
+	TArray<int32> RiverTriangles;
+
+	SeaVertices.Reserve(VertexCount);
+	SeaNormals.Reserve(VertexCount);
 	UV0.Reserve(VertexCount);
-	Colors.Reserve(VertexCount);
-	Tangents.Reserve(VertexCount);
-	Triangles.Reserve(Resolution * Resolution * 6);
+	SeaColors.Reserve(VertexCount);
+	SeaTangents.Reserve(VertexCount);
+	RiverVertices.Reserve(VertexCount);
+	RiverNormals.Reserve(VertexCount);
+	RiverColors.Reserve(VertexCount);
+	RiverTangents.Reserve(VertexCount);
+	RiverWeights.Reserve(VertexCount);
+	SeaTriangles.Reserve(Resolution * Resolution * 6);
+	RiverTriangles.Reserve(Resolution * Resolution);
 
 	for (int32 Y = 0; Y <= Resolution; ++Y)
 	{
@@ -605,19 +646,42 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 		{
 			const float LocalX = -HalfExtent + static_cast<float>(X) * Step;
 			const float LocalY = -HalfExtent + static_cast<float>(Y) * Step;
-			Vertices.Add(FVector(LocalX, LocalY, 0.0f));
-			Normals.Add(FVector::UpVector);
+			const double WorldX = static_cast<double>(ConfiguredWorldCenter.X) + LocalX;
+			const double WorldY = static_cast<double>(ConfiguredWorldCenter.Y) + LocalY;
+
+			SeaVertices.Add(FVector(LocalX, LocalY, 0.0f));
+			SeaNormals.Add(FVector::UpVector);
 			UV0.Add(FVector2D(
 				static_cast<float>(X) * Step / SafeTileSize,
 				static_cast<float>(Y) * Step / SafeTileSize));
-			Colors.Add(FLinearColor::White);
-			Tangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
+			SeaColors.Add(FLinearColor::White);
+			SeaTangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
+
+			const float RiverInfluence = FSVoxelGenerator::SampleRiverInfluence(
+				WorldX, WorldY, GenerationSettings);
+			const double TerrainHeight = FSVoxelGenerator::SampleSurfaceHeight(
+				WorldX, WorldY, GenerationSettings);
+			const double RiverSurfaceHeight = FMath::Max(
+				static_cast<double>(ConfiguredSeaLevel) + 2.0,
+				TerrainHeight + std::abs(static_cast<double>(GenerationSettings.RiverDepth)) *
+					static_cast<double>(RiverInfluence) * 0.62);
+			// River mesh uses the same global grid as the sea. At channel banks its
+			// edge returns to the terrain surface; where it reaches the ocean it
+			// approaches the common sea level instead of leaving a visible gap.
+			RiverVertices.Add(FVector(
+				LocalX,
+				LocalY,
+				static_cast<float>(RiverSurfaceHeight - static_cast<double>(ConfiguredSeaLevel))));
+			RiverWeights.Add(RiverInfluence);
+			RiverNormals.Add(FVector::UpVector);
+			RiverColors.Add(FLinearColor::White);
+			RiverTangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
 		}
 	}
 
-	// Match the ProceduralMeshComponent winding used by the voxel blocks while
-	// retaining upward normals. Every water vertex is derived from the same
-	// global XY bounds, so the sheet never shifts as Octree LODs stream.
+	// The sea sheet is globally aligned and deliberately independent of the
+	// Octree's leaf/chunk layout. Terrain above sea level naturally defines the
+	// coastline by occluding it in the depth buffer.
 	for (int32 Y = 0; Y < Resolution; ++Y)
 	{
 		for (int32 X = 0; X < Resolution; ++X)
@@ -626,31 +690,82 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 			const int32 B = A + 1;
 			const int32 D = (Y + 1) * Side + X;
 			const int32 C = D + 1;
-			Triangles.Add(A);
-			Triangles.Add(C);
-			Triangles.Add(B);
-			Triangles.Add(A);
-			Triangles.Add(D);
-			Triangles.Add(C);
+
+			SeaTriangles.Add(A);
+			SeaTriangles.Add(C);
+			SeaTriangles.Add(B);
+			SeaTriangles.Add(A);
+			SeaTriangles.Add(D);
+			SeaTriangles.Add(C);
+
+			if (RiverWeights[A] > 0.01f || RiverWeights[B] > 0.01f || RiverWeights[C] > 0.01f)
+			{
+				RiverTriangles.Add(A);
+				RiverTriangles.Add(C);
+				RiverTriangles.Add(B);
+			}
+			if (RiverWeights[A] > 0.01f || RiverWeights[D] > 0.01f || RiverWeights[C] > 0.01f)
+			{
+				RiverTriangles.Add(A);
+				RiverTriangles.Add(D);
+				RiverTriangles.Add(C);
+			}
+		}
+	}
+
+	// Calculate smooth normals for the varying river profile. The sea itself
+	// remains exactly horizontal.
+	for (int32 Y = 0; Y <= Resolution; ++Y)
+	{
+		for (int32 X = 0; X <= Resolution; ++X)
+		{
+			const int32 Left = Y * Side + FMath::Max(0, X - 1);
+			const int32 Right = Y * Side + FMath::Min(Resolution, X + 1);
+			const int32 Down = FMath::Max(0, Y - 1) * Side + X;
+			const int32 Up = FMath::Min(Resolution, Y + 1) * Side + X;
+			const float DX = FMath::Max(Step, static_cast<float>(Right - Left) * Step / 2.0f);
+			const float DY = FMath::Max(Step, static_cast<float>(Up - Down) * Step / 2.0f);
+			const float SlopeX = (RiverVertices[Right].Z - RiverVertices[Left].Z) / DX;
+			const float SlopeY = (RiverVertices[Up].Z - RiverVertices[Down].Z) / DY;
+			RiverNormals[Y * Side + X] = FVector(-SlopeX, -SlopeY, 1.0f).GetSafeNormal();
 		}
 	}
 
 	Mesh->ClearAllMeshSections();
 	Mesh->CreateMeshSection_LinearColor(
 		0,
-		Vertices,
-		Triangles,
-		Normals,
+		SeaVertices,
+		SeaTriangles,
+		SeaNormals,
 		UV0,
 		TArray<FVector2D>(),
 		TArray<FVector2D>(),
 		TArray<FVector2D>(),
-		Colors,
-		Tangents,
+		SeaColors,
+		SeaTangents,
 		bEnableCollision);
+	if (RiverTriangles.Num() > 0)
+	{
+		Mesh->CreateMeshSection_LinearColor(
+			1,
+			RiverVertices,
+			RiverTriangles,
+			RiverNormals,
+			UV0,
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			RiverColors,
+			RiverTangents,
+			bEnableCollision);
+	}
 	if (ActiveMaterial)
 	{
 		Mesh->SetMaterial(0, ActiveMaterial);
+		if (RiverTriangles.Num() > 0)
+		{
+			Mesh->SetMaterial(1, ActiveMaterial);
+		}
 	}
 	Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
 	Mesh->SetCollisionEnabled(
