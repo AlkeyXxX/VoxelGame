@@ -872,6 +872,72 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	TestTrue(TEXT("Edited surface normals must be finite"), bAllNormalsFinite);
 	TestTrue(TEXT("Edited surface normals must be normalized"), bAllNormalsNormalized);
 
+	// Regression coverage for repeated mining hits. Earlier tests only checked
+	// the first damage stage, while the reported back-face artifacts appeared
+	// after later density edits rebuilt the same patch.
+	const auto HasConsistentWinding = [](const FSVoxelMeshData& Candidate)
+	{
+		if (Candidate.Vertices.Num() == 0 ||
+			Candidate.Triangles.Num() == 0 ||
+			Candidate.Triangles.Num() % 3 != 0 ||
+			Candidate.Normals.Num() != Candidate.Vertices.Num())
+		{
+			return false;
+		}
+
+		for (int32 Triangle = 0; Triangle < Candidate.Triangles.Num(); Triangle += 3)
+		{
+			const int32 A = Candidate.Triangles[Triangle];
+			const int32 B = Candidate.Triangles[Triangle + 1];
+			const int32 C = Candidate.Triangles[Triangle + 2];
+			if (!Candidate.Vertices.IsValidIndex(A) ||
+				!Candidate.Vertices.IsValidIndex(B) ||
+				!Candidate.Vertices.IsValidIndex(C))
+			{
+				return false;
+			}
+
+			const FVector Cross = FVector::CrossProduct(
+				Candidate.Vertices[B] - Candidate.Vertices[A],
+				Candidate.Vertices[C] - Candidate.Vertices[A]);
+			if (!FMath::IsFinite(Cross.X) ||
+				!FMath::IsFinite(Cross.Y) ||
+				!FMath::IsFinite(Cross.Z) ||
+				Cross.SizeSquared() <= SMALL_NUMBER)
+			{
+				return false;
+			}
+
+			const FVector ExpectedOutward = (
+				Candidate.Normals[A] +
+				Candidate.Normals[B] +
+				Candidate.Normals[C]).GetSafeNormal();
+			if (ExpectedOutward.SizeSquared() > SMALL_NUMBER &&
+				FVector::DotProduct(Cross, ExpectedOutward) > 0.001f)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+
+	FSVoxelMeshData StageTwoMesh;
+	FSVoxelTransvoxelMesher::Generate(StageTwoSettings, 16, 50.0f, 0, StageTwoMesh);
+	TestTrue(
+		TEXT("Second mining stage must not introduce back-face-culled triangles"),
+		HasConsistentWinding(StageTwoMesh));
+
+	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> StageFiveEdits =
+		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(*Edits);
+	StageFiveEdits->Add(FIntVector(2, 2, 4), int8(-5));
+	FSVoxelGenerationSettings StageFiveSettings = Settings;
+	StageFiveSettings.BlockEdits = StageFiveEdits;
+	FSVoxelMeshData StageFiveMesh;
+	FSVoxelTransvoxelMesher::Generate(StageFiveSettings, 16, 50.0f, 0, StageFiveMesh);
+	TestTrue(
+		TEXT("Final mining stage must not introduce back-face-culled triangles"),
+		HasConsistentWinding(StageFiveMesh));
+
 	return true;
 }
 
