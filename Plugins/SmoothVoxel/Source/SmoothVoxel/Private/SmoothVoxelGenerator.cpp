@@ -977,10 +977,10 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
         const double RingRadius = RingRadii[RingIndex];
         for (int32 SampleIndex = 0; SampleIndex < RingSamples[RingIndex]; ++SampleIndex)
         {
-            const double Angle = 6.283185307179586 * static_cast<double>(SampleIndex) /
+            const double SampleAngle = 6.283185307179586 * static_cast<double>(SampleIndex) /
                 static_cast<double>(RingSamples[RingIndex]);
-            const double EllipseX = RingRadius * std::cos(Angle) * AxisX;
-            const double EllipseY = RingRadius * std::sin(Angle) * AxisY;
+            const double EllipseX = RingRadius * std::cos(SampleAngle) * AxisX;
+            const double EllipseY = RingRadius * std::sin(SampleAngle) * AxisY;
             const double OffsetX = EllipseX * CosAngle - EllipseY * SinAngle;
             const double OffsetY = EllipseX * SinAngle + EllipseY * CosAngle;
             const double RimHeight = SampleUnflattenedSurfaceHeight(
