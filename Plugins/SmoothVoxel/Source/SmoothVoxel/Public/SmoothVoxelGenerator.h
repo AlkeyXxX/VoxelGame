@@ -58,6 +58,9 @@ struct FSVoxelGenerationSettings
 	float RiverScale = 0.00001f;
 	float RiverHalfWidth = 7500.0f;
 	float RiverDepth = 350.0f;
+	// River beds are carved below this absolute world Z so the shared sea plane
+	// fills the channel without any separate sloped river-water mesh.
+	float RiverWaterLevel = 0.0f;
 
 	// Solid bottom
 	float BottomDepth = 2000.0f;
