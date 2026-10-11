@@ -801,10 +801,10 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
         return;
     }
 
-    // Slight global density boost also affects already-placed world actors whose
-    // serialized RiverScale predates the denser network default.
+    // Use a denser world-scale field so 2-4 km maps contain multiple long
+    // channels, while keeping RiverScale as the user-facing tuning control.
     const double Scale = FMath::Max(
-        0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 1.25);
+        0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
     const double HalfWidth = FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
     if (HalfWidth <= 0.0)
     {
@@ -843,14 +843,10 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // instead of cutting the river mesh off at a categorical biome edge.
     OutInfluence *= (1.0f - DesertWeight);
 
-    // Prefer flatter ground, but keep channels continuous across rolling terrain.
-    // The previous hard cutoff at 0.72 could erase nearly the entire network when
-    // users raised hill coverage or changed the scale of flatland regions.
-    const float Flatness = SampleFlatlandInfluence(X, Y, S);
-    const float FlatGroundGateT = FMath::Clamp((Flatness - 0.38f) / 0.37f, 0.0f, 1.0f);
-    const float FlatGroundGate = FlatGroundGateT * FlatGroundGateT *
-        (3.0f - 2.0f * FlatGroundGateT);
-    OutInfluence *= FlatGroundGate;
+    // Do not gate the channel by flatland coverage: at high hill coverage that
+    // gate reduced the channel mask, so terrain could be cut without reaching
+    // RiverWaterLevel and the same river appeared as a dry trench. Full-strength
+    // centre lines now carve to the bed level and are rendered with matching water.
 }
 
 float FSVoxelGenerator::SampleRiverInfluence(
