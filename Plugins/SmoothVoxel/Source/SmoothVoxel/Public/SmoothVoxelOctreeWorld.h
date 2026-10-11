@@ -253,6 +253,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks", meta=(ClampMin="100.0"))
 	float InteractionDistance = 600.0f;
 
+	/** Damage dealt to a terrain density node per mining hit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks", meta=(ClampMin="0.1"))
+	float TerrainMiningToolDamage = 1.0f;
+
 	// Compatible with the existing player/Blueprint interaction calls.
 	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
 	bool BreakBlockByRay();
@@ -299,7 +303,7 @@ private:
 		EVoxelBlock Block,
 		int8 EditStateOverride = 0,
 		const FVector* EditCenterOverride = nullptr);
-	void RebuildChunksNearEditedCell(const FIntVector& Cell);
+	void RebuildChunksNearEditedCell(const FIntVector& Cell, bool bGridNode = false);
 
 	FSVoxelGenerationSettings MakeGenerationSettings(
 		const FVector& ChunkOrigin,
@@ -327,6 +331,12 @@ private:
 	TMap<FIntVector, EVoxelBlock> EditedBlockTypes;
 	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEditSnapshot;
 	TSharedPtr<const FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> BlockEditCenterSnapshot;
+
+	// Mining progress and completed cuts are keyed by absolute density-grid
+	// nodes, independent from block-cell edits and fractional trace coordinates.
+	TMap<FIntVector, float> TerrainMiningProgress;
+	FSVoxelMinedNodeSet MinedTerrainNodes;
+	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodeSnapshot;
 
 	UPROPERTY()
 	TMap<FIntVector, ASmoothVoxelPlacedCubeBlock*> PlacedCubeBlocks;
