@@ -754,36 +754,48 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		Mesh.Vertices.Num() > 0 && Mesh.Triangles.Num() > 0);
 	TestEqual(TEXT("Triangle indices must be emitted in triples"), Mesh.Triangles.Num() % 3, 0);
 
+	bool bAllTriangleIndicesValid = true;
+	bool bNoCollapsedTriangleIndices = true;
+	bool bNoZeroAreaTriangles = true;
 	for (int32 Index = 0; Index + 2 < Mesh.Triangles.Num(); Index += 3)
 	{
 		const int32 A = Mesh.Triangles[Index];
 		const int32 B = Mesh.Triangles[Index + 1];
 		const int32 C = Mesh.Triangles[Index + 2];
-		TestTrue(TEXT("Triangle index must be in range"),
-			Mesh.Vertices.IsValidIndex(A) && Mesh.Vertices.IsValidIndex(B) && Mesh.Vertices.IsValidIndex(C));
 		if (!Mesh.Vertices.IsValidIndex(A) ||
 			!Mesh.Vertices.IsValidIndex(B) ||
 			!Mesh.Vertices.IsValidIndex(C))
 		{
+			bAllTriangleIndicesValid = false;
 			continue;
 		}
 
-		TestTrue(TEXT("Edited mesh must not contain collapsed triangle indices"),
-			A != B && B != C && C != A);
+		if (A == B || B == C || C == A)
+		{
+			bNoCollapsedTriangleIndices = false;
+			continue;
+		}
 		const FVector Cross = FVector::CrossProduct(
 			Mesh.Vertices[B] - Mesh.Vertices[A],
 			Mesh.Vertices[C] - Mesh.Vertices[A]);
-		TestTrue(TEXT("Edited mesh must not contain zero-area triangles"),
-			Cross.SizeSquared() > SMALL_NUMBER);
+		if (Cross.SizeSquared() <= SMALL_NUMBER)
+		{
+			bNoZeroAreaTriangles = false;
+		}
 	}
+	TestTrue(TEXT("Every edited-mesh triangle index must be in range"), bAllTriangleIndicesValid);
+	TestTrue(TEXT("Edited mesh must not contain collapsed triangle indices"), bNoCollapsedTriangleIndices);
+	TestTrue(TEXT("Edited mesh must not contain zero-area triangles"), bNoZeroAreaTriangles);
 
+	bool bAllNormalsFinite = true;
+	bool bAllNormalsNormalized = true;
 	for (const FVector& Normal : Mesh.Normals)
 	{
-		TestTrue(TEXT("Edited surface normal must be finite"),
-			FMath::IsFinite(Normal.X) && FMath::IsFinite(Normal.Y) && FMath::IsFinite(Normal.Z));
-		TestTrue(TEXT("Edited surface normal must be normalized"),
-			FMath::IsNearlyEqual(Normal.SizeSquared(), 1.0f, 0.01f));
+		bAllNormalsFinite &= FMath::IsFinite(Normal.X) && FMath::IsFinite(Normal.Y) && FMath::IsFinite(Normal.Z);
+		bAllNormalsNormalized &= FMath::IsNearlyEqual(Normal.SizeSquared(), 1.0f, 0.01f);
 	}
+	TestTrue(TEXT("Edited surface normals must be finite"), bAllNormalsFinite);
+	TestTrue(TEXT("Edited surface normals must be normalized"), bAllNormalsNormalized);
 
 	return true;
 }
