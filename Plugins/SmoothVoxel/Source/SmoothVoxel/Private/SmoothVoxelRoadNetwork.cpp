@@ -459,7 +459,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     {
                         Distance[NextIndex] = TentativeDistance;
                         Parent[NextIndex] = CurrentIndex;
-                        Open.push({ TentativeDistance + Heuristic(NextCell, GoalCell), NextIndex });
+                        FRoadOpenNode NextOpenNode;
+                        NextOpenNode.Score = TentativeDistance + Heuristic(NextCell, GoalCell);
+                        NextOpenNode.Index = NextIndex;
+                        Open.push(NextOpenNode);
                     }
                 }
             }
