@@ -149,7 +149,8 @@ public:
 		double WorldY,
 		const FSVoxelGenerationSettings& Settings,
 		float& OutInfluence,
-		float& OutSignedField);
+		float& OutSignedField,
+		float* OutBankInfluence = nullptr);
 
 	/** Sample the macro terrain noise at a global XY coordinate. */
 	static float SampleTerrainNoise(
