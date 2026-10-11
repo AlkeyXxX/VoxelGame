@@ -31,10 +31,10 @@ The rewrite lives beside the current world and does not replace the legacy
    sampling scales with LOD; world-XY UVs stay stable and tangent frames now come
    directly from the same projection derivatives at every vertex.
 8. Terrain noise bandwidth is clamped globally for the coarsest supported sample
-   step (maximum LOD 3 / 8 m per cell). This avoids aliasing at distant LOD while
+   step (maximum LOD 4 / 16 m per cell). This avoids aliasing at distant LOD while
    keeping the exact same density function across the entire terrain and all
    transition faces.
-8. Completed CPU meshes are queued to the manager and only one procedural mesh
+9. Completed CPU meshes are queued to the manager and only one procedural mesh
    section is committed on the game thread per frame. Worker concurrency is
    capped at two, and LOD reselection has a minimum 10 m movement threshold.
 
@@ -51,7 +51,7 @@ capped at two to reduce game-thread upload bursts and CPU contention.
 The root is a rolling finite window, not an unbounded world at once: it shifts
 horizontally by half its width and keeps 50% overlap to avoid stopping terrain
 generation at the original root boundary. Its vertical interval remains
-anchored to `RootWorldCenter.Z`. Maximum runtime LOD is capped at 3 (up to 8 m
+anchored to `RootWorldCenter.Z`. Maximum runtime LOD is capped at 4 (up to 16 m
 between samples with a 1 m base voxel). The cap also applies to serialized actor
 instances so old Details-panel values cannot restore highly aliased coarse LODs.
 It has not been compiled or run in UE4.27 in this environment, so automation
@@ -80,8 +80,8 @@ winding separately from the stored outward normals.
 
 - Terrain frequency parameters are in inverse centimetres because the density
   function samples Unreal world coordinates directly. The default values are
-  `NoiseScale=0.0001` and `DetailScale=0.000075`. The world manager also calls
-  `ClampNoiseScalesForMaxSampleStep` with the coarsest supported step, limiting
+  `NoiseScale=0.00005` and `DetailScale=0.0000375`. The world manager also calls
+  `ClampNoiseScalesForMaxSampleStep` with the coarsest supported step (16 m), limiting
   the highest FBM octave to 0.35 noise-lattice units per sample. That is a global
   cap shared by every LOD—not a different density function per LOD—so adjacent
   chunks and Transvoxel transitions still use the same scalar field.
