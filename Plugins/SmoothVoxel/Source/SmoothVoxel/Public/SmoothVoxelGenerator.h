@@ -33,7 +33,7 @@ struct FSVoxelGenerationSettings
 
 	// World-space climate settings: changing map size never rescales biome regions.
 	bool bEnableBiomes = true;
-	float BiomeScale = 0.00000065f;
+	float BiomeScale = 0.00001f;
 
 	// Deterministic clearings reserved for future POIs.
 	bool bEnablePOIPlateaus = true;
