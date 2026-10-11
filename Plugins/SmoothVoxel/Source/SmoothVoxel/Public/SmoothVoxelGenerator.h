@@ -29,7 +29,7 @@ struct FSVoxelGenerationSettings
 
 	float IsoLevel = 0.0f;
 
-	int32 Seed = 1337;
+	int32 Seed = 555;
 
 	// Biomes follow one stable layout tied to the finite map rather than independent
 	// climate patches. Distances are normalized to the selected world footprint.
@@ -40,39 +40,39 @@ struct FSVoxelGenerationSettings
 
 	// Deterministic clearings reserved for future POIs.
 	bool bEnablePOIPlateaus = true;
-	float POISiteSpacing = 65000.0f;
-	float POIPlateauRadius = 6500.0f;
-	float POIPlateauBlendDistance = 5000.0f;
+	float POISiteSpacing = 45000.0f;
+	float POIPlateauRadius = 4500.0f;
+	float POIPlateauBlendDistance = 3000.0f;
 
 	// Large-scale landscape layout; flatness is shared by terrain and water masks.
-	float FlatlandRegionScale = 0.0000045f;
-	float FlatlandCoverage = 0.62f;
-	float FlatlandNoiseAmplitude = 0.0f;
-	float HillScale = 0.0000035f;
-	float HillHeight = 3500.0f;
-	float DesertHillCoverage = 0.06f;
-	float MountainBiomeThreshold = 0.72f;
-	float MountainHeight = 18000.0f;
+	float FlatlandRegionScale = 0.00002f;
+	float FlatlandCoverage = 0.2f;
+	float FlatlandNoiseAmplitude = 50.0f;
+	float HillScale = 0.00002f;
+	float HillHeight = 4000.0f;
+	float DesertHillCoverage = 0.18f;
+	float MountainBiomeThreshold = 0.80f;
+	float MountainHeight = 12000.0f;
 
 	float BaseHeight = 900.0f;
-	float HeightAmplitude = 850.0f;
+	float HeightAmplitude = 3500.0f;
 	float NoiseScale = 0.00005f;
-	float DetailScale = 0.000035f;
+	float DetailScale = 0.000025f;
 	float DetailAmplitude = 60.0f;
 
 	bool bEnableRivers = true;
 	float RiverScale = 0.000004f;
-	float RiverHalfWidth = 2500.0f;
-	float RiverDepth = 600.0f;
+	float RiverHalfWidth = 500.0f;
+	float RiverDepth = 200.0f;
 	float RiverWaterLevel = 850.0f;
 
 	bool bEnableLakes = true;
-	float LakeSiteSpacing = 90000.0f;
-	float LakeRadius = 4500.0f;
+	float LakeSiteSpacing = 50000.0f;
+	float LakeRadius = 4000.0f;
 	float LakeShoreBlendDistance = 1800.0f;
 	float LakeDepth = 500.0f;
-	float LakeChance = 0.12f;
-	float HillLakeChance = 0.07f;
+	float LakeChance = 0.3f;
+	float HillLakeChance = 0.15f;
 
 	// Solid bottom
 	float BottomDepth = 2000.0f;
