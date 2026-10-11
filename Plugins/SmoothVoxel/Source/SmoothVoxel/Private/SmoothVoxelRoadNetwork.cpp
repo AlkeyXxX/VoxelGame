@@ -172,8 +172,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     int32 SkippedUnsafeBridgeCount = 0;
     const int32 SamplesPerRoad = FMath::Max(
         2, FMath::CeilToInt(static_cast<float>(Spacing / SafeSampleSpacing)));
+    // Four possible long-range site links plus the local POI ring create
+    // substantially more geometry than the old two-links-per-site estimate.
     const int32 ExpectedSamples = FMath::Clamp(
-        SamplesPerRoad * Sites.Num() * 2,
+        SamplesPerRoad * Sites.Num() * 8,
         0, 300000);
     Vertices.Reserve(ExpectedSamples * 2);
     Triangles.Reserve(ExpectedSamples * 6);
@@ -233,7 +235,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     };
 
     TMap<FIntPoint, FRoadGridSample> RouteGridCache;
-    RouteGridCache.Reserve(8192);
+    RouteGridCache.Reserve(FMath::Clamp(Sites.Num() * 128, 8192, 160000));
 
     auto GetRouteGridSample = [&](const FIntPoint& GridCell) -> FRoadGridSample&
     {
