@@ -12,6 +12,16 @@ class UProceduralMeshComponent;
 class UMaterialInterface;
 class UDataTable;
 
+// World dimensions are selected per new world in the editor. Keep these values
+// in centimetres in code (Unreal's default world units) for exact grid bounds.
+UENUM(BlueprintType)
+enum class ESmoothVoxelWorldSize : uint8
+{
+	Size2Km UMETA(DisplayName = "2 x 2 km"),
+	Size4Km UMETA(DisplayName = "4 x 4 km"),
+	Size8Km UMETA(DisplayName = "8 x 8 km")
+};
+
 /**
  * One independently streamed chunk rendered with the new experimental
  * Transvoxel backend. This actor is only spawned by ASmoothVoxelOctreeWorld.
@@ -167,30 +177,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="16"))
 	int32 MaxChunkRequestsPerFrame = 4;
 
+	/** Safety budget for octree leaves. 8192 permits the minimum 8K root coverage at LOD 4. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="32", ClampMax="8192"))
-	int32 MaxLeafCount = 2048;
+	int32 MaxLeafCount = 8192;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="128"))
 	int32 CellsPerAxis = 32;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="1.0"))
-	float BaseVoxelSize = 100.0f;
+	/** Runtime-effective sample spacing is derived from WorldSize so the map bounds stay exact. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Octree", meta=(Units="cm"))
+	float BaseVoxelSize = 97.65625f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0", ClampMax="4"))
 	int32 MaxLod = 4;
 
-	/** Fixed world window scale. The default fills a 4 km square at default settings. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="7"))
-	int32 RootWindowLod = 7;
+	/** Select the finite map dimensions for this world instance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World", meta=(DisplayName="World Size"))
+	ESmoothVoxelWorldSize WorldSize = ESmoothVoxelWorldSize::Size4Km;
 
 	/** LOD refinement distance multiplier. Higher values create more chunks and transition boundaries. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0.05", ClampMax="4.0"))
 	float SplitDistanceMultiplier = 0.75f;
 
-	/** Fixed centre of the finite world bounds. The world does not follow the
-	 * player; its horizontal size is capped at 4 km per axis.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree")
+	/** Fixed centre of the finite world bounds. The world does not follow the player. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World")
 	FVector RootWorldCenter = FVector::ZeroVector;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
@@ -244,6 +254,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Voxel|Streaming")
 	void RegenerateWorld();
 
+	UFUNCTION(BlueprintPure, Category="Voxel|World")
+	float GetWorldSizeCentimeters() const;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
 	bool bEnableBlockEditing = true;
 
@@ -290,6 +303,7 @@ private:
 	void ApplyOneCompletedBuild(const FVector& CameraLocation);
 	bool AreDesiredChunksReady() const;
 	void RetireUndesiredChunks(int32 MaxChunksToRetire);
+	int32 GetRootLodForWorldSize() const;
 
 	bool TraceInteractionRay(FHitResult& OutHit) const;
 	float GetEffectiveBlockSize() const;
