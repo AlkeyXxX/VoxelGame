@@ -12,6 +12,8 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "InputCoreTypes.h"
+#include "Engine/World.h"
+#include "CollisionShape.h"
 
 namespace
 {
@@ -651,6 +653,34 @@ void ASmoothVoxelOctreeWorld::RegenerateWorld()
 	bForceUpdate = true;
 }
 
+float ASmoothVoxelOctreeWorld::GetWorldSizeCentimeters() const
+{
+	switch (WorldSize)
+	{
+	case ESmoothVoxelWorldSize::Size2Km:
+		return 200000.0f;
+	case ESmoothVoxelWorldSize::Size8Km:
+		return 800000.0f;
+	case ESmoothVoxelWorldSize::Size4Km:
+	default:
+		return 400000.0f;
+	}
+}
+
+int32 ASmoothVoxelOctreeWorld::GetRootLodForWorldSize() const
+{
+	switch (WorldSize)
+	{
+	case ESmoothVoxelWorldSize::Size2Km:
+		return 6;
+	case ESmoothVoxelWorldSize::Size8Km:
+		return 8;
+	case ESmoothVoxelWorldSize::Size4Km:
+	default:
+		return 7;
+	}
+}
+
 FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	const FVector& ChunkOrigin,
 	const FIntVector& ChunkOriginCells,
@@ -664,7 +694,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.BaseVoxelSize = EffectiveBaseVoxelSize;
 	Settings.ChunkOriginCells = ChunkOriginCells;
 	Settings.bUseChunkLatticeCoordinates = true;
-	Settings.NormalSampleStep = FMath::Max(5.0f, BaseVoxelSize * 0.5f);
+	Settings.NormalSampleStep = FMath::Max(5.0f, EffectiveBaseVoxelSize * 0.5f);
 	Settings.IsoLevel = 0.0f;
 	Settings.Seed = Seed;
 	Settings.BaseHeight = BaseHeight;
@@ -1545,6 +1575,55 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		static_cast<float>(Cell.Y) * Step,
 		static_cast<float>(Cell.Z) * Step);
 
+	// Never allow a face-adjacent placement to extend beyond the selected
+	// finite world window.
+	const float WorldHalfSize = GetWorldSizeCentimeters() * 0.5f;
+	const float WorldMinX = RootWorldCenter.X - WorldHalfSize;
+	const float WorldMaxX = RootWorldCenter.X + WorldHalfSize;
+	const float WorldMinY = RootWorldCenter.Y - WorldHalfSize;
+	const float WorldMaxY = RootWorldCenter.Y + WorldHalfSize;
+	const float BoundsTolerance = FMath::Max(0.05f, Step * 0.001f);
+	if (CubeWorldOrigin.X < WorldMinX - BoundsTolerance ||
+		CubeWorldOrigin.Y < WorldMinY - BoundsTolerance ||
+		CubeWorldOrigin.X + Step > WorldMaxX + BoundsTolerance ||
+		CubeWorldOrigin.Y + Step > WorldMaxY + BoundsTolerance)
+	{
+		return false;
+	}
+
+	// Reject placements whose target cube would occupy any part of the player
+	// pawn's collision. Shrink the query box by a tiny epsilon so a block
+	// touching the player's feet or side is still placeable face-to-face.
+	if (IsValid(PlayerPawn) && GetWorld())
+	{
+		FCollisionObjectQueryParams PawnObjectQuery;
+		PawnObjectQuery.AddObjectTypesToQuery(ECC_Pawn);
+		FCollisionQueryParams PawnOverlapParams(
+			SCENE_QUERY_STAT(SmoothVoxelPlacementPlayerOverlap), false);
+		PawnOverlapParams.AddIgnoredActor(this);
+
+		TArray<FOverlapResult> PlayerOverlaps;
+		const FVector TargetCenter = CubeWorldOrigin + FVector(Step * 0.5f);
+		const float PlayerOverlapTolerance = FMath::Max(0.05f, Step * 0.001f);
+		const float HalfExtent = FMath::Max(0.1f, Step * 0.5f - PlayerOverlapTolerance);
+		const FCollisionShape TargetShape = FCollisionShape::MakeBox(FVector(HalfExtent));
+		GetWorld()->OverlapMultiByObjectType(
+			PlayerOverlaps,
+			TargetCenter,
+			FQuat::Identity,
+			PawnObjectQuery,
+			TargetShape,
+			PawnOverlapParams);
+		for (const FOverlapResult& Overlap : PlayerOverlaps)
+		{
+			if (Overlap.GetActor() == PlayerPawn ||
+				(Overlap.Component.IsValid() && Overlap.Component->GetOwner() == PlayerPawn))
+			{
+				return false;
+			}
+		}
+	}
+
 	// Keep the overlap guard as a safety net for stale or inconsistent edit
 	// state, while allowing exact face-to-face contact for stacking.
 	const FVector TargetMin = CubeWorldOrigin;
@@ -1691,21 +1770,27 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 
 	FSVoxelOctreeSelectionSettings SelectionSettings;
 	SelectionSettings.CellsPerAxis = FMath::Clamp(CellsPerAxis, 4, 128);
-	// The world is a finite, fixed window: never larger than 400,000 cm (4 km)
-	// on an axis. Use the octree's power-of-two lattice but reduce the effective
-	// base step slightly when needed so the default 32-cell, RootLod-7 window is
-	// exactly 4 km rather than 4.096 km.
-	constexpr float MaxWorldSizeCm = 400000.0f;
+	// Root LOD 6/7/8 maps to 2K/4K/8K respectively. Derive the sample
+	// spacing from the selected dimensions so all three sizes have exact,
+	// centred boundaries and keep the same world-space noise lattice.
+	const float SelectedWorldSizeCm = GetWorldSizeCentimeters();
 	SelectionSettings.MaxLod = FMath::Clamp(MaxLod, 0, 4);
 	SelectionSettings.RootLod = FMath::Clamp(
-		RootWindowLod, SelectionSettings.MaxLod, 7);
+		GetRootLodForWorldSize(), SelectionSettings.MaxLod, 8);
 	const float RootCellCount = static_cast<float>(
 		SelectionSettings.CellsPerAxis * (1 << SelectionSettings.RootLod));
-	const float MaxCellSizeForWorldBound = MaxWorldSizeCm / RootCellCount;
-	SelectionSettings.BaseVoxelSize = FMath::Min(
-		FMath::Max(1.0f, BaseVoxelSize), MaxCellSizeForWorldBound);
+	const float MaxCellSizeForWorldBound = SelectedWorldSizeCm / RootCellCount;
+	SelectionSettings.BaseVoxelSize = FMath::Max(1.0f, MaxCellSizeForWorldBound);
+	BaseVoxelSize = SelectionSettings.BaseVoxelSize;
+
 	SelectionSettings.SplitDistanceMultiplier = FMath::Clamp(SplitDistanceMultiplier, 0.05f, 4.0f);
+	// At 8K, a root at LOD 8 needs at least 8^(8-4) = 4096 leaves just
+	// to bring the whole tree down to the default maximum leaf LOD.
 	SelectionSettings.MaxLeafCount = FMath::Max(32, MaxLeafCount);
+	const int32 RequiredRootLeaves = 1 << (3 * FMath::Max(
+		0, SelectionSettings.RootLod - SelectionSettings.MaxLod));
+	SelectionSettings.MaxLeafCount = FMath::Max(
+		SelectionSettings.MaxLeafCount, RequiredRootLeaves);
 
 	const float RootSize = static_cast<float>(SelectionSettings.CellsPerAxis) *
 		static_cast<float>(1 << SelectionSettings.RootLod) *
