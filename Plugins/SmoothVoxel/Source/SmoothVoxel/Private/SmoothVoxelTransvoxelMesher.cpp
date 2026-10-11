@@ -246,6 +246,26 @@ namespace
 		OutSampleA = (EdgeCode >> 4) & 0x0F;
 	}
 
+	// The ProceduralMeshComponent stores UVs as floats on the CPU but its
+	// render vertex buffer uses half precision on the UE4.27 path. Keep UVs
+	// bounded per emitted cell: subtracting an integer tile offset preserves
+	// the repeating world-aligned texture while avoiding low precision at large
+	// absolute UV values. Vertices are unique to each emitted cell, so every
+	// triangle in that cell receives the same integer offset.
+	void GetWorldXYForUV(
+		const FVector& LocalPosition,
+		const FSVoxelGenerationSettings& Settings,
+		double& OutWorldX,
+		double& OutWorldY)
+	{
+		OutWorldX = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.X) * static_cast<double>(Settings.BaseVoxelSize) + static_cast<double>(LocalPosition.X)
+			: static_cast<double>(Settings.ChunkWorldOrigin.X) + static_cast<double>(LocalPosition.X);
+		OutWorldY = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Y) * static_cast<double>(Settings.BaseVoxelSize) + static_cast<double>(LocalPosition.Y)
+			: static_cast<double>(Settings.ChunkWorldOrigin.Y) + static_cast<double>(LocalPosition.Y);
+	}
+
 	void AppendCellToMesh(
 		const FVector* CellLocalVertices,
 		int32 VertexCount,
@@ -263,6 +283,26 @@ namespace
 		}
 
 		const int32 BaseVertex = OutMesh.Vertices.Num();
+		constexpr double UVWorldScale = 0.0005; // One texture repeat per 2000 cm.
+		double MeanU = 0.0;
+		double MeanV = 0.0;
+		for (int32 I = 0; I < VertexCount; ++I)
+		{
+			double WorldX = 0.0;
+			double WorldY = 0.0;
+			GetWorldXYForUV(CellLocalVertices[I], Settings, WorldX, WorldY);
+			MeanU += WorldX * UVWorldScale;
+			MeanV += WorldY * UVWorldScale;
+		}
+		MeanU /= static_cast<double>(VertexCount);
+		MeanV /= static_cast<double>(VertexCount);
+
+		// All vertices belonging to this cell use the same integer offset.
+		// Since the material tiles on integer UV boundaries, this leaves the
+		// world-aligned texture phase unchanged at cell and chunk boundaries.
+		const double UvOffsetU = static_cast<double>(FMath::FloorToInt64(MeanU));
+		const double UvOffsetV = static_cast<double>(FMath::FloorToInt64(MeanV));
+
 		TArray<FVector> CellNormals;
 		CellNormals.SetNumUninitialized(VertexCount);
 		for (int32 I = 0; I < VertexCount; ++I)
@@ -273,18 +313,16 @@ namespace
 			OutMesh.Vertices.Add(LocalPosition);
 			OutMesh.Normals.Add(CellNormals[I]);
 
-			// Keep one stable world-XY projection across vertices, cells, LODs,
-			// and chunk boundaries. Reconstruct UV coordinates from the integer
-			// chunk lattice in double precision, not a rounded absolute FVector.
-			const double WorldX = Settings.bUseChunkLatticeCoordinates
-				? static_cast<double>(Settings.ChunkOriginCells.X) * static_cast<double>(Settings.BaseVoxelSize) + static_cast<double>(LocalPosition.X)
-				: static_cast<double>(Settings.ChunkWorldOrigin.X) + static_cast<double>(LocalPosition.X);
-			const double WorldY = Settings.bUseChunkLatticeCoordinates
-				? static_cast<double>(Settings.ChunkOriginCells.Y) * static_cast<double>(Settings.BaseVoxelSize) + static_cast<double>(LocalPosition.Y)
-				: static_cast<double>(Settings.ChunkWorldOrigin.Y) + static_cast<double>(LocalPosition.Y);
+			// Reconstruct world coordinates in double precision, then remove a
+			// per-cell integer tile offset before conversion to the GPU UV format.
+			// This retains the same world-XY mapping modulo texture repetition
+			// without uploading ever-growing absolute coordinates to half floats.
+			double WorldX = 0.0;
+			double WorldY = 0.0;
+			GetWorldXYForUV(LocalPosition, Settings, WorldX, WorldY);
 			OutMesh.UV0.Add(FVector2D(
-				static_cast<float>(WorldX * 0.0005),
-				static_cast<float>(WorldY * 0.0005)));
+				static_cast<float>(WorldX * UVWorldScale - UvOffsetU),
+				static_cast<float>(WorldY * UVWorldScale - UvOffsetV)));
 
 			// UV0 = (world X, world Y), so for the height-field surface use
 			// the corresponding parametric tangents: dP/dX=(1,0,dZ/dX),
