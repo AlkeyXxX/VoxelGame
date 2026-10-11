@@ -490,8 +490,6 @@ namespace
 		int32 TriangleCount,
 		bool bFlipWinding,
 		const FSVoxelGenerationSettings& Settings,
-		uint8 TransitionFaceMask,
-		float ChunkSize,
 		FSVoxelMeshData& OutMesh,
 		TMap<FIntVector, uint32> VertexCaches[3])
 	{
@@ -809,7 +807,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					false, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, VertexCaches);
+					false, MeshSettings, OutMesh, VertexCaches);
 			}
 		}
 	}
@@ -899,7 +897,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					bTableFlip, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, VertexCaches);
+					bTableFlip, MeshSettings, OutMesh, VertexCaches);
 			}
 		}
 	}
