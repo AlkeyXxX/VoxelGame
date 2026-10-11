@@ -171,43 +171,44 @@ namespace
         const int32 BaseY = static_cast<int32>(std::floor(Y / Step));
         const int32 BaseZ = static_cast<int32>(std::floor(Z / Step));
 
-        // Cell edits are reserved for block placement/removal. Terrain mining
-        // uses MinedNodes, a separate set of exact density-lattice coordinates.
+        // Block placement is a visual/collision actor and must not carve
+        // procedural terrain. State +2 is only a logical occupancy marker.
+        // Terrain mining uses MinedNodes as integer voxel-cell coordinates.
         const double RoundRadius = Step * 0.28;
         const double SmoothBlend = Step * 0.10;
-        const double HardBoxHalfExtent = Step * 0.5 + FMath::Max(0.05, Step * 0.0005);
 
         int8 CandidateStates[27];
         double CandidateSdfs[27];
         int32 CandidateCount = 0;
 
-        // A mined sample removes one stable voxel-sized region centered exactly
-        // on a density lattice node. The one-node neighborhood matches the
-        // query radius and ensures every rebuilt LOD sees the same world-space
-        // modification instead of a hit-point-dependent diamond.
+        // A completed mining hit removes exactly one grid cell. The cut is
+        // centred at (cell + 0.5) * Step, not at a lattice corner: repeated
+        // hits while looking vertically down therefore remove successive cells
+        // in the same column and create flat floors/walls instead of a drifting
+        // octahedral tunnel.
         if (bHasMinedNodes)
         {
-            const double MinedNodeRadius = Step * 1.0;
-            const double MinedNodeBlend = Step * 0.08;
+            const double CutHalfExtent = Step * 0.5 + Step * 0.001;
+            const double CutRoundRadius = Step * 0.025;
             for (int32 DZ = -1; DZ <= 1; ++DZ)
             {
                 for (int32 DY = -1; DY <= 1; ++DY)
                 {
                     for (int32 DX = -1; DX <= 1; ++DX)
                     {
-                        const FIntVector Node(BaseX + DX, BaseY + DY, BaseZ + DZ);
-                        if (!Settings.MinedNodes->Contains(Node))
+                        const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        if (!Settings.MinedNodes->Contains(Cell))
                         {
                             continue;
                         }
 
-                        const double NodeX = static_cast<double>(Node.X) * Step;
-                        const double NodeY = static_cast<double>(Node.Y) * Step;
-                        const double NodeZ = static_cast<double>(Node.Z) * Step;
-                        const double NodeSdf = OctahedronSdf(
-                            X, Y, Z, NodeX, NodeY, NodeZ, MinedNodeRadius);
-                        Density = static_cast<float>(SmoothMinimum(
-                            static_cast<double>(Density), NodeSdf, MinedNodeBlend));
+                        const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
+                        const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
+                        const double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
+                        const double CellSdf = BoxSdf(
+                            X, Y, Z, CenterX, CenterY, CenterZ,
+                            CutHalfExtent, CutRoundRadius);
+                        Density = FMath::Min(Density, static_cast<float>(CellSdf));
                     }
                 }
             }
@@ -223,7 +224,7 @@ namespace
                     {
                         const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
                         const int8* EditState = Settings.BlockEdits->Find(Cell);
-                        if (!EditState || *EditState == 0 ||
+                        if (!EditState || *EditState == 0 || *EditState == 2 ||
                             *EditState > 2 || *EditState < -5)
                         {
                             continue;
@@ -248,12 +249,6 @@ namespace
                             CandidateSdfs[CandidateCount] = BoxSdf(
                                 X, Y, Z, CenterX, CenterY, CenterZ,
                                 Step * 0.5, RoundRadius);
-                        }
-                        else if (*EditState == 2)
-                        {
-                            CandidateSdfs[CandidateCount] = BoxSdf(
-                                X, Y, Z, CenterX, CenterY, CenterZ,
-                                HardBoxHalfExtent, 0.0);
                         }
                         else
                         {
@@ -283,11 +278,7 @@ namespace
             for (int32 Index = 0; Index < CandidateCount; ++Index)
             {
                 const int8 State = CandidateStates[Index];
-                if (State == 2)
-                {
-                    Density = FMath::Min(Density, static_cast<float>(CandidateSdfs[Index]));
-                }
-                else if (State < 0)
+                if (State < 0)
                 {
                     Density = static_cast<float>(SmoothMinimum(
                         static_cast<double>(Density),
