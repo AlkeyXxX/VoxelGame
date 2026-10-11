@@ -674,9 +674,10 @@ float ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(
 	}
 }
 
-int32 ASmoothVoxelOctreeWorld::GetRootLodForWorldSize() const
+int32 ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(
+	ESmoothVoxelWorldSize InWorldSize)
 {
-	switch (WorldSize)
+	switch (InWorldSize)
 	{
 	case ESmoothVoxelWorldSize::Size2Km:
 		return 6;
