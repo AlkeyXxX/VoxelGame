@@ -1428,6 +1428,14 @@ void ASmoothVoxelOctreeWorld::SetBlockAtWorld(const FVector& WorldPosition, EVox
 
 bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 {
+	// A Blueprint may call this method on the same input event that this actor
+	// handles directly. Permit only one mining action per game frame.
+	if (LastBreakInteractionFrame == GFrameCounter)
+	{
+		return false;
+	}
+	LastBreakInteractionFrame = GFrameCounter;
+
 	FHitResult Hit;
 	if (!TraceInteractionRay(Hit))
 	{
@@ -1562,6 +1570,14 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRay()
 
 bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 {
+	// Prevent duplicate placement if both the player Blueprint and the Octree
+	// world's direct action binding receive the same click.
+	if (LastPlaceInteractionFrame == GFrameCounter)
+	{
+		return false;
+	}
+	LastPlaceInteractionFrame = GFrameCounter;
+
 	if (!UVoxelBlockLibrary::CanPlaceBlockFromTable(BlockDataTable, BlockToPlace))
 	{
 		return false;

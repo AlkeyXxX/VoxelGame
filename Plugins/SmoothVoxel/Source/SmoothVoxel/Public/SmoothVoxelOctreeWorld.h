@@ -387,6 +387,10 @@ private:
 		float VoxelSize,
 		bool bFilterBlockEdits = true) const;
 
+	// Guard same-frame duplicate calls from legacy Blueprint input handlers and this actor.
+	uint64 LastBreakInteractionFrame = 0;
+	uint64 LastPlaceInteractionFrame = 0;
+
 	TMap<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*> ActiveChunks;
 	TArray<TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>> QueuedChunkBuilds;
 	TArray<TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>> CompletedChunkBuilds;
