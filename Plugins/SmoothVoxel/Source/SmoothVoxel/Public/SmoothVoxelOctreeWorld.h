@@ -323,9 +323,10 @@ private:
 	TMap<FSVoxelOctreeNode, bool> DesiredCollisionFlags;
 	TSet<FSVoxelOctreeNode> PreparedDesiredNodes;
 
-	// Edit state +1 adds smooth Dirt/Sand to the terrain SDF, -1 carves air,
-	// and +2 reserves a carved cell filled by a separate hard cube actor.
-	// Workers only read immutable snapshots, never the game-thread maps.
+	// Block-cell edits: +1 adds smooth Dirt/Sand, negative values preserve
+	// explicit legacy cell removals, and +2 reserves a hard cube cavity.
+	// Ray mining stores progress and completed cuts separately in lattice-node
+	// coordinates. Workers only read immutable snapshots.
 	FSVoxelBlockEditMap EditedBlockCells;
 	FSVoxelBlockEditCenterMap EditedBlockCenters;
 	TMap<FIntVector, EVoxelBlock> EditedBlockTypes;
