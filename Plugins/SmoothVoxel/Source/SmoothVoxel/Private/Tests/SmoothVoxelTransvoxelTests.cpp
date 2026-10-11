@@ -38,6 +38,19 @@ bool FSmoothVoxelWorldConfigurationDeterminismTest::RunTest(const FString& Param
 		ASmoothVoxelOctreeWorld::GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize::Size8Km),
 		8);
 
+	TestEqual(
+		TEXT("The 4K world should preserve LOD 4 under the 2048-leaf budget"),
+		ASmoothVoxelOctreeWorld::GetEffectiveMaxLodForBudget(7, 4, 2048),
+		4);
+	TestEqual(
+		TEXT("The 8K world should automatically use a coarser far LOD under the 2048-leaf budget"),
+		ASmoothVoxelOctreeWorld::GetEffectiveMaxLodForBudget(8, 4, 2048),
+		5);
+	TestEqual(
+		TEXT("Explicitly increasing the budget can restore LOD 4 coverage for the 8K world"),
+		ASmoothVoxelOctreeWorld::GetEffectiveMaxLodForBudget(8, 4, 8192),
+		4);
+
 	const float BaseSteps[] =
 	{
 		ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize::Size2Km) /
