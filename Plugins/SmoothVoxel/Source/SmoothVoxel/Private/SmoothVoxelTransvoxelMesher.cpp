@@ -123,92 +123,11 @@ namespace
 		return FaceOrigin + AxisU * U + AxisV * V + Inward * Depth;
 	}
 
-	float ComputeNormalSampleStep(
-		const FVector& LocalPosition,
-		const FSVoxelGenerationSettings& Settings,
-		uint8 TransitionFaceMask,
-		float ChunkSize)
+	float ComputeNormalSampleStep(const FSVoxelGenerationSettings& Settings)
 	{
-		const float CoarseNormalStep = FMath::Max(5.0f, Settings.VoxelSize * 0.5f);
-		if (TransitionFaceMask == 0)
-		{
-			return CoarseNormalStep;
-		}
-
-		// A vertex on any same-LOD chunk border must use the coarse sampling
-		// distance, even if another face of this chunk transitions to finer LOD.
-		// Otherwise the normal step changes at the corner of the transition face
-		// but not on the neighbouring same-LOD chunk, creating square lighting
-		// patches whose size increases with the LOD.
-		uint8 VertexBorderMask = 0;
-		if (FMath::IsNearlyZero(LocalPosition.X, 0.01f))
-		{
-			VertexBorderMask |= SVoxelTransitionFace_NegativeX;
-		}
-		if (FMath::IsNearlyEqual(LocalPosition.X, ChunkSize, 0.01f))
-		{
-			VertexBorderMask |= SVoxelTransitionFace_PositiveX;
-		}
-		if (FMath::IsNearlyZero(LocalPosition.Y, 0.01f))
-		{
-			VertexBorderMask |= SVoxelTransitionFace_NegativeY;
-		}
-		if (FMath::IsNearlyEqual(LocalPosition.Y, ChunkSize, 0.01f))
-		{
-			VertexBorderMask |= SVoxelTransitionFace_PositiveY;
-		}
-		if (FMath::IsNearlyZero(LocalPosition.Z, 0.01f))
-		{
-			VertexBorderMask |= SVoxelTransitionFace_NegativeZ;
-		}
-		if (FMath::IsNearlyEqual(LocalPosition.Z, ChunkSize, 0.01f))
-		{
-			VertexBorderMask |= SVoxelTransitionFace_PositiveZ;
-		}
-		if ((VertexBorderMask & static_cast<uint8>(~TransitionFaceMask)) != 0)
-		{
-			return CoarseNormalStep;
-		}
-
-		// Share the finer neighbour's normal sampling distance at the seam,
-		// then blend towards the coarse LOD scale over one coarse cell.
-		float DistanceToTransitionFace = TNumericLimits<float>::Max();
-		if (TransitionFaceMask & SVoxelTransitionFace_NegativeX)
-		{
-			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, LocalPosition.X));
-		}
-		if (TransitionFaceMask & SVoxelTransitionFace_PositiveX)
-		{
-			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, ChunkSize - LocalPosition.X));
-		}
-		if (TransitionFaceMask & SVoxelTransitionFace_NegativeY)
-		{
-			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, LocalPosition.Y));
-		}
-		if (TransitionFaceMask & SVoxelTransitionFace_PositiveY)
-		{
-			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, ChunkSize - LocalPosition.Y));
-		}
-		if (TransitionFaceMask & SVoxelTransitionFace_NegativeZ)
-		{
-			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, LocalPosition.Z));
-		}
-		if (TransitionFaceMask & SVoxelTransitionFace_PositiveZ)
-		{
-			DistanceToTransitionFace = FMath::Min(DistanceToTransitionFace, FMath::Max(0.0f, ChunkSize - LocalPosition.Z));
-		}
-
-		if (DistanceToTransitionFace == TNumericLimits<float>::Max())
-		{
-			return CoarseNormalStep;
-		}
-
-		const float FineNormalStep = FMath::Max(5.0f, Settings.VoxelSize * 0.25f);
-		const float Blend = FMath::Clamp(
-			DistanceToTransitionFace / FMath::Max(1.0f, Settings.VoxelSize),
-			0.0f,
-			1.0f);
-		return FMath::Lerp(FineNormalStep, CoarseNormalStep, Blend);
+		// Use one world-space gradient radius for every LOD and transition face.
+		// LOD-dependent radii produce lighting bands aligned to chunk boundaries.
+		return FMath::Max(5.0f, Settings.NormalSampleStep);
 	}
 
 	FVector ComputeTransitionSecondaryPosition(
@@ -343,8 +262,7 @@ namespace
 		{
 			const FVector LocalPosition = CellLocalVertices[I];
 			const FVector WorldPosition = Settings.ChunkWorldOrigin + LocalPosition;
-			const float NormalSampleStep = ComputeNormalSampleStep(
-				LocalPosition, Settings, TransitionFaceMask, ChunkSize);
+			const float NormalSampleStep = ComputeNormalSampleStep(Settings);
 			CellNormals[I] = SampleOutwardNormal(WorldPosition, Settings, NormalSampleStep);
 			OutMesh.Vertices.Add(LocalPosition);
 			OutMesh.Normals.Add(CellNormals[I]);
@@ -631,7 +549,7 @@ void FSVoxelTransvoxelMesher::Generate(
 					const FVector PrimaryNormal = SampleOutwardNormal(
 						PrimaryWorldPosition,
 						MeshSettings,
-						FMath::Max(5.0f, VoxelSize * 0.25f));
+						FMath::Max(5.0f, MeshSettings.NormalSampleStep));
 					CellVertices[V] = ComputeTransitionSecondaryPosition(
 						PrimaryPosition,
 						PrimaryNormal,
