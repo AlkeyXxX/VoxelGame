@@ -17,7 +17,8 @@ The rewrite lives beside the current world and does not replace the legacy
    separate CPU mesh for one chunk.
 4. Unreal automation tests cover table validity, repeated density sampling,
    octree balance/determinism, face-mask coverage, all six face flags, combined
-   face masks, flat/sloped coarse-fine seams, normal continuity and tangent validity.
+   face masks, flat/sloped coarse-fine seams, normal/tangent continuity and a
+   large-coordinate cross-chunk density regression.
 5. An opt-in actor pair now drives the new path: an octree world manager plus
    async chunk actors, bounded parallel builds, height-envelope culling, and
    deferred retirement of old chunks until the requested set is ready.
@@ -79,13 +80,16 @@ winding separately from the stored outward normals.
 
 ## Runtime tuning notes
 
-- Terrain frequency parameters are in inverse centimetres because the density
-  function samples Unreal world coordinates directly. The default values are
-  `NoiseScale=0.00005` and `DetailScale=0.0000375`. The world manager also calls
-  `ClampNoiseScalesForMaxSampleStep` with the coarsest supported step (16 m), limiting
-  the highest FBM octave to 0.35 noise-lattice units per sample. That is a global
-  cap shared by every LOD—not a different density function per LOD—so adjacent
-  chunks and Transvoxel transitions still use the same scalar field.
+- Terrain frequency parameters are in inverse centimetres. The defaults are
+  `NoiseScale=0.00005` and `DetailScale=0.0000375`. The world manager clamps them
+  to the 16 m maximum leaf spacing and uses the same values for every LOD.
+- The Transvoxel path reconstructs double-precision sample coordinates from the
+  chunk's integer base-lattice origin plus its local position. Its 2D terrain and
+  optional 3D cave noise use 64-bit integer lattice hashes instead of a float
+  sine-hash. This avoids losing the noise-grid fractional coordinate or creating
+  repeated hash patterns as absolute world coordinates grow. Mesh vertices remain
+  chunk-local. UE4.27 still uses float actor/component transforms, so truly huge
+  worlds may additionally need world-origin rebasing.
 - This intentionally trades some fine geometric noise for stable distant terrain.
   Add high-frequency albedo/normal detail in the material rather than raising the
   geometry noise scales beyond the supported sampling bandwidth.
@@ -105,11 +109,12 @@ winding separately from the stored outward normals.
   workers, and a one-mesh-section-per-frame commit budget. These safeguards
   reduce repeated rebuilds and completion bursts but cannot guarantee zero
   frame-time cost for every terrain/material configuration.
-- UVs use stable world-XY projection at a fixed world scale across cells, LODs
-  and chunk seams. This suits the height-field terrain and avoids skew from
-  switching projection axes at individual vertices. It may stretch on near-
-  vertical cliffs; use a triplanar material for cliffs/caves. Distant textures
-  can still soften naturally because of mip filtering and screen-space limits.
+- UVs use a stable world-XY projection at fixed world scale, reconstructed from
+  the chunk's integer lattice origin in double precision before conversion to
+  the float UV channel. This is seam-consistent for the height-field terrain and
+  avoids per-vertex projection switching. Near-vertical cliffs can stretch; use
+  triplanar mapping there. Very large absolute UVs may still require material-side
+  wrapping/offset management because UE4 shader coordinates are floats.
 - Tangents are derived from the UV0 world-XY projection and the smoothed surface
   normal, rather than accumulated independently from each cell's triangle list.
   Duplicate vertices at adjacent cells therefore get the same tangent frame,
