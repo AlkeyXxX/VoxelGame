@@ -5,6 +5,11 @@
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 #include "SmoothVoxelTransvoxelMesher.h"
+#include "VoxelBlockLibrary.h"
+#include "VoxelInventoryComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "InputCoreTypes.h"
 
 ASmoothVoxelTransvoxelChunk::ASmoothVoxelTransvoxelChunk()
 {
@@ -303,7 +308,336 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.CaveThreshold = CaveThreshold;
 	Settings.CaveStrength = CaveStrength;
 	Settings.ChunkWorldOrigin = ChunkOrigin;
+	Settings.BlockEdits = BlockEditSnapshot;
 	return Settings;
+}
+
+float ASmoothVoxelOctreeWorld::GetEffectiveBlockSize() const
+{
+	return FMath::Max(1.0f, DesiredBaseVoxelSize > 0.0f ? DesiredBaseVoxelSize : BaseVoxelSize);
+}
+
+FIntVector ASmoothVoxelOctreeWorld::WorldPositionToBlockCell(const FVector& WorldPosition) const
+{
+	const float Step = GetEffectiveBlockSize();
+	return FIntVector(
+		FMath::FloorToInt(WorldPosition.X / Step),
+		FMath::FloorToInt(WorldPosition.Y / Step),
+		FMath::FloorToInt(WorldPosition.Z / Step));
+}
+
+FVector ASmoothVoxelOctreeWorld::BlockCellCenter(const FIntVector& Cell) const
+{
+	const float Step = GetEffectiveBlockSize();
+	return FVector(
+		(static_cast<float>(Cell.X) + 0.5f) * Step,
+		(static_cast<float>(Cell.Y) + 0.5f) * Step,
+		(static_cast<float>(Cell.Z) + 0.5f) * Step);
+}
+
+FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() const
+{
+	const float Step = GetEffectiveBlockSize();
+	return MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step);
+}
+
+float ASmoothVoxelOctreeWorld::SampleCurrentDensityAt(const FVector& WorldPosition) const
+{
+	const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
+	return FSVoxelGenerator::SampleDensity(
+		static_cast<double>(WorldPosition.X),
+		static_cast<double>(WorldPosition.Y),
+		static_cast<double>(WorldPosition.Z),
+		Settings);
+}
+
+EVoxelBlock ASmoothVoxelOctreeWorld::GetBlockTypeForCell(const FIntVector& Cell) const
+{
+	if (const int8* EditState = EditedBlockCells.Find(Cell))
+	{
+		if (*EditState < 0)
+		{
+			return EVoxelBlock::Air;
+		}
+		if (const EVoxelBlock* EditedType = EditedBlockTypes.Find(Cell))
+		{
+			return *EditedType;
+		}
+	}
+
+	const FVector Center = BlockCellCenter(Cell);
+	if (SampleCurrentDensityAt(Center) <= 0.0f)
+	{
+		return EVoxelBlock::Air;
+	}
+
+	const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
+	const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
+		static_cast<double>(Center.X),
+		static_cast<double>(Center.Y),
+		Settings);
+	const double Depth = SurfaceHeight - static_cast<double>(Center.Z);
+	const float Step = GetEffectiveBlockSize();
+	if (Depth <= Step * 1.25)
+	{
+		return EVoxelBlock::Grass;
+	}
+	if (Depth <= Step * 4.0)
+	{
+		return EVoxelBlock::Dirt;
+	}
+	return EVoxelBlock::Stone;
+}
+
+bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
+{
+	if (!bEnableBlockEditing || !GetWorld())
+	{
+		return false;
+	}
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		return false;
+	}
+
+	int32 ViewportSizeX = 0;
+	int32 ViewportSizeY = 0;
+	PC->GetViewportSize(ViewportSizeX, ViewportSizeY);
+	if (ViewportSizeX <= 0 || ViewportSizeY <= 0)
+	{
+		return false;
+	}
+
+	FVector RayStart;
+	FVector RayDirection;
+	if (!PC->DeprojectScreenPositionToWorld(
+		static_cast<float>(ViewportSizeX) * 0.5f,
+		static_cast<float>(ViewportSizeY) * 0.5f,
+		RayStart,
+		RayDirection))
+	{
+		return false;
+	}
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SmoothVoxelBlockInteraction), true);
+	Params.AddIgnoredActor(this);
+	if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0))
+	{
+		Params.AddIgnoredActor(PlayerPawn);
+	}
+
+	return GetWorld()->LineTraceSingleByChannel(
+		OutHit,
+		RayStart,
+		RayStart + RayDirection * FMath::Max(100.0f, InteractionDistance),
+		ECC_Visibility,
+		Params);
+}
+
+void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(const FIntVector& Cell, EVoxelBlock Block)
+{
+	const int8 EditState = Block == EVoxelBlock::Air ? int8(-1) : int8(1);
+	EditedBlockCells.Add(Cell, EditState);
+	if (EditState > 0)
+	{
+		EditedBlockTypes.Add(Cell, Block);
+	}
+	else
+	{
+		EditedBlockTypes.Remove(Cell);
+	}
+
+	BlockEditSnapshot = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells);
+	RebuildChunksNearEditedCell(Cell);
+}
+
+void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(const FIntVector& Cell)
+{
+	check(IsInGameThread());
+	if (ActiveChunks.Num() == 0 || DesiredNodes.Num() == 0)
+	{
+		return;
+	}
+
+	const float Step = GetEffectiveBlockSize();
+	const FVector Center = BlockCellCenter(Cell);
+	const FVector EditExtent(Step * 0.55f);
+	const FBox EditBounds(Center - EditExtent, Center + EditExtent);
+
+	for (const TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
+	{
+		if (!DesiredNodes.Contains(Pair.Key) || !IsValid(Pair.Value))
+		{
+			continue;
+		}
+
+		const FVector* ChunkOrigin = DesiredChunkOrigins.Find(Pair.Key);
+		const float* VoxelSize = DesiredVoxelSizes.Find(Pair.Key);
+		const uint8* FaceMask = DesiredFaceMasks.Find(Pair.Key);
+		const bool* bCollision = DesiredCollisionFlags.Find(Pair.Key);
+		if (!ChunkOrigin || !VoxelSize || !FaceMask || !bCollision)
+		{
+			continue;
+		}
+
+		// Rebuild chunks whose samples or transition borders can be influenced
+		// by this cell. Expanding by one local LOD step covers coarse neighbours.
+		const FVector Padding(*VoxelSize);
+		const FVector ChunkMax = *ChunkOrigin + FVector(
+			static_cast<float>(DesiredCellsPerAxis) * *VoxelSize);
+		const FBox ChunkBounds(*ChunkOrigin - Padding, ChunkMax + Padding);
+		if (!ChunkBounds.Intersect(EditBounds))
+		{
+			continue;
+		}
+
+		const FSVoxelGenerationSettings GeneratorSettings = MakeGenerationSettings(
+			*ChunkOrigin, Pair.Key.OriginCells, DesiredBaseVoxelSize, *VoxelSize);
+		Pair.Value->QueueBuild(
+			Pair.Key, DesiredCellsPerAxis, *VoxelSize, *FaceMask, GeneratorSettings, *bCollision);
+		EnqueueChunkBuild(Pair.Value);
+	}
+}
+
+void ASmoothVoxelOctreeWorld::RemoveBlockAtWorld(const FVector& WorldPosition)
+{
+	ApplyBlockCellEdit(WorldPositionToBlockCell(WorldPosition), EVoxelBlock::Air);
+}
+
+void ASmoothVoxelOctreeWorld::SetBlockAtWorld(const FVector& WorldPosition, EVoxelBlock Block)
+{
+	ApplyBlockCellEdit(WorldPositionToBlockCell(WorldPosition), Block);
+}
+
+bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
+{
+	FHitResult Hit;
+	if (!TraceInteractionRay(Hit))
+	{
+		return false;
+	}
+
+	ASmoothVoxelTransvoxelChunk* HitChunk = Cast<ASmoothVoxelTransvoxelChunk>(Hit.GetActor());
+	if (!HitChunk || HitChunk->GetOwner() != this)
+	{
+		return false;
+	}
+
+	const float Step = GetEffectiveBlockSize();
+	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
+	const FVector InsidePoint = Hit.ImpactPoint - Normal * (Step * 0.2f);
+	const FIntVector Cell = WorldPositionToBlockCell(Hit.ImpactPoint - Normal * (Step * 0.51f));
+	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
+	if (ExistingEdit && *ExistingEdit < 0)
+	{
+		return false;
+	}
+	if (SampleCurrentDensityAt(InsidePoint) <= 0.0f)
+	{
+		return false;
+	}
+
+	EVoxelBlock HitBlock = GetBlockTypeForCell(Cell);
+	if (HitBlock == EVoxelBlock::Air)
+	{
+		// On a steep slope, the cell centre may lie just outside the surface even
+		// though the ray is inside solid terrain. Use the actual hit column to
+		// classify that natural surface cell in this case.
+		const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
+		const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
+			static_cast<double>(InsidePoint.X),
+			static_cast<double>(InsidePoint.Y),
+			Settings);
+		const double Depth = SurfaceHeight - static_cast<double>(InsidePoint.Z);
+		HitBlock = Depth <= Step * 1.25 ? EVoxelBlock::Grass :
+			(Depth <= Step * 4.0 ? EVoxelBlock::Dirt : EVoxelBlock::Stone);
+	}
+
+	if (!UVoxelBlockLibrary::CanBreakBlockFromTable(BlockDataTable, HitBlock))
+	{
+		return false;
+	}
+
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	UVoxelInventoryComponent* Inventory = PlayerPawn
+		? PlayerPawn->FindComponentByClass<UVoxelInventoryComponent>()
+		: nullptr;
+	const EVoxelBlock DropBlock = UVoxelBlockLibrary::GetBlockDropFromTable(BlockDataTable, HitBlock);
+	if (Inventory && DropBlock != EVoxelBlock::Air && !Inventory->CanAddBlock(DropBlock, 1))
+	{
+		// Never remove a block if its drop cannot fit into the inventory.
+		return false;
+	}
+
+	ApplyBlockCellEdit(Cell, EVoxelBlock::Air);
+	if (Inventory && DropBlock != EVoxelBlock::Air)
+	{
+		Inventory->AddBlock(DropBlock, 1);
+	}
+	return true;
+}
+
+bool ASmoothVoxelOctreeWorld::PlaceBlockByRay()
+{
+	if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0))
+	{
+		if (UVoxelInventoryComponent* Inventory = PlayerPawn->FindComponentByClass<UVoxelInventoryComponent>())
+		{
+			return PlaceBlockByRayWithType(Inventory->GetSelectedBlock());
+		}
+	}
+	return PlaceBlockByRayWithType(EVoxelBlock::Dirt);
+}
+
+bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
+{
+	if (!UVoxelBlockLibrary::CanPlaceBlockFromTable(BlockDataTable, BlockToPlace))
+	{
+		return false;
+	}
+
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	UVoxelInventoryComponent* Inventory = PlayerPawn
+		? PlayerPawn->FindComponentByClass<UVoxelInventoryComponent>()
+		: nullptr;
+	if (Inventory &&
+		(Inventory->GetSelectedBlock() != BlockToPlace || Inventory->GetSelectedQuantity() <= 0))
+	{
+		return false;
+	}
+
+	FHitResult Hit;
+	if (!TraceInteractionRay(Hit))
+	{
+		return false;
+	}
+	ASmoothVoxelTransvoxelChunk* HitChunk = Cast<ASmoothVoxelTransvoxelChunk>(Hit.GetActor());
+	if (!HitChunk || HitChunk->GetOwner() != this)
+	{
+		return false;
+	}
+
+	const float Step = GetEffectiveBlockSize();
+	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
+	const FIntVector Cell = WorldPositionToBlockCell(Hit.ImpactPoint + Normal * (Step * 0.51f));
+	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
+	if (ExistingEdit && *ExistingEdit > 0)
+	{
+		return false;
+	}
+	if ((!ExistingEdit || *ExistingEdit == 0) && SampleCurrentDensityAt(BlockCellCenter(Cell)) > 0.0f)
+	{
+		return false;
+	}
+
+	ApplyBlockCellEdit(Cell, BlockToPlace);
+	if (Inventory)
+	{
+		Inventory->RemoveFromSelectedSlot(1);
+	}
+	return true;
 }
 
 void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
