@@ -669,9 +669,36 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             FVector2D Tangent2D = After - Before;
             if (Tangent2D.SizeSquared() < 0.001f)
             {
-                Tangent2D = Direction;
+                // Duplicate route samples can occur where separately sampled
+                // A* segments meet. Fall back to the nearest non-zero local
+                // direction instead of relying on the removed chord variable.
+                for (int32 Radius = 1; Radius <= SampleCount; ++Radius)
+                {
+                    const int32 BackIndex = SampleIndex - Radius;
+                    const int32 ForwardIndex = SampleIndex + Radius;
+                    if (BackIndex >= 0 && ForwardIndex <= SampleCount)
+                    {
+                        Tangent2D = Path[ForwardIndex] - Path[BackIndex];
+                    }
+                    else if (ForwardIndex <= SampleCount)
+                    {
+                        Tangent2D = Path[ForwardIndex] - Point;
+                    }
+                    else if (BackIndex >= 0)
+                    {
+                        Tangent2D = Point - Path[BackIndex];
+                    }
+
+                    if (Tangent2D.SizeSquared() >= 0.001f)
+                    {
+                        break;
+                    }
+                }
             }
-            Tangent2D.Normalize();
+            if (!Tangent2D.Normalize())
+            {
+                Tangent2D = FVector2D(1.0f, 0.0f);
+            }
             const FVector2D Perp(-Tangent2D.Y, Tangent2D.X);
 
             const FVector2D LeftXY = Point + Perp * static_cast<float>(HalfRoadWidth);
