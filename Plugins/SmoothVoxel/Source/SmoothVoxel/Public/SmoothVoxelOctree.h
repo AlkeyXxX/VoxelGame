@@ -100,9 +100,8 @@ struct FSVoxelOctreeSelectionSettings
 /**
  * Builds a view-dependent octree leaf set and enforces a 2:1 neighbour rule.
  *
- * This is a pure CPU spatial selector. It intentionally does not spawn actors
- * or modify the existing block-based AVoxelWorld. A mixed-LOD renderer must
- * consume the returned leaves only after transition-cell meshing is connected.
+ * This is a pure CPU spatial selector. ASmoothVoxelOctreeWorld owns actor
+ * creation, asynchronous chunk builds, and Transvoxel transition-cell meshing.
  */
 class SMOOTHVOXEL_API FSVoxelOctreeSelector
 {

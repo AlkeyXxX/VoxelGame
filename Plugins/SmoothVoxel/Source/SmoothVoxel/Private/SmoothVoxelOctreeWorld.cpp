@@ -843,8 +843,38 @@ bool ASmoothVoxelOctreeWorld::GetBlockDebugInfoAtWorldPosition(
 	FIntVector& OutNodeOriginCells,
 	int32& OutLod) const
 {
+	OutBlock = EVoxelBlock::Air;
 	OutCell = WorldPositionToBlockCell(WorldPosition);
-	return GetBlockDebugInfoForCell(OutCell, OutBlock, OutNodeOriginCells, OutLod);
+	OutNodeOriginCells = FIntVector::ZeroValue;
+	OutLod = INDEX_NONE;
+
+	if (GetBlockDebugInfoForCell(OutCell, OutBlock, OutNodeOriginCells, OutLod))
+	{
+		return true;
+	}
+
+	// The impact point can be inside a solid cell even when that cell's centre
+	// falls outside the density field on steep slopes. Use the validated sample
+	// as a fallback so the debug overlay still reports the hit terrain block.
+	FSVoxelOctreeNode Node;
+	if (!GetOctreeNodeAtWorldPosition(WorldPosition, Node) ||
+		SampleCurrentDensityAt(WorldPosition) <= 0.0f)
+	{
+		return false;
+	}
+
+	const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
+	const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
+		static_cast<double>(WorldPosition.X),
+		static_cast<double>(WorldPosition.Y),
+		Settings);
+	const double Depth = SurfaceHeight - static_cast<double>(WorldPosition.Z);
+	const float Step = GetEffectiveBlockSize();
+	OutBlock = Depth <= Step * 1.25 ? EVoxelBlock::Grass :
+		(Depth <= Step * 4.0 ? EVoxelBlock::Dirt : EVoxelBlock::Stone);
+	OutNodeOriginCells = Node.OriginCells;
+	OutLod = Node.Lod;
+	return true;
 }
 
 void ASmoothVoxelOctreeWorld::GetTerrainDebugInfoAtWorldPosition(
