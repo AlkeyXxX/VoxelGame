@@ -324,8 +324,9 @@ namespace
 				static_cast<float>(WorldX * UVWorldScale - UvOffsetU),
 				static_cast<float>(WorldY * UVWorldScale - UvOffsetV)));
 
-			// UV0 = (world X, world Y), so for the height-field surface use
-			// the corresponding parametric tangents: dP/dX=(1,0,dZ/dX),
+			// UV0 follows a fixed-scale world-XY projection within this cell.
+			// Subtracting a constant integer tile offset does not change its
+			// derivatives, so for a height field use dP/dX=(1,0,dZ/dX) and
 			// dP/dY=(0,1,dZ/dY). Recover their slopes from the outward normal.
 			// This gives the same tangent frame at the same world point in every
 			// cell and LOD, unlike per-cell triangle-derived tangent accumulation.
