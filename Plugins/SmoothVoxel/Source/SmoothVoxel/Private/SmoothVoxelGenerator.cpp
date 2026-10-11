@@ -562,7 +562,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         X * static_cast<double>(S.HillScale),
         Y * static_cast<double>(S.HillScale),
         S.Seed + 1001);
-    const double HillShape = SmoothStep(-0.10f, 0.75f, static_cast<float>(HillNoise));
+    const double HillShape = SmoothStep(-0.35f, 0.55f, static_cast<float>(HillNoise));
     const double FineNoise = FBM2D(
         X * static_cast<double>(S.DetailScale),
         Y * static_cast<double>(S.DetailScale),
