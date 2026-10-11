@@ -388,33 +388,32 @@ namespace
 			: static_cast<double>(Settings.ChunkWorldOrigin.Y) + static_cast<double>(LocalPosition.Y);
 	}
 
-	void AppendCellToMesh(
-		const FVector* CellLocalVertices,
-		int32 VertexCount,
-		const uint8* TriangleIndices,
-		int32 TriangleCount,
-		bool bFlipWinding,
+		uint32 GetOrAddProjectedVertex(
+		const FVector& LocalPosition,
+		uint8 ProjectionAxis,
 		const FSVoxelGenerationSettings& Settings,
-		uint8 TransitionFaceMask,
-		float ChunkSize,
 		FSVoxelMeshData& OutMesh,
 		TMap<FIntVector, uint32>& VertexCache)
 	{
-		if (VertexCount <= 0 || TriangleCount <= 0)
+		const FIntVector VertexKey(
+			FMath::RoundToInt(LocalPosition.X * 10.0f),
+			FMath::RoundToInt(LocalPosition.Y * 10.0f),
+			FMath::RoundToInt(LocalPosition.Z * 10.0f));
+		if (const uint32* ExistingIndex = VertexCache.Find(VertexKey))
 		{
-			return;
+			return *ExistingIndex;
 		}
 
-		// One world-aligned repeat scale for every surface orientation. Different
-		// floor/wall scales caused visible texture-density jumps when a vertex
-		// normal crossed the dominant-axis threshold during a terrain rebuild.
-		constexpr double UVWorldScale = 0.00125; // One texture tile per 800 cm.
+		const FVector Normal = SampleOutwardNormal(
+			LocalPosition, Settings, ComputeNormalSampleStep(Settings));
 
-		// Rebase UVs once per chunk, not once per cell. Cell-local rebasing kept
-		// values small but introduced UV discontinuities on every marching-cubes
-		// cell boundary for materials that scale or otherwise process UV0.
-		// A single chunk-wide integer offset keeps UVs continuous within each
-		// mesh. Neighbouring chunks differ only by whole texture repeats.
+		double WorldX = 0.0;
+		double WorldY = 0.0;
+		GetWorldXYForUV(LocalPosition, Settings, WorldX, WorldY);
+		const double WorldZ = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Z) * static_cast<double>(Settings.BaseVoxelSize) + static_cast<double>(LocalPosition.Z)
+			: static_cast<double>(Settings.ChunkWorldOrigin.Z) + static_cast<double>(LocalPosition.Z);
+
 		const double ChunkOriginWorldX = Settings.bUseChunkLatticeCoordinates
 			? static_cast<double>(Settings.ChunkOriginCells.X) * static_cast<double>(Settings.BaseVoxelSize)
 			: static_cast<double>(Settings.ChunkWorldOrigin.X);
@@ -425,106 +424,80 @@ namespace
 			? static_cast<double>(Settings.ChunkOriginCells.Z) * static_cast<double>(Settings.BaseVoxelSize)
 			: static_cast<double>(Settings.ChunkWorldOrigin.Z);
 
-		TArray<FVector> CellNormals;
-		CellNormals.SetNumUninitialized(VertexCount);
-		TArray<uint32> CellGlobalIndices;
-		CellGlobalIndices.SetNumUninitialized(VertexCount);
-
-		for (int32 I = 0; I < VertexCount; ++I)
+		// Select UV axes once per triangle. A vertex shared between floor and
+		// wall projections otherwise inherits whichever mapping was emitted
+		// first, making texture coordinates jump after terrain edits.
+		constexpr double UVWorldScale = 0.00125; // One repeat per 800 cm.
+		double U = WorldX;
+		double V = WorldY;
+		double OriginU = ChunkOriginWorldX;
+		double OriginV = ChunkOriginWorldY;
+		FVector WorldU(1.0f, 0.0f, 0.0f);
+		FVector WorldV(0.0f, 1.0f, 0.0f);
+		switch (ProjectionAxis)
 		{
-			const FVector LocalPosition = CellLocalVertices[I];
-			// Quantize local positions to 0.1 cm. Adjacent marching-cubes cells
-			// then share one render vertex/index instead of uploading duplicate
-			// positions, normals, UVs and tangents. The same key also guarantees
-			// matching cached normals at cell boundaries.
-			const FIntVector VertexKey(
-				FMath::RoundToInt(LocalPosition.X * 10.0f),
-				FMath::RoundToInt(LocalPosition.Y * 10.0f),
-				FMath::RoundToInt(LocalPosition.Z * 10.0f));
+		case 0: // X-facing wall: YZ projection.
+			U = WorldY;
+			V = WorldZ;
+			OriginU = ChunkOriginWorldY;
+			OriginV = ChunkOriginWorldZ;
+			WorldU = FVector(0.0f, 1.0f, 0.0f);
+			WorldV = FVector(0.0f, 0.0f, 1.0f);
+			break;
+		case 1: // Y-facing wall: XZ projection.
+			U = WorldX;
+			V = WorldZ;
+			OriginU = ChunkOriginWorldX;
+			OriginV = ChunkOriginWorldZ;
+			WorldU = FVector(1.0f, 0.0f, 0.0f);
+			WorldV = FVector(0.0f, 0.0f, 1.0f);
+			break;
+		default: // Horizontal / floor: XY projection.
+			break;
+		}
 
-			if (const uint32* ExistingIndex = VertexCache.Find(VertexKey))
-			{
-				CellGlobalIndices[I] = *ExistingIndex;
-				CellNormals[I] = OutMesh.Normals[static_cast<int32>(*ExistingIndex)];
-				continue;
-			}
+		// Keep GPU UV values small and chunk offsets repeat-aligned; perform
+		// the rebase in double precision to avoid precision loss at large origins.
+		const double TileOffsetU = std::floor(OriginU * UVWorldScale);
+		const double TileOffsetV = std::floor(OriginV * UVWorldScale);
+		const FVector2D UV(
+			static_cast<float>(U * UVWorldScale - TileOffsetU),
+			static_cast<float>(V * UVWorldScale - TileOffsetV));
 
-			CellNormals[I] = SampleOutwardNormal(
-				LocalPosition, Settings, ComputeNormalSampleStep(Settings));
-			CellGlobalIndices[I] = static_cast<uint32>(OutMesh.Vertices.Num());
-			VertexCache.Add(VertexKey, CellGlobalIndices[I]);
-			OutMesh.Vertices.Add(LocalPosition);
-			OutMesh.Normals.Add(CellNormals[I]);
+		FVector Tangent = WorldU - Normal * FVector::DotProduct(Normal, WorldU);
+		if (!Tangent.Normalize())
+		{
+			Tangent = (WorldV - Normal * FVector::DotProduct(Normal, WorldV)).GetSafeNormal();
+		}
+		FVector Bitangent = WorldV - Normal * FVector::DotProduct(Normal, WorldV);
+		Bitangent.Normalize();
+		const bool bFlipTangentY =
+			FVector::DotProduct(FVector::CrossProduct(Normal, Tangent), Bitangent) < 0.0f;
 
-			// Reconstruct world coordinates in double precision, then subtract
-			// the shared chunk tile offset before conversion to the GPU UV format.
-			double WorldX = 0.0;
-			double WorldY = 0.0;
-			GetWorldXYForUV(LocalPosition, Settings, WorldX, WorldY);
-			const double WorldZ = Settings.bUseChunkLatticeCoordinates
-				? static_cast<double>(Settings.ChunkOriginCells.Z) * static_cast<double>(Settings.BaseVoxelSize) + LocalPosition.Z
-				: static_cast<double>(Settings.ChunkWorldOrigin.Z) + LocalPosition.Z;
+		const uint32 NewIndex = static_cast<uint32>(OutMesh.Vertices.Num());
+		VertexCache.Add(VertexKey, NewIndex);
+		OutMesh.Vertices.Add(LocalPosition);
+		OutMesh.Normals.Add(Normal);
+		OutMesh.UV0.Add(UV);
+		OutMesh.Tangents.Add(FProcMeshTangent(Tangent, bFlipTangentY));
+		return NewIndex;
+	}
 
-			// Use dominant-axis planar mapping. World-XY alone makes UVs constant
-			// across X-facing walls and therefore stretches the terrain texture into
-			// long stripes when the player looks into a pit or a cliff.
-			const FVector Normal = CellNormals[I].GetSafeNormal();
-			const float AbsX = FMath::Abs(Normal.X);
-			const float AbsY = FMath::Abs(Normal.Y);
-			const float AbsZ = FMath::Abs(Normal.Z);
-			double U = WorldX;
-			double V = WorldY;
-			double ProjectionScale = UVWorldScale;
-			double UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * ProjectionScale)));
-			double UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * ProjectionScale)));
-			FVector WorldU(1.0f, 0.0f, 0.0f);
-			FVector WorldV(0.0f, 1.0f, 0.0f);
-
-			// Keep the XY projection on ground and ordinary slopes; switch to a
-			// side projection only for clearly wall-like surfaces. The wider
-			// dead-zone prevents small normal changes after mining from making
-			// neighbouring vertices abruptly swap their UV axes.
-			const float StrongestHorizontalNormal = FMath::Max(AbsX, AbsY);
-			if (StrongestHorizontalNormal > AbsZ * 1.35f)
-			{
-				if (AbsX >= AbsY)
-				{
-					// X-facing wall: project onto YZ.
-					U = WorldY;
-					V = WorldZ;
-					UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * ProjectionScale)));
-					UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * ProjectionScale)));
-					WorldU = FVector(0.0f, 1.0f, 0.0f);
-					WorldV = FVector(0.0f, 0.0f, 1.0f);
-				}
-				else
-				{
-					// Y-facing wall: project onto XZ.
-					U = WorldX;
-					V = WorldZ;
-					UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * ProjectionScale)));
-					UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * ProjectionScale)));
-					WorldU = FVector(1.0f, 0.0f, 0.0f);
-					WorldV = FVector(0.0f, 0.0f, 1.0f);
-				}
-			}
-			// Otherwise the floor projection on XY remains unchanged.
-
-			OutMesh.UV0.Add(FVector2D(
-				static_cast<float>(U * ProjectionScale - UvOffsetU),
-				static_cast<float>(V * ProjectionScale - UvOffsetV)));
-
-			// Build the tangent basis from the same planar projection as UV0.
-			FVector Tangent = WorldU - Normal * FVector::DotProduct(Normal, WorldU);
-			if (!Tangent.Normalize())
-			{
-				Tangent = (WorldV - Normal * FVector::DotProduct(Normal, WorldV)).GetSafeNormal();
-			}
-			FVector Bitangent = WorldV - Normal * FVector::DotProduct(Normal, WorldV);
-			Bitangent.Normalize();
-			const bool bFlipTangentY =
-				FVector::DotProduct(FVector::CrossProduct(Normal, Tangent), Bitangent) < 0.0f;
-			OutMesh.Tangents.Add(FProcMeshTangent(Tangent, bFlipTangentY));
+	void AppendCellToMesh(
+		const FVector* CellLocalVertices,
+		int32 VertexCount,
+		const uint8* TriangleIndices,
+		int32 TriangleCount,
+		bool bFlipWinding,
+		const FSVoxelGenerationSettings& Settings,
+		uint8 TransitionFaceMask,
+		float ChunkSize,
+		FSVoxelMeshData& OutMesh,
+		TMap<FIntVector, uint32> VertexCaches[3])
+	{
+		if (VertexCount <= 0 || TriangleCount <= 0)
+		{
+			return;
 		}
 
 		for (int32 I = 0; I < TriangleCount; ++I)
@@ -533,7 +506,6 @@ namespace
 			const uint32 A = TriangleIndices[Offset];
 			uint32 B = TriangleIndices[Offset + 1];
 			uint32 C = TriangleIndices[Offset + 2];
-
 			if (A >= static_cast<uint32>(VertexCount) ||
 				B >= static_cast<uint32>(VertexCount) ||
 				C >= static_cast<uint32>(VertexCount))
@@ -546,14 +518,32 @@ namespace
 				Swap(B, C);
 			}
 
-			const uint32 GlobalA = CellGlobalIndices[A];
-			const uint32 GlobalB = CellGlobalIndices[B];
-			const uint32 GlobalC = CellGlobalIndices[C];
+			const FVector& PositionA = CellLocalVertices[A];
+			const FVector& PositionB = CellLocalVertices[B];
+			const FVector& PositionC = CellLocalVertices[C];
+			const FVector FaceNormal = FVector::CrossProduct(
+				PositionB - PositionA,
+				PositionC - PositionA);
+			if (FaceNormal.SizeSquared() <= SMALL_NUMBER)
+			{
+				continue;
+			}
 
-			// Position caching can merge almost coincident edge intersections.
-			// Do not upload a triangle whose final mesh indices collapse to one
-			// or two vertices; such zero-area faces show up as tiny cracks in
-			// render meshes and produce unreliable collision.
+			const float AbsX = FMath::Abs(FaceNormal.X);
+			const float AbsY = FMath::Abs(FaceNormal.Y);
+			const float AbsZ = FMath::Abs(FaceNormal.Z);
+			const uint8 ProjectionAxis = AbsX >= AbsY && AbsX >= AbsZ
+				? 0
+				: (AbsY >= AbsZ ? 1 : 2);
+			TMap<FIntVector, uint32>& VertexCache = VertexCaches[ProjectionAxis];
+
+			const uint32 GlobalA = GetOrAddProjectedVertex(
+				PositionA, ProjectionAxis, Settings, OutMesh, VertexCache);
+			uint32 GlobalB = GetOrAddProjectedVertex(
+				PositionB, ProjectionAxis, Settings, OutMesh, VertexCache);
+			uint32 GlobalC = GetOrAddProjectedVertex(
+				PositionC, ProjectionAxis, Settings, OutMesh, VertexCache);
+
 			if (GlobalA == GlobalB || GlobalB == GlobalC || GlobalC == GlobalA)
 			{
 				continue;
@@ -562,79 +552,31 @@ namespace
 			const FVector& MeshA = OutMesh.Vertices[static_cast<int32>(GlobalA)];
 			const FVector& MeshB = OutMesh.Vertices[static_cast<int32>(GlobalB)];
 			const FVector& MeshC = OutMesh.Vertices[static_cast<int32>(GlobalC)];
-			const FVector MeshFaceNormal = FVector::CrossProduct(MeshB - MeshA, MeshC - MeshA);
+			const FVector MeshFaceNormal = FVector::CrossProduct(
+				MeshB - MeshA, MeshC - MeshA);
 			if (MeshFaceNormal.SizeSquared() <= SMALL_NUMBER)
 			{
 				continue;
 			}
 
-			const FVector FaceNormal = FVector::CrossProduct(
-				CellLocalVertices[B] - CellLocalVertices[A],
-				CellLocalVertices[C] - CellLocalVertices[A]);
-			const FVector ExpectedNormal =
-				(CellNormals[A] + CellNormals[B] + CellNormals[C]).GetSafeNormal();
+			const FVector ExpectedNormal = (
+				OutMesh.Normals[static_cast<int32>(GlobalA)] +
+				OutMesh.Normals[static_cast<int32>(GlobalB)] +
+				OutMesh.Normals[static_cast<int32>(GlobalC)]).GetSafeNormal();
 
-			// Orient each triangle against the actual signed-density field at its
-			// centroid. Averaged vertex normals can point the wrong way where a
-			// mining cavity meets the original hill, especially on an underside or
-			// at an octahedral corner; that is how back-face-culling made faces
-			// look invisible when mining upward.
-			const FVector TriangleCenter = (
-				CellLocalVertices[A] + CellLocalVertices[B] + CellLocalVertices[C]) / 3.0f;
-			bool bReverseForUnrealFrontFace = false;
-
-			// Only evaluate two extra density samples around cave/mining surfaces.
-			// Plain terrain keeps the cheaper normal-dot path so normal mesh builds
-			// do not pay for additional full noise evaluations per triangle.
-			const bool bNeedsDensityOrientation =
-				(Settings.bEnableCaves && Settings.CaveStrength > 0.0f) ||
-				HasBlockEditNearPosition(TriangleCenter, Settings);
-			if (bNeedsDensityOrientation)
+			// Do not flip faces from scalar-density probes at their centroid:
+			// interpolated curved surfaces can put the planar triangle slightly
+			// to one side of the zero set. Orient by the actual surface normals.
+			if (ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
+				FVector::DotProduct(MeshFaceNormal, ExpectedNormal) > 0.0f)
 			{
-				const FVector RawFaceDirection = FaceNormal.GetSafeNormal();
-				// Probe far enough to cross the isosurface despite interpolation and
-				// SDF curvature. A tiny probe can leave both samples on the same
-				// side of the surface; comparing their values alone then randomly
-				// flips faces as mining changes the local density field.
-				const float OrientationProbe = FMath::Max(5.0f, Settings.VoxelSize * 0.1f);
-				const float DensityAlongRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
-					TriangleCenter + RawFaceDirection * OrientationProbe, Settings);
-				const float DensityAgainstRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
-					TriangleCenter - RawFaceDirection * OrientationProbe, Settings);
-				const bool bSamplesOppositeSides =
-					(DensityAlongRawNormal > Settings.IsoLevel) !=
-					(DensityAgainstRawNormal > Settings.IsoLevel);
-				if (bSamplesOppositeSides)
-				{
-					// Positive density is solid and negative is air. Only trust density
-					// orientation when the probes straddle the isosurface.
-					bReverseForUnrealFrontFace =
-						DensityAlongRawNormal < DensityAgainstRawNormal;
-				}
-				else if (ExpectedNormal.SizeSquared() > SMALL_NUMBER)
-				{
-					// If both probes are on the same side, fall back to the actual
-					// density-gradient normal instead of guessing from density slope.
-					bReverseForUnrealFrontFace =
-						FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f;
-				}
-			}
-			else if (ExpectedNormal.SizeSquared() > SMALL_NUMBER)
-			{
-				bReverseForUnrealFrontFace =
-					FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f;
+				Swap(GlobalB, GlobalC);
 			}
 
-			if (bReverseForUnrealFrontFace)
-			{
-				Swap(B, C);
-			}
-
-			OutMesh.Triangles.Add(static_cast<int32>(CellGlobalIndices[A]));
-			OutMesh.Triangles.Add(static_cast<int32>(CellGlobalIndices[B]));
-			OutMesh.Triangles.Add(static_cast<int32>(CellGlobalIndices[C]));
+			OutMesh.Triangles.Add(static_cast<int32>(GlobalA));
+			OutMesh.Triangles.Add(static_cast<int32>(GlobalB));
+			OutMesh.Triangles.Add(static_cast<int32>(GlobalC));
 		}
-
 	}
 }
 
@@ -793,8 +735,11 @@ void FSVoxelTransvoxelMesher::Generate(
 	OutMesh.Normals.Reserve(CellsPerAxis * CellsPerAxis * 6);
 	OutMesh.UV0.Reserve(CellsPerAxis * CellsPerAxis * 6);
 	OutMesh.Triangles.Reserve(CellsPerAxis * CellsPerAxis * 12);
-	TMap<FIntVector, uint32> VertexCache;
-	VertexCache.Reserve(CellsPerAxis * CellsPerAxis * 4);
+	TMap<FIntVector, uint32> VertexCaches[3];
+	for (int32 Axis = 0; Axis < 3; ++Axis)
+	{
+		VertexCaches[Axis].Reserve(CellsPerAxis * CellsPerAxis * 4);
+	}
 	const float ChunkSize = static_cast<float>(CellsPerAxis) * VoxelSize;
 
 	// Generate regular cells at the selected LOD. Transition cells are emitted
@@ -864,7 +809,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					false, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, VertexCache);
+					false, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, VertexCaches);
 			}
 		}
 	}
@@ -954,7 +899,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					bTableFlip, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, VertexCache);
+					bTableFlip, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, VertexCaches);
 			}
 		}
 	}
