@@ -77,6 +77,47 @@ namespace
         return static_cast<uint32>(MixHash64(H) >> 40) & 0x00FFFFFFu;
     }
 
+    FORCEINLINE double SmoothMaximum(double A, double B, double BlendWidth)
+    {
+        if (BlendWidth <= SMALL_NUMBER)
+        {
+            return FMath::Max(A, B);
+        }
+
+        const double H = FMath::Clamp(
+            0.5 + 0.5 * (A - B) / BlendWidth,
+            0.0,
+            1.0);
+        return FMath::Lerp(B, A, H) + BlendWidth * H * (1.0 - H);
+    }
+
+    FORCEINLINE double BoxSdf(
+        double X,
+        double Y,
+        double Z,
+        double CenterX,
+        double CenterY,
+        double CenterZ,
+        double HalfExtent,
+        double RoundRadius)
+    {
+        // Rounded-box SDF. RoundRadius=0 gives an exact axis-aligned box;
+        // nonzero radius softens block corners before blending into terrain.
+        const double CoreHalfExtent = FMath::Max(0.0, HalfExtent - RoundRadius);
+        const double QX = std::abs(X - CenterX) - CoreHalfExtent;
+        const double QY = std::abs(Y - CenterY) - CoreHalfExtent;
+        const double QZ = std::abs(Z - CenterZ) - CoreHalfExtent;
+        const double OutsideX = FMath::Max(QX, 0.0);
+        const double OutsideY = FMath::Max(QY, 0.0);
+        const double OutsideZ = FMath::Max(QZ, 0.0);
+        const double OutsideDistance = std::sqrt(
+            OutsideX * OutsideX + OutsideY * OutsideY + OutsideZ * OutsideZ);
+        const double InsideDistance = FMath::Min(
+            FMath::Max(QX, FMath::Max(QY, QZ)),
+            0.0);
+        return OutsideDistance + InsideDistance - RoundRadius;
+    }
+
     FORCEINLINE float ApplyBlockEdits(
         double X,
         double Y,
@@ -93,10 +134,21 @@ namespace
         const int32 BaseX = static_cast<int32>(std::floor(X / Step));
         const int32 BaseY = static_cast<int32>(std::floor(Y / Step));
         const int32 BaseZ = static_cast<int32>(std::floor(Z / Step));
-        const double HalfExtent = Step * 0.55;
 
-        // The 0.55-cell half extent slightly overlaps neighbouring cell volumes,
-        // so check the 3x3x3 neighbourhood at boundaries. Never scan the full map.
+        // State meanings:
+        //   +1: smooth terrain material (Dirt/Sand), added to the SDF.
+        //   -1: mined air cell, subtracted from the terrain SDF.
+        //   +2: a hard cube occupies this cell; subtract the cell from terrain
+        //       and render the cube separately with flat face normals.
+        // The tiny epsilon avoids exact-zero samples on every cell boundary
+        // without the 10% overlap that made consecutive cuts form ragged seams.
+        const double CarveHalfExtent = Step * 0.5 + FMath::Max(0.05, Step * 0.0005);
+        const double SmoothHalfExtent = Step * 0.5;
+        const double RoundRadius = Step * 0.28;
+        const double BlendWidth = Step * 0.12;
+
+        // Cell edits are sparse. Only inspect neighbours of this lattice sample;
+        // never scan the global edit map from the hot density-sampling path.
         int8 CandidateStates[27];
         double CandidateBoxSdfs[27];
         int32 CandidateCount = 0;
@@ -109,7 +161,7 @@ namespace
                 {
                     const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
                     const int8* EditState = Settings.BlockEdits->Find(Cell);
-                    if (!EditState || *EditState == 0)
+                    if (!EditState || (*EditState != 1 && *EditState != -1 && *EditState != 2))
                     {
                         continue;
                     }
@@ -117,40 +169,37 @@ namespace
                     const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
                     const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
                     const double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
-                    const double QX = std::abs(X - CenterX) - HalfExtent;
-                    const double QY = std::abs(Y - CenterY) - HalfExtent;
-                    const double QZ = std::abs(Z - CenterZ) - HalfExtent;
-                    const double OutsideX = FMath::Max(QX, 0.0);
-                    const double OutsideY = FMath::Max(QY, 0.0);
-                    const double OutsideZ = FMath::Max(QZ, 0.0);
-                    const double OutsideDistance = std::sqrt(
-                        OutsideX * OutsideX + OutsideY * OutsideY + OutsideZ * OutsideZ);
-                    const double InsideDistance = FMath::Min(
-                        FMath::Max(QX, FMath::Max(QY, QZ)),
-                        0.0);
-
+                    const bool bSmoothAddition = *EditState == 1;
                     CandidateStates[CandidateCount] = *EditState;
-                    CandidateBoxSdfs[CandidateCount] = OutsideDistance + InsideDistance;
+                    CandidateBoxSdfs[CandidateCount] = bSmoothAddition
+                        ? BoxSdf(X, Y, Z, CenterX, CenterY, CenterZ, SmoothHalfExtent, RoundRadius)
+                        : BoxSdf(X, Y, Z, CenterX, CenterY, CenterZ, CarveHalfExtent, 0.0);
                     ++CandidateCount;
                 }
             }
         }
 
-        // Always union placed solids first and subtract carved cells second.
-        // This makes breaking win at the tiny overlaps between adjacent cells.
-        for (int32 Pass = 0; Pass < 2; ++Pass)
+        // First union only the smooth materials. Hard cubes are not added to this
+        // scalar field: their cell is carved out and a separate cube mesh fills it.
+        // Apply all cuts last, so a previously mined cell always remains air.
+        for (int32 Index = 0; Index < CandidateCount; ++Index)
         {
-            for (int32 Index = 0; Index < CandidateCount; ++Index)
+            if (CandidateStates[Index] == 1)
             {
-                const double BoxSdf = CandidateBoxSdfs[Index];
-                if (Pass == 0 && CandidateStates[Index] > 0)
-                {
-                    Density = FMath::Max(Density, static_cast<float>(-BoxSdf));
-                }
-                else if (Pass == 1 && CandidateStates[Index] < 0)
-                {
-                    Density = FMath::Min(Density, static_cast<float>(BoxSdf));
-                }
+                Density = static_cast<float>(SmoothMaximum(
+                    static_cast<double>(Density),
+                    -CandidateBoxSdfs[Index],
+                    BlendWidth));
+            }
+        }
+
+        for (int32 Index = 0; Index < CandidateCount; ++Index)
+        {
+            if (CandidateStates[Index] < 0 || CandidateStates[Index] == 2)
+            {
+                Density = FMath::Min(
+                    Density,
+                    static_cast<float>(CandidateBoxSdfs[Index]));
             }
         }
 
