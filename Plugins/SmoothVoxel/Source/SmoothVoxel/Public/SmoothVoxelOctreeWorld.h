@@ -363,7 +363,7 @@ public:
 	bool bEnableRivers = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.000001", ClampMax="0.00005"))
-	float RiverScale = 0.0000045f;
+	float RiverScale = 0.0000025f;
 
 	/** River half-width in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
