@@ -505,8 +505,8 @@ ASmoothVoxelWaterSurface::ASmoothVoxelWaterSurface()
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetCanEverAffectNavigation(false);
 
-	// Starter Content's lake material provides an out-of-box water appearance.
-	// Projects can override it per world instance through WaterMaterial.
+	// Use the lake material for the same calm, level appearance as generated lakes.
+	// Projects can replace it per Octree world instance through WaterMaterial.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WaterAsset(
 		TEXT("/Game/StarterContent/Materials/M_Water_Lake.M_Water_Lake"));
 	if (WaterAsset.Succeeded())
@@ -525,16 +525,13 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 	float WorldSize,
 	float InSeaLevel,
 	float InTileSize,
-	int32 InResolution,
 	UMaterialInterface* InMaterial,
-	const FSVoxelGenerationSettings& InGenerationSettings,
 	bool bEnableCollision)
 {
 	check(IsInGameThread());
 
 	const float SafeWorldSize = FMath::Max(100.0f, WorldSize);
 	const float SafeTileSize = FMath::Max(100.0f, InTileSize);
-	const int32 SafeResolution = FMath::Clamp(InResolution, 16, 512);
 	UMaterialInterface* EffectiveMaterial = InMaterial
 		? InMaterial
 		: FallbackWaterMaterial;
@@ -543,34 +540,13 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 		EffectiveMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
 	}
 
-	const FSVoxelGenerationSettings& OldSettings = ConfiguredGenerationSettings;
-	const bool bSameGeneratorSettings =
-		OldSettings.Seed == InGenerationSettings.Seed &&
-		OldSettings.bEnableBiomes == InGenerationSettings.bEnableBiomes &&
-		FMath::IsNearlyEqual(OldSettings.BiomeScale, InGenerationSettings.BiomeScale) &&
-		OldSettings.bEnablePOIPlateaus == InGenerationSettings.bEnablePOIPlateaus &&
-		FMath::IsNearlyEqual(OldSettings.POISiteSpacing, InGenerationSettings.POISiteSpacing) &&
-		FMath::IsNearlyEqual(OldSettings.POIPlateauRadius, InGenerationSettings.POIPlateauRadius) &&
-		FMath::IsNearlyEqual(OldSettings.POIPlateauBlendDistance, InGenerationSettings.POIPlateauBlendDistance) &&
-		FMath::IsNearlyEqual(OldSettings.BaseHeight, InGenerationSettings.BaseHeight) &&
-		FMath::IsNearlyEqual(OldSettings.HeightAmplitude, InGenerationSettings.HeightAmplitude) &&
-		FMath::IsNearlyEqual(OldSettings.NoiseScale, InGenerationSettings.NoiseScale) &&
-		FMath::IsNearlyEqual(OldSettings.DetailScale, InGenerationSettings.DetailScale) &&
-		FMath::IsNearlyEqual(OldSettings.DetailAmplitude, InGenerationSettings.DetailAmplitude) &&
-		OldSettings.bEnableRivers == InGenerationSettings.bEnableRivers &&
-		FMath::IsNearlyEqual(OldSettings.RiverScale, InGenerationSettings.RiverScale) &&
-		FMath::IsNearlyEqual(OldSettings.RiverHalfWidth, InGenerationSettings.RiverHalfWidth) &&
-		FMath::IsNearlyEqual(OldSettings.RiverDepth, InGenerationSettings.RiverDepth);
-
 	const bool bUnchanged = bHasConfiguration &&
 		ConfiguredWorldCenter.Equals(WorldCenter, KINDA_SMALL_NUMBER) &&
 		FMath::IsNearlyEqual(ConfiguredWorldSize, SafeWorldSize) &&
 		FMath::IsNearlyEqual(ConfiguredSeaLevel, InSeaLevel) &&
 		FMath::IsNearlyEqual(ConfiguredTileSize, SafeTileSize) &&
-		ConfiguredResolution == SafeResolution &&
 		ActiveMaterial == EffectiveMaterial &&
-		bConfiguredCollision == bEnableCollision &&
-		bSameGeneratorSettings;
+		bConfiguredCollision == bEnableCollision;
 	if (bUnchanged)
 	{
 		return;
@@ -580,26 +556,17 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 	ConfiguredWorldSize = SafeWorldSize;
 	ConfiguredSeaLevel = InSeaLevel;
 	ConfiguredTileSize = SafeTileSize;
-	ConfiguredResolution = SafeResolution;
-	ConfiguredGenerationSettings = InGenerationSettings;
 	bConfiguredCollision = bEnableCollision;
 	bHasConfiguration = true;
 	ActiveMaterial = EffectiveMaterial;
 
 	SetActorLocation(FVector(WorldCenter.X, WorldCenter.Y, InSeaLevel));
-	BuildSurfaceMesh(
-		SafeWorldSize,
-		SafeTileSize,
-		SafeResolution,
-		InGenerationSettings,
-		bEnableCollision);
+	BuildSurfaceMesh(SafeWorldSize, SafeTileSize, bEnableCollision);
 }
 
 void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	float WorldSize,
 	float InTileSize,
-	int32 InResolution,
-	const FSVoxelGenerationSettings& GenerationSettings,
 	bool bEnableCollision)
 {
 	if (!Mesh)
@@ -607,320 +574,57 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 		return;
 	}
 
-	const int32 Resolution = FMath::Clamp(InResolution, 16, 512);
-	const int32 Side = Resolution + 1;
 	const float HalfExtent = FMath::Max(100.0f, WorldSize) * 0.5f;
-	const float Step = (HalfExtent * 2.0f) / static_cast<float>(Resolution);
 	const float SafeTileSize = FMath::Max(100.0f, InTileSize);
-	const double RiverDepth = std::abs(static_cast<double>(GenerationSettings.RiverDepth));
-	const int32 VertexCount = Side * Side;
 
-	// The ocean/lake plane is truly level and only needs a quad. Keeping it
-	// separate from the river grid avoids hundreds of thousands of redundant
-	// flat-water triangles.
-	TArray<FVector> SeaVertices;
-	TArray<int32> SeaTriangles;
-	TArray<FVector> SeaNormals;
-	TArray<FVector2D> SeaUVs;
-	TArray<FLinearColor> SeaColors;
-	TArray<FProcMeshTangent> SeaTangents;
-	SeaVertices.Add(FVector(-HalfExtent, -HalfExtent, 0.0f));
-	SeaVertices.Add(FVector( HalfExtent, -HalfExtent, 0.0f));
-	SeaVertices.Add(FVector( HalfExtent,  HalfExtent, 0.0f));
-	SeaVertices.Add(FVector(-HalfExtent,  HalfExtent, 0.0f));
-	SeaTriangles.Add(0);
-	SeaTriangles.Add(2);
-	SeaTriangles.Add(1);
-	SeaTriangles.Add(0);
-	SeaTriangles.Add(3);
-	SeaTriangles.Add(2);
+	TArray<FVector> Vertices;
+	TArray<int32> Triangles;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UV0;
+	TArray<FLinearColor> Colors;
+	TArray<FProcMeshTangent> Tangents;
+
+	// Exactly one horizontal quad is used for the whole water level. Rivers are
+	// cut into the terrain below this plane, so this same sheet fills lakes and
+	// channels without a second water mesh, sloped vertices, holes, or torn edges.
+	Vertices.Add(FVector(-HalfExtent, -HalfExtent, 0.0f));
+	Vertices.Add(FVector( HalfExtent, -HalfExtent, 0.0f));
+	Vertices.Add(FVector( HalfExtent,  HalfExtent, 0.0f));
+	Vertices.Add(FVector(-HalfExtent,  HalfExtent, 0.0f));
+
+	// Winding matches the upward-facing normal.
+	Triangles.Add(0);
+	Triangles.Add(1);
+	Triangles.Add(2);
+	Triangles.Add(0);
+	Triangles.Add(2);
+	Triangles.Add(3);
+
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
-		SeaNormals.Add(FVector::UpVector);
-		SeaColors.Add(FLinearColor::White);
-		SeaTangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
+		Normals.Add(FVector::UpVector);
+		Colors.Add(FLinearColor::White);
+		Tangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
 	}
-	SeaUVs.Add(FVector2D(0.0f, 0.0f));
-	SeaUVs.Add(FVector2D(WorldSize / SafeTileSize, 0.0f));
-	SeaUVs.Add(FVector2D(WorldSize / SafeTileSize, WorldSize / SafeTileSize));
-	SeaUVs.Add(FVector2D(0.0f, WorldSize / SafeTileSize));
-
-	// River heights are generated from a smoothed large-scale terrain profile,
-	// not from each noisy terrain vertex. The local bed-height cap below keeps
-	// the water inside the carved channel rather than floating across hilltops.
-	TArray<FVector> RiverVertices;
-	TArray<int32> RiverTriangles;
-	TArray<FVector> RiverNormals;
-	TArray<FVector2D> RiverUVs;
-	TArray<FLinearColor> RiverColors;
-	TArray<FProcMeshTangent> RiverTangents;
-	TArray<double> NaturalHeights;
-	TArray<double> SmoothedHorizontal;
-	TArray<double> SmoothedHeights;
-	TArray<double> CarvedBedHeights;
-	TArray<float> RiverWeights;
-	TArray<float> RiverFields;
-
-	RiverVertices.Reserve(VertexCount);
-	RiverNormals.Reserve(VertexCount);
-	RiverUVs.Reserve(VertexCount);
-	RiverColors.Reserve(VertexCount);
-	RiverTangents.Reserve(VertexCount);
-	NaturalHeights.SetNumUninitialized(VertexCount);
-	SmoothedHorizontal.SetNumUninitialized(VertexCount);
-	SmoothedHeights.SetNumUninitialized(VertexCount);
-	CarvedBedHeights.SetNumUninitialized(VertexCount);
-	RiverWeights.SetNumUninitialized(VertexCount);
-	RiverFields.SetNumUninitialized(VertexCount);
-	RiverTriangles.Reserve(Resolution * Resolution * 2);
-
-	for (int32 Y = 0; Y <= Resolution; ++Y)
-	{
-		for (int32 X = 0; X <= Resolution; ++X)
-		{
-			const int32 Index = Y * Side + X;
-			const float LocalX = -HalfExtent + static_cast<float>(X) * Step;
-			const float LocalY = -HalfExtent + static_cast<float>(Y) * Step;
-			const double WorldX = static_cast<double>(ConfiguredWorldCenter.X) + LocalX;
-			const double WorldY = static_cast<double>(ConfiguredWorldCenter.Y) + LocalY;
-
-			float RiverInfluence = 0.0f;
-			float RiverSignedField = 0.0f;
-			FSVoxelGenerator::SampleRiverMaskAndField(
-				WorldX,
-				WorldY,
-				GenerationSettings,
-				RiverInfluence,
-				RiverSignedField);
-			RiverInfluence = FMath::Clamp(RiverInfluence, 0.0f, 1.0f);
-			const double CarvedHeight = FSVoxelGenerator::SampleSurfaceHeight(
-				WorldX, WorldY, GenerationSettings);
-			// SampleSurfaceHeight already cuts the riverbed. Add that cut back to
-			// recover the exact same uncarved profile before smoothing it.
-			const double NaturalHeight = CarvedHeight + RiverDepth * RiverInfluence;
-			NaturalHeights[Index] = NaturalHeight;
-			CarvedBedHeights[Index] = CarvedHeight;
-			RiverWeights[Index] = RiverInfluence;
-			RiverFields[Index] = RiverSignedField;
-		}
-	}
-
-	// Separable triangular low-pass filter over a fixed world-space radius.
-	// It removes terrain-frequency bumps from the visible water while preserving
-	// the broad downhill profile of the river valley.
-	const int32 SmoothingRadius = FMath::Clamp(
-		FMath::RoundToInt(25000.0f / FMath::Max(1.0f, Step)),
-		8,
-		16);
-	for (int32 Y = 0; Y <= Resolution; ++Y)
-	{
-		for (int32 X = 0; X <= Resolution; ++X)
-		{
-			double WeightedHeight = 0.0;
-			double WeightSum = 0.0;
-			for (int32 Offset = -SmoothingRadius; Offset <= SmoothingRadius; ++Offset)
-			{
-				const int32 SampleX = FMath::Clamp(X + Offset, 0, Resolution);
-				const double Weight = static_cast<double>(SmoothingRadius + 1 - FMath::Abs(Offset));
-				WeightedHeight += NaturalHeights[Y * Side + SampleX] * Weight;
-				WeightSum += Weight;
-			}
-			SmoothedHorizontal[Y * Side + X] = WeightedHeight / WeightSum;
-		}
-	}
-
-	for (int32 Y = 0; Y <= Resolution; ++Y)
-	{
-		for (int32 X = 0; X <= Resolution; ++X)
-		{
-			double WeightedHeight = 0.0;
-			double WeightSum = 0.0;
-			for (int32 Offset = -SmoothingRadius; Offset <= SmoothingRadius; ++Offset)
-			{
-				const int32 SampleY = FMath::Clamp(Y + Offset, 0, Resolution);
-				const double Weight = static_cast<double>(SmoothingRadius + 1 - FMath::Abs(Offset));
-				WeightedHeight += SmoothedHorizontal[SampleY * Side + X] * Weight;
-				WeightSum += Weight;
-			}
-			SmoothedHeights[Y * Side + X] = WeightedHeight / WeightSum;
-		}
-	}
-
-	for (int32 Y = 0; Y <= Resolution; ++Y)
-	{
-		for (int32 X = 0; X <= Resolution; ++X)
-		{
-			const int32 Index = Y * Side + X;
-			const float LocalX = -HalfExtent + static_cast<float>(X) * Step;
-			const float LocalY = -HalfExtent + static_cast<float>(Y) * Step;
-			const double RiverInfluence = static_cast<double>(RiverWeights[Index]);
-			const double NaturalHeight = NaturalHeights[Index];
-			const double BedHeight = CarvedBedHeights[Index];
-
-			// Estimate the normal of the signed river field. Project points across
-			// a channel onto its zero-contour, then take the water elevation from
-			// that centreline. This preserves the downhill profile along the river
-			// while avoiding the old sideways tilt that copied each bank's terrain.
-			const int32 Left = Y * Side + FMath::Max(0, X - 1);
-			const int32 Right = Y * Side + FMath::Min(Resolution, X + 1);
-			const int32 Down = FMath::Max(0, Y - 1) * Side + X;
-			const int32 Up = FMath::Min(Resolution, Y + 1) * Side + X;
-			const double FieldDX = static_cast<double>(RiverFields[Right] - RiverFields[Left]) /
-				((X == 0 || X == Resolution) ? Step : Step * 2.0);
-			const double FieldDY = static_cast<double>(RiverFields[Up] - RiverFields[Down]) /
-				((Y == 0 || Y == Resolution) ? Step : Step * 2.0);
-			const double FieldGradient = FMath::Sqrt(FieldDX * FieldDX + FieldDY * FieldDY);
-
-			double RiverAxisHeight = SmoothedHeights[Index];
-			if (FieldGradient > 1.0e-10)
-			{
-				const double DistanceToAxis = static_cast<double>(RiverFields[Index]) / FieldGradient;
-				const double MaxProjectionDistance =
-					FMath::Max(1.0, std::abs(static_cast<double>(GenerationSettings.RiverHalfWidth)) * 1.25);
-				if (std::abs(DistanceToAxis) <= MaxProjectionDistance)
-				{
-					const double GridX = FMath::Clamp(
-						static_cast<double>(X) - DistanceToAxis * FieldDX / FieldGradient / Step,
-						0.0,
-						static_cast<double>(Resolution));
-					const double GridY = FMath::Clamp(
-						static_cast<double>(Y) - DistanceToAxis * FieldDY / FieldGradient / Step,
-						0.0,
-						static_cast<double>(Resolution));
-					const int32 X0 = FMath::FloorToInt(GridX);
-					const int32 Y0 = FMath::FloorToInt(GridY);
-					const int32 X1 = FMath::Min(Resolution, X0 + 1);
-					const int32 Y1 = FMath::Min(Resolution, Y0 + 1);
-					const double TX = GridX - static_cast<double>(X0);
-					const double TY = GridY - static_cast<double>(Y0);
-					const double Lower = FMath::Lerp(
-						SmoothedHeights[Y0 * Side + X0],
-						SmoothedHeights[Y0 * Side + X1],
-						TX);
-					const double Upper = FMath::Lerp(
-						SmoothedHeights[Y1 * Side + X0],
-						SmoothedHeights[Y1 * Side + X1],
-						TX);
-					RiverAxisHeight = FMath::Lerp(Lower, Upper, TY);
-				}
-			}
-
-			// Water is level across the channel width, but may descend gradually
-			// along the river. Clamp it into the carved bed and below the local bank.
-			const double SmoothedWaterHeight = RiverAxisHeight - RiverDepth * 0.35;
-			const double BelowBankHeight = NaturalHeight - FMath::Max(75.0, RiverDepth * 0.12);
-			const double AboveBedHeight = BedHeight + RiverDepth * 0.10 * RiverInfluence;
-			const double RiverSurfaceHeight = FMath::Min(
-				FMath::Max(SmoothedWaterHeight, AboveBedHeight),
-				BelowBankHeight);
-
-			RiverVertices.Add(FVector(
-				LocalX,
-				LocalY,
-				static_cast<float>(RiverSurfaceHeight - static_cast<double>(ConfiguredSeaLevel))));
-			RiverNormals.Add(FVector::UpVector);
-			RiverUVs.Add(FVector2D(
-				static_cast<float>(X) * Step / SafeTileSize,
-				static_cast<float>(Y) * Step / SafeTileSize));
-			RiverColors.Add(FLinearColor::White);
-			RiverTangents.Add(FProcMeshTangent(FVector::ForwardVector, false));
-		}
-	}
-
-	// Test each triangle independently. The previous "any vertex > 0.01"
-	// rule expanded a narrow channel to every adjacent whole grid cell, making
-	// huge water sheets and sharp, torn edges on large maps.
-	const auto ShouldCreateRiverTriangle = [&RiverWeights](int32 A, int32 B, int32 C)
-	{
-		const float WA = RiverWeights[A];
-		const float WB = RiverWeights[B];
-		const float WC = RiverWeights[C];
-		const float Average = (WA + WB + WC) / 3.0f;
-		const int32 NearChannelVertices =
-			(WA >= 0.14f ? 1 : 0) +
-			(WB >= 0.14f ? 1 : 0) +
-			(WC >= 0.14f ? 1 : 0);
-		return Average >= 0.18f && NearChannelVertices >= 2;
-	};
-
-	for (int32 Y = 0; Y < Resolution; ++Y)
-	{
-		for (int32 X = 0; X < Resolution; ++X)
-		{
-			const int32 A = Y * Side + X;
-			const int32 B = A + 1;
-			const int32 D = (Y + 1) * Side + X;
-			const int32 C = D + 1;
-
-			if (ShouldCreateRiverTriangle(A, C, B))
-			{
-				RiverTriangles.Add(A);
-				RiverTriangles.Add(C);
-				RiverTriangles.Add(B);
-			}
-			if (ShouldCreateRiverTriangle(A, D, C))
-			{
-				RiverTriangles.Add(A);
-				RiverTriangles.Add(D);
-				RiverTriangles.Add(C);
-			}
-		}
-	}
-
-	// Smooth water normals from the filtered height field. The ocean is always
-	// perfectly level and does not inherit any terrain normals.
-	for (int32 Y = 0; Y <= Resolution; ++Y)
-	{
-		for (int32 X = 0; X <= Resolution; ++X)
-		{
-			const int32 Left = Y * Side + FMath::Max(0, X - 1);
-			const int32 Right = Y * Side + FMath::Min(Resolution, X + 1);
-			const int32 Down = FMath::Max(0, Y - 1) * Side + X;
-			const int32 Up = FMath::Min(Resolution, Y + 1) * Side + X;
-			const float DX = (X == 0 || X == Resolution) ? Step : Step * 2.0f;
-			const float DY = (Y == 0 || Y == Resolution) ? Step : Step * 2.0f;
-			const float SlopeX = (RiverVertices[Right].Z - RiverVertices[Left].Z) / DX;
-			const float SlopeY = (RiverVertices[Up].Z - RiverVertices[Down].Z) / DY;
-			RiverNormals[Y * Side + X] = FVector(-SlopeX, -SlopeY, 1.0f).GetSafeNormal();
-		}
-	}
+	UV0.Add(FVector2D(0.0f, 0.0f));
+	UV0.Add(FVector2D(WorldSize / SafeTileSize, 0.0f));
+	UV0.Add(FVector2D(WorldSize / SafeTileSize, WorldSize / SafeTileSize));
+	UV0.Add(FVector2D(0.0f, WorldSize / SafeTileSize));
 
 	Mesh->ClearAllMeshSections();
 	Mesh->CreateMeshSection_LinearColor(
 		0,
-		SeaVertices,
-		SeaTriangles,
-		SeaNormals,
-		SeaUVs,
+		Vertices,
+		Triangles,
+		Normals,
+		UV0,
 		TArray<FVector2D>(),
 		TArray<FVector2D>(),
 		TArray<FVector2D>(),
-		SeaColors,
-		SeaTangents,
+		Colors,
+		Tangents,
 		bEnableCollision);
-	if (RiverTriangles.Num() > 0)
-	{
-		Mesh->CreateMeshSection_LinearColor(
-			1,
-			RiverVertices,
-			RiverTriangles,
-			RiverNormals,
-			RiverUVs,
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			RiverColors,
-			RiverTangents,
-			bEnableCollision);
-	}
-	if (ActiveMaterial)
-	{
-		Mesh->SetMaterial(0, ActiveMaterial);
-		if (RiverTriangles.Num() > 0)
-		{
-			Mesh->SetMaterial(1, ActiveMaterial);
-		}
-	}
+	Mesh->SetMaterial(0, ActiveMaterial);
 	Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
 	Mesh->SetCollisionEnabled(
 		bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
