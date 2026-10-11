@@ -208,17 +208,20 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             HalfRoadWidth + RouteGridStep * 0.75,
         Spacing * 0.45);
 
-    // A complete ring must fit inside the finite map. Border sites keep their
-    // road connection, but use a normal junction instead of a clipped ring.
+    // A complete ring must fit inside the finite map. Border sites cannot host
+    // a full safe POI footprint, so remove them from both the ring set and the
+    // road graph; neighbouring links will bridge the gap to the next viable site.
     for (auto It = POIRingSites.CreateIterator(); It; ++It)
     {
-        const FVector2D* Site = Sites.Find(*It);
+        const FIntPoint SiteCell = *It;
+        const FVector2D* Site = Sites.Find(SiteCell);
         if (!Site ||
             Site->X - SiteConnectionRadius - HalfRoadWidth < MinX ||
             Site->X + SiteConnectionRadius + HalfRoadWidth > MaxX ||
             Site->Y - SiteConnectionRadius - HalfRoadWidth < MinY ||
             Site->Y + SiteConnectionRadius + HalfRoadWidth > MaxY)
         {
+            Sites.Remove(SiteCell);
             It.RemoveCurrent();
         }
     }
