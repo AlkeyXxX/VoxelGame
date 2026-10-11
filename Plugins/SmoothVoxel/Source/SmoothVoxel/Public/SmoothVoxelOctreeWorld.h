@@ -198,7 +198,7 @@ public:
 	int32 CollisionMaxLod = 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Collision", meta=(ClampMin="0.0"))
-	float CollisionRadius = 3000.0f;
+	float CollisionRadius = 2000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Rendering")
 	UMaterialInterface* TerrainMaterial = nullptr;
