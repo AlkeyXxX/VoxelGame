@@ -11,6 +11,7 @@
 class UProceduralMeshComponent;
 class UMaterialInterface;
 class UDataTable;
+class APlayerController;
 
 // World dimensions are selected per new world in the editor. Keep these values
 // in centimetres in code (Unreal's default world units) for exact grid bounds.
@@ -355,6 +356,7 @@ public:
 	void EnqueueCompletedChunk(ASmoothVoxelTransvoxelChunk* Chunk);
 
 private:
+	void TryBindPlayerInteractionInput();
 	void HandleBreakBlockInput();
 	void HandlePlaceBlockInput();
 	void RebuildForCamera(const FVector& CameraLocation);
@@ -387,9 +389,13 @@ private:
 		float VoxelSize,
 		bool bFilterBlockEdits = true) const;
 
-	// Guard same-frame duplicate calls from legacy Blueprint input handlers and this actor.
+	// Guard same-frame duplicate calls from existing Blueprint input handlers and this actor.
 	uint64 LastBreakInteractionFrame = 0;
 	uint64 LastPlaceInteractionFrame = 0;
+
+	// Bind only once, and retry when the PlayerController appears after BeginPlay.
+	TWeakObjectPtr<APlayerController> InteractionInputController;
+	bool bInteractionActionsBound = false;
 
 	TMap<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*> ActiveChunks;
 	TArray<TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>> QueuedChunkBuilds;

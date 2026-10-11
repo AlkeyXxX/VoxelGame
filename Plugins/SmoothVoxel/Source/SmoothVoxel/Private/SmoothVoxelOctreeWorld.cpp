@@ -14,6 +14,8 @@
 #include "Components/InputComponent.h"
 #include "InputCoreTypes.h"
 #include "Engine/World.h"
+#include "Engine/DataTable.h"
+#include "UObject/ConstructorHelpers.h"
 #include "CollisionShape.h"
 #include "CollisionQueryParams.h"
 
@@ -631,14 +633,31 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 ASmoothVoxelOctreeWorld::ASmoothVoxelOctreeWorld()
 {
 	PrimaryActorTick.bCanEverTick = true;
+
+	// The Octree world owns its block rules and does not read them from a legacy world actor.
+	static ConstructorHelpers::FObjectFinder<UDataTable> BlockTableAsset(
+		TEXT("/Game/Voxel/Data/DT_VoxelBlocks.DT_VoxelBlocks"));
+	if (BlockTableAsset.Succeeded())
+	{
+		BlockDataTable = BlockTableAsset.Object;
+	}
 }
 
 void ASmoothVoxelOctreeWorld::BeginPlay()
 {
 	Super::BeginPlay();
+	TryBindPlayerInteractionInput();
+}
 
+void ASmoothVoxelOctreeWorld::TryBindPlayerInteractionInput()
+{
 	if (!bEnableBlockEditing || !bBindPlayerInteractionInput || !GetWorld())
 	{
+		if (InteractionInputController.IsValid())
+		{
+			DisableInput(InteractionInputController.Get());
+		}
+		InteractionInputController.Reset();
 		return;
 	}
 
@@ -646,15 +665,28 @@ void ASmoothVoxelOctreeWorld::BeginPlay()
 		UGameplayStatics::GetPlayerController(this, 0);
 	if (!IsValid(PlayerController))
 	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("SmoothVoxelOctreeWorld: no player controller available to bind terrain interaction input."));
+		// PlayerController may not exist yet during this actor's BeginPlay.
+		// Tick retries the binding until the controller is available.
 		return;
 	}
 
-	// The Octree world binds the project's existing action mappings itself.
-	// This keeps mining/placement independent from the deprecated AVoxelWorld.
+	if (InteractionInputController.Get() == PlayerController && bInteractionActionsBound)
+	{
+		return;
+	}
+
+	if (InteractionInputController.IsValid())
+	{
+		DisableInput(InteractionInputController.Get());
+	}
+
 	EnableInput(PlayerController);
-	if (InputComponent)
+	if (!InputComponent)
+	{
+		return;
+	}
+
+	if (!bInteractionActionsBound)
 	{
 		InputComponent->BindAction(
 			FName(TEXT("BreakBlock")), IE_Pressed,
@@ -662,7 +694,10 @@ void ASmoothVoxelOctreeWorld::BeginPlay()
 		InputComponent->BindAction(
 			FName(TEXT("PlaceBlock")), IE_Pressed,
 			this, &ASmoothVoxelOctreeWorld::HandlePlaceBlockInput);
+		bInteractionActionsBound = true;
 	}
+
+	InteractionInputController = PlayerController;
 }
 
 void ASmoothVoxelOctreeWorld::HandleBreakBlockInput()
@@ -677,6 +712,12 @@ void ASmoothVoxelOctreeWorld::HandlePlaceBlockInput()
 
 void ASmoothVoxelOctreeWorld::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (InteractionInputController.IsValid())
+	{
+		DisableInput(InteractionInputController.Get());
+	}
+	InteractionInputController.Reset();
+
 	for (TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
 	{
 		if (IsValid(Pair.Value))
@@ -1811,6 +1852,13 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	// Bind player input independently from mesh generation so startup ordering
+	// cannot make the world permanently miss the first PlayerController.
+	if (!InteractionInputController.IsValid() || !bInteractionActionsBound)
+	{
+		TryBindPlayerInteractionInput();
+	}
 
 	if (!bAutoGenerate || !GetWorld())
 	{
