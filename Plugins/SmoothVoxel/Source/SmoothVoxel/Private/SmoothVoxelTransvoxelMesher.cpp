@@ -405,8 +405,10 @@ namespace
 			return;
 		}
 
-		constexpr double UVWorldScale = 0.0005; // Floor repeat: one texture tile per 2000 cm.
-		constexpr double WallUVWorldScale = 0.0025; // Wall repeat: one tile per 400 cm.
+		// One world-aligned repeat scale for every surface orientation. Different
+		// floor/wall scales caused visible texture-density jumps when a vertex
+		// normal crossed the dominant-axis threshold during a terrain rebuild.
+		constexpr double UVWorldScale = 0.00125; // One texture tile per 800 cm.
 
 		// Rebase UVs once per chunk, not once per cell. Cell-local rebasing kept
 		// values small but introduced UV discontinuities on every marching-cubes
@@ -478,34 +480,35 @@ namespace
 			FVector WorldU(1.0f, 0.0f, 0.0f);
 			FVector WorldV(0.0f, 1.0f, 0.0f);
 
-			if (AbsX >= AbsY && AbsX >= AbsZ)
+			// Keep the XY projection on ground and ordinary slopes; switch to a
+			// side projection only for clearly wall-like surfaces. The wider
+			// dead-zone prevents small normal changes after mining from making
+			// neighbouring vertices abruptly swap their UV axes.
+			const float StrongestHorizontalNormal = FMath::Max(AbsX, AbsY);
+			if (StrongestHorizontalNormal > AbsZ * 1.35f)
 			{
-				// X-facing wall: project onto YZ.
-				U = WorldY;
-				V = WorldZ;
-				ProjectionScale = WallUVWorldScale;
-				UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * ProjectionScale)));
-				UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * ProjectionScale)));
-				WorldU = FVector(0.0f, 1.0f, 0.0f);
-				WorldV = FVector(0.0f, 0.0f, 1.0f);
+				if (AbsX >= AbsY)
+				{
+					// X-facing wall: project onto YZ.
+					U = WorldY;
+					V = WorldZ;
+					UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * ProjectionScale)));
+					UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * ProjectionScale)));
+					WorldU = FVector(0.0f, 1.0f, 0.0f);
+					WorldV = FVector(0.0f, 0.0f, 1.0f);
+				}
+				else
+				{
+					// Y-facing wall: project onto XZ.
+					U = WorldX;
+					V = WorldZ;
+					UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * ProjectionScale)));
+					UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * ProjectionScale)));
+					WorldU = FVector(1.0f, 0.0f, 0.0f);
+					WorldV = FVector(0.0f, 0.0f, 1.0f);
+				}
 			}
-			else if (AbsY >= AbsZ)
-			{
-				// Y-facing wall: project onto XZ.
-				U = WorldX;
-				V = WorldZ;
-				ProjectionScale = WallUVWorldScale;
-				UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * ProjectionScale)));
-				UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * ProjectionScale)));
-				WorldU = FVector(1.0f, 0.0f, 0.0f);
-				WorldV = FVector(0.0f, 0.0f, 1.0f);
-			}
-			else
-			{
-				// Horizontal / floor surface: project onto XY.
-				WorldU = FVector(1.0f, 0.0f, 0.0f);
-				WorldV = FVector(0.0f, 1.0f, 0.0f);
-			}
+			// Otherwise the floor projection on XY remains unchanged.
 
 			OutMesh.UV0.Add(FVector2D(
 				static_cast<float>(U * ProjectionScale - UvOffsetU),
@@ -589,20 +592,29 @@ namespace
 			if (bNeedsDensityOrientation)
 			{
 				const FVector RawFaceDirection = FaceNormal.GetSafeNormal();
-				const float OrientationProbe = FMath::Max(1.0f, Settings.VoxelSize * 0.02f);
+				// Probe far enough to cross the isosurface despite interpolation and
+				// SDF curvature. A tiny probe can leave both samples on the same
+				// side of the surface; comparing their values alone then randomly
+				// flips faces as mining changes the local density field.
+				const float OrientationProbe = FMath::Max(5.0f, Settings.VoxelSize * 0.1f);
 				const float DensityAlongRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
 					TriangleCenter + RawFaceDirection * OrientationProbe, Settings);
 				const float DensityAgainstRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
 					TriangleCenter - RawFaceDirection * OrientationProbe, Settings);
-				if (FMath::Abs(DensityAlongRawNormal - DensityAgainstRawNormal) > KINDA_SMALL_NUMBER)
+				const bool bSamplesOppositeSides =
+					(DensityAlongRawNormal > Settings.IsoLevel) !=
+					(DensityAgainstRawNormal > Settings.IsoLevel);
+				if (bSamplesOppositeSides)
 				{
-					// Positive density is solid, negative is air. A conventional cross
-					// pointing into air is outward; UE's index winding must be opposite.
+					// Positive density is solid and negative is air. Only trust density
+					// orientation when the probes straddle the isosurface.
 					bReverseForUnrealFrontFace =
 						DensityAlongRawNormal < DensityAgainstRawNormal;
 				}
 				else if (ExpectedNormal.SizeSquared() > SMALL_NUMBER)
 				{
+					// If both probes are on the same side, fall back to the actual
+					// density-gradient normal instead of guessing from density slope.
 					bReverseForUnrealFrontFace =
 						FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f;
 				}
