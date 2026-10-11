@@ -295,11 +295,10 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 	DamageStage = FMath::Max(0, InDamageStage);
 
 	const float Size = FMath::Max(1.0f, InBlockSize);
-	// Keep the block cubic but show accumulating damage through a small inset.
-	// The hit-point stages are intentionally subtle, not a sudden full-cell cut.
-	const float Inset = FMath::Min(Size * 0.045f, Size * 0.015f * DamageStage);
-	const float Lo = Inset;
-	const float Hi = Size - Inset;
+	// Keep the cube geometry identical on every hit. Damage feedback will be
+	// shown by UI later; it must not change the collision/visual block size.
+	const float Lo = 0.0f;
+	const float Hi = Size;
 	const FVector GridAlignedOrigin(
 		static_cast<float>(InCell.X) * Size,
 		static_cast<float>(InCell.Y) * Size,
@@ -1065,18 +1064,31 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		}
 
 		const float Step = GetEffectiveBlockSize();
+		// TraceInteractionRay returns the current density-field crossing, with
+		// ImpactNormal pointing toward the air side. Probe inward using a small,
+		// adaptive offset: a quarter-cell jump can skip the cell at a wall,
+		// especially when mining horizontally from inside a tunnel.
 		const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
-		const float ProbeDistance = FMath::Max(5.0f, Step * 0.25f);
-		const FVector ProbeAlongNormal = Hit.ImpactPoint + Normal * ProbeDistance;
-		const FVector ProbeAgainstNormal = Hit.ImpactPoint - Normal * ProbeDistance;
-		const float DensityAlong = SampleCurrentDensityAt(ProbeAlongNormal);
-		const float DensityAgainst = SampleCurrentDensityAt(ProbeAgainstNormal);
-
-		if (FMath::Max(DensityAlong, DensityAgainst) <= 0.0f)
+		const float ProbeScales[] = { 0.005f, 0.01f, 0.02f, 0.04f, 0.08f, 0.16f, 0.32f };
+		bool bFoundSolidProbe = false;
+		for (const float ProbeScale : ProbeScales)
 		{
+			const float ProbeDistance = FMath::Max(0.5f, Step * ProbeScale);
+			const FVector CandidatePoint = Hit.ImpactPoint - Normal * ProbeDistance;
+			if (SampleCurrentDensityAt(CandidatePoint) > 0.0f)
+			{
+				InsidePoint = CandidatePoint;
+				bFoundSolidProbe = true;
+				break;
+			}
+		}
+
+		if (!bFoundSolidProbe)
+		{
+			// No solid sample behind this exact crossing means the density data
+			// changed between trace and interaction. Do not mine an unrelated cell.
 			return false;
 		}
-		InsidePoint = DensityAlong >= DensityAgainst ? ProbeAlongNormal : ProbeAgainstNormal;
 		Cell = WorldPositionToBlockCell(InsidePoint);
 		HitBlock = GetBlockTypeForCell(Cell);
 		if (HitBlock == EVoxelBlock::Air)
@@ -1102,30 +1114,18 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		? PlayerPawn->FindComponentByClass<UVoxelInventoryComponent>()
 		: nullptr;
 	const EVoxelBlock DropBlock = UVoxelBlockLibrary::GetBlockDropFromTable(BlockDataTable, HitBlock);
-	const float ToolDamage = FMath::Max(0.1f, TerrainMiningToolDamage);
-	const float Durability = FMath::Max(
-		0.0f, UVoxelBlockLibrary::GetBlockDurabilityFromTable(BlockDataTable, HitBlock));
-	const int32 HitsRequired = FMath::Max(
-		1, FMath::CeilToInt(Durability / ToolDamage));
+
+	// Durability and hit-progress are intentionally disabled for now: every
+	// valid mining hit breaks exactly one block/cell. Inventory capacity is
+	// still checked before applying the edit so drops are never lost.
+	if (Inventory && DropBlock != EVoxelBlock::Air &&
+		!Inventory->CanAddBlock(DropBlock, 1))
+	{
+		return false;
+	}
 
 	if (IsValid(HitCube))
 	{
-		if (HitCube->GetDamageStage() + 1 < HitsRequired)
-		{
-			const int32 NewDamageStage = HitCube->RegisterDamageHit();
-			HitCube->ConfigureBlock(
-				HitBlock, Cell, GetEffectiveBlockSize(), TerrainMaterial,
-				NewDamageStage);
-			return true;
-		}
-
-		if (Inventory && DropBlock != EVoxelBlock::Air &&
-			!Inventory->CanAddBlock(DropBlock, 1))
-		{
-			return false;
-		}
-
-		// Only award the drop after the edit has actually been applied.
 		if (!ApplyBlockCellEdit(Cell, EVoxelBlock::Air))
 		{
 			return false;
@@ -1137,35 +1137,14 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		return true;
 	}
 
-	// Mine the voxel cell containing a point just inside the hit surface.
-	// Because the selected cell is derived from the ray hit (not the nearest
-	// lattice corner), repeated hits while aiming vertically down remove
-	// cells in the same X/Y column and produce a straight, block-sized shaft.
+	// The point was validated on the solid side of the ray crossing above.
+	// Mine that cell immediately rather than accumulating hidden progress.
 	const FIntVector MinedCell = WorldPositionToBlockCell(InsidePoint);
 	if (SampleCurrentDensityAt(InsidePoint) <= 0.0f)
 	{
-		// Stale collision or a mesh rebuild caught the ray outside the current
-		// solid field; do not record a cut unless this exact point is solid.
 		return false;
 	}
 
-	float& Progress = TerrainMiningProgress.FindOrAdd(MinedCell);
-	const float NextProgress = FMath::Min(1.0f, Progress + ToolDamage / FMath::Max(ToolDamage, Durability));
-	if (NextProgress < 1.0f)
-	{
-		Progress = NextProgress;
-		return true;
-	}
-
-	if (Inventory && DropBlock != EVoxelBlock::Air &&
-		!Inventory->CanAddBlock(DropBlock, 1))
-	{
-		// Do not consume the last mining hit when the resulting drop cannot fit.
-		Progress = FMath::Min(Progress, 0.999f);
-		return false;
-	}
-
-	TerrainMiningProgress.Remove(MinedCell);
 	MinedTerrainNodes.Add(MinedCell);
 	MinedNodeSnapshot =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
