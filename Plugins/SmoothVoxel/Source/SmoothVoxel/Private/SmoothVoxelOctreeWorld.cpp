@@ -1230,6 +1230,10 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	{
 		FaceStep.Z = Normal.Z >= 0.0f ? 1 : -1;
 	}
+	const FVector FaceDirection(
+		static_cast<float>(FaceStep.X),
+		static_cast<float>(FaceStep.Y),
+		static_cast<float>(FaceStep.Z));
 	FIntVector Cell = FIntVector::ZeroValue;
 	FVector CubeWorldOrigin = FVector::ZeroVector;
 	if (ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor()))
@@ -1253,7 +1257,10 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 
 		// Use the dominant face normal to select an adjacent grid cell. The
 		// terrain stays smooth, while all placed cubes remain globally aligned.
-		Cell = WorldPositionToBlockCell(Hit.ImpactPoint) + FaceStep;
+		// Bias just inside the terrain before flooring so an exact grid-plane
+		// hit chooses the cell on the solid side, then step outward one cell.
+		const float GridBias = FMath::Max(0.05f, Step * 0.001f);
+		Cell = WorldPositionToBlockCell(Hit.ImpactPoint - FaceDirection * GridBias) + FaceStep;
 	}
 
 	CubeWorldOrigin = FVector(
