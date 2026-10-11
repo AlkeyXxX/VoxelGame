@@ -58,11 +58,22 @@ namespace
 		const FBox Bounds(WorldMin, WorldMin + FVector(NodeSize));
 		const float SplitDistance = NodeSize * Settings.SplitDistanceMultiplier;
 
-		const bool bShouldSplit =
-			Node.Lod > 0 &&
+		const bool bMustSplitForLeafLod = Node.Lod > Settings.MaxLod;
+		const bool bWithinSplitDistance =
 			Bounds.ComputeSquaredDistanceToPoint(CameraWorldLocation) <
-				FMath::Square(SplitDistance) &&
-			OutLeaves.Num() + 8 <= Settings.MaxLeafCount;
+				FMath::Square(SplitDistance);
+		const bool bCanSplit =
+			Node.Lod > 0 && OutLeaves.Num() + 8 <= Settings.MaxLeafCount;
+
+		// A larger root window must still be subdivided until every rendered
+		// leaf is at or below MaxLod, even when it is far from the camera.
+		if (bMustSplitForLeafLod && !bCanSplit)
+		{
+			return false;
+		}
+
+		const bool bShouldSplit =
+			bCanSplit && (bMustSplitForLeafLod || bWithinSplitDistance);
 
 		if (!bShouldSplit)
 		{
@@ -286,14 +297,18 @@ bool FSVoxelOctreeSelector::BuildBalancedLeaves(
 
 	FSVoxelOctreeSelectionSettings Settings = InSettings;
 	Settings.MaxLod = FMath::Clamp(Settings.MaxLod, 0, 10);
+	Settings.RootLod = FMath::Clamp(
+		Settings.RootLod < 0 ? Settings.MaxLod : Settings.RootLod,
+		Settings.MaxLod,
+		10);
 	Settings.SplitDistanceMultiplier = FMath::Max(0.01f, Settings.SplitDistanceMultiplier);
 	Settings.MaxLeafCount = FMath::Max(1, Settings.MaxLeafCount);
 
-	const int32 RootSpan = Settings.CellsPerAxis * (1 << Settings.MaxLod);
+	const int32 RootSpan = Settings.CellsPerAxis * (1 << Settings.RootLod);
 	OutLeaves.Reserve(FMath::Min(Settings.MaxLeafCount, 4096));
 
 	if (!SelectNode(
-		FSVoxelOctreeNode(Settings.RootOriginCells, Settings.MaxLod),
+		FSVoxelOctreeNode(Settings.RootOriginCells, Settings.RootLod),
 		CameraWorldLocation,
 		Settings,
 		OutLeaves))
@@ -336,7 +351,8 @@ bool FSVoxelOctreeSelector::BuildTransitionFaceMasks(
 	int32 CellsPerAxis,
 	int32 MaxLod,
 	TArray<uint8>& OutFaceMasks,
-	const FIntVector& RootOriginCells)
+	const FIntVector& RootOriginCells,
+	int32 RootLod)
 {
 	OutFaceMasks.Reset();
 
@@ -346,7 +362,8 @@ bool FSVoxelOctreeSelector::BuildTransitionFaceMasks(
 	}
 
 	MaxLod = FMath::Clamp(MaxLod, 0, 10);
-	const int32 RootSpan = CellsPerAxis * (1 << MaxLod);
+	RootLod = FMath::Clamp(RootLod < 0 ? MaxLod : RootLod, MaxLod, 10);
+	const int32 RootSpan = CellsPerAxis * (1 << RootLod);
 
 	TArray<FSVoxelOctreeNode> OrderedLeaves = Leaves;
 	FSVoxelNodeLookup Lookup;
