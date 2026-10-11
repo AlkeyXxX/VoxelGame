@@ -680,20 +680,6 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 	}
 
 	const float MaxDistance = FMath::Max(100.0f, InteractionDistance);
-	if (GetWorld()->LineTraceSingleByChannel(
-		OutHit,
-		RayStart,
-		RayStart + RayDirection * MaxDistance,
-		ECC_Visibility,
-		Params))
-	{
-		return true;
-	}
-
-	// Complex triangle collision can reject back-face rays on a terrain underside.
-	// If the ordinary physics trace misses, march the same signed-density field
-	// used by the mesher. This is a rare fallback only; normal interaction stays
-	// on the cheap collision-query path.
 	const FVector Direction = RayDirection.GetSafeNormal();
 	const float MarchStep = FMath::Clamp(GetEffectiveBlockSize() * 0.25f, 5.0f, 20.0f);
 	const FSVoxelGenerationSettings DensitySettings = MakeBlockQuerySettings();
@@ -705,6 +691,52 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 			static_cast<double>(Position.Z),
 			DensitySettings);
 	};
+
+	FHitResult PhysicalHit;
+	if (GetWorld()->LineTraceSingleByChannel(
+		PhysicalHit,
+		RayStart,
+		RayStart + Direction * MaxDistance,
+		ECC_Visibility,
+		Params))
+	{
+		// Cubes have exact box geometry and do not depend on terrain recooking.
+		if (Cast<ASmoothVoxelPlacedCubeBlock>(PhysicalHit.GetActor()))
+		{
+			OutHit = PhysicalHit;
+			return true;
+		}
+
+		if (!Cast<ASmoothVoxelTransvoxelChunk>(PhysicalHit.GetActor()))
+		{
+			// Preserve ordinary interaction behaviour for non-terrain blockers.
+			OutHit = PhysicalHit;
+			return true;
+		}
+
+		// Async mesh collision can lag one or more mining edits. Accept the
+		// physical terrain hit only if its normal crosses the current density
+		// isosurface. Otherwise ignore the stale face and ray-march the current
+		// immutable edit snapshot below, so rapid hits cannot mine through old
+		// collision or become stuck on an already-air triangle.
+		const FVector ProbeNormal = PhysicalHit.ImpactNormal.GetSafeNormal();
+		const float ProbeDistance = FMath::Max(5.0f, GetEffectiveBlockSize() * 0.25f);
+		const float DensityPlus = SampleRayDensity(
+			PhysicalHit.ImpactPoint + ProbeNormal * ProbeDistance);
+		const float DensityMinus = SampleRayDensity(
+			PhysicalHit.ImpactPoint - ProbeNormal * ProbeDistance);
+		const bool bCurrentSurfaceCrossing =
+			(DensityPlus > DensitySettings.IsoLevel) !=
+			(DensityMinus > DensitySettings.IsoLevel);
+		if (bCurrentSurfaceCrossing)
+		{
+			OutHit = PhysicalHit;
+			return true;
+		}
+	}
+
+	// Physics missed or reported a stale face: ray-march the exact same density
+	// snapshot as mesh generation. This also handles underside mining reliably.
 	float PreviousDistance = 0.0f;
 	float PreviousDensity = SampleRayDensity(RayStart);
 	float HitDistance = -1.0f;
