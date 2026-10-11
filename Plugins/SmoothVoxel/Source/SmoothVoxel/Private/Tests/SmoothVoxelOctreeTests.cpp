@@ -384,4 +384,48 @@ bool FSmoothVoxelLargeCoordinateSamplingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelMiningCellCutTest,
+	"SmoothVoxel.Density.MiningRemovesOneAlignedCell",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelMiningCellCutTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.BaseVoxelSize = 100.0f;
+	Settings.VoxelSize = 100.0f;
+	Settings.BaseHeight = 1000.0f;
+	Settings.HeightAmplitude = 0.0f;
+	Settings.DetailAmplitude = 0.0f;
+	Settings.NoiseScale = 0.0f;
+	Settings.DetailScale = 0.0f;
+	Settings.bEnableCaves = false;
+
+	const float SolidBeforeCut = FSVoxelGenerator::SampleDensity(50.0, 50.0, 50.0, Settings);
+	TestTrue(TEXT("Unmined terrain is solid"), SolidBeforeCut > 0.0f);
+
+	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedCells =
+		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
+	MinedCells->Add(FIntVector(0, 0, 0));
+	Settings.MinedNodes = MinedCells;
+
+	const float InsideCut = FSVoxelGenerator::SampleDensity(50.0, 50.0, 50.0, Settings);
+	const float AdjacentCell = FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, Settings);
+	TestTrue(TEXT("The selected voxel cell becomes air"), InsideCut < 0.0f);
+	TestTrue(TEXT("The neighbouring cell remains solid"), AdjacentCell > 0.0f);
+
+	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEdits =
+		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
+	BlockEdits->Add(FIntVector(1, 0, 0), int8(2));
+	Settings.BlockEdits = BlockEdits;
+	const float DensityWithPlacedCube =
+		FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, Settings);
+	TestTrue(
+		TEXT("A placed hard cube does not carve the procedural density field"),
+		FMath::IsNearlyEqual(DensityWithPlacedCube, AdjacentCell, KINDA_SMALL_NUMBER));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
