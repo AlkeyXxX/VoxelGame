@@ -747,6 +747,20 @@ bool FSmoothVoxelHardCubeCavityTrianglesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Cavity mesh triangle count must be divisible by three"),
 		Mesh.Triangles.Num() % 3, 0);
 
+	bool bPreservedSubTenthCentimetreIntersection = false;
+	for (const FVector& Vertex : Mesh.Vertices)
+	{
+		const float DistanceToCellPlane = FMath::Abs(Vertex.X - 100.0f);
+		if (DistanceToCellPlane > 0.01f && DistanceToCellPlane < 0.06f)
+		{
+			bPreservedSubTenthCentimetreIntersection = true;
+			break;
+		}
+	}
+	TestTrue(
+		TEXT("The 0.05 cm hard-cavity inset must remain distinct from the exact 100 cm grid plane"),
+		bPreservedSubTenthCentimetreIntersection);
+
 	bool bAllIndicesValid = true;
 	bool bNoDuplicateIndices = true;
 	bool bNoZeroAreaTriangles = true;
