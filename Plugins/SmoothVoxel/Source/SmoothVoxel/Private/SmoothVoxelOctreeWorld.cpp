@@ -451,7 +451,6 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.Seed = Seed;
 	Settings.BaseHeight = BaseHeight;
 	Settings.HeightAmplitude = HeightAmplitude;
-
 	Settings.NoiseScale = NoiseScale;
 	Settings.DetailScale = DetailScale;
 
@@ -467,13 +466,17 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.CaveStrength = CaveStrength;
 	Settings.ChunkWorldOrigin = ChunkOrigin;
 
-	// Only carry edits near this chunk into the worker snapshot. Without this
-	// spatial filtering, every unrelated chunk generated after a single edit
-	// would pay for edit-map lookups at every density sample.
-	if (bFilterBlockEdits && BlockEditSnapshot.IsValid() && BlockEditSnapshot->Num() > 0)
+	const bool bHasBlockEdits =
+		BlockEditSnapshot.IsValid() && BlockEditSnapshot->Num() > 0;
+	const bool bHasMinedNodes =
+		MinedNodeSnapshot.IsValid() && MinedNodeSnapshot->Num() > 0;
+	if (bFilterBlockEdits && (bHasBlockEdits || bHasMinedNodes))
 	{
 		const double EditGridStep = FMath::Max(1.0, static_cast<double>(EffectiveBaseVoxelSize));
-		const double Padding = static_cast<double>(VoxelSize) + EditGridStep;
+		// A mined node sits on a lattice corner, and its SDF reaches one base
+		// voxel in each direction. Include an extra base step so every LOD and
+		// every face-neighbour samples the identical edit field at shared borders.
+		const double Padding = static_cast<double>(VoxelSize) + EditGridStep * 1.5;
 		const double MinX = static_cast<double>(ChunkOrigin.X) - Padding;
 		const double MinY = static_cast<double>(ChunkOrigin.Y) - Padding;
 		const double MinZ = static_cast<double>(ChunkOrigin.Z) - Padding;
@@ -486,42 +489,69 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 
 		FSVoxelBlockEditMap LocalEdits;
 		FSVoxelBlockEditCenterMap LocalEditCenters;
-		for (const TPair<FIntVector, int8>& Edit : *BlockEditSnapshot)
+		if (bHasBlockEdits)
 		{
-			double EditX = (static_cast<double>(Edit.Key.X) + 0.5) * EditGridStep;
-			double EditY = (static_cast<double>(Edit.Key.Y) + 0.5) * EditGridStep;
-			double EditZ = (static_cast<double>(Edit.Key.Z) + 0.5) * EditGridStep;
-			if (BlockEditCenterSnapshot.IsValid())
+			for (const TPair<FIntVector, int8>& Edit : *BlockEditSnapshot)
 			{
-				if (const FVector* EditCenter = BlockEditCenterSnapshot->Find(Edit.Key))
-				{
-					EditX = EditCenter->X;
-					EditY = EditCenter->Y;
-					EditZ = EditCenter->Z;
-				}
-			}
-			if (EditX >= MinX && EditX <= MaxX &&
-				EditY >= MinY && EditY <= MaxY &&
-				EditZ >= MinZ && EditZ <= MaxZ)
-			{
-				LocalEdits.Add(Edit.Key, Edit.Value);
+				double EditX = (static_cast<double>(Edit.Key.X) + 0.5) * EditGridStep;
+				double EditY = (static_cast<double>(Edit.Key.Y) + 0.5) * EditGridStep;
+				double EditZ = (static_cast<double>(Edit.Key.Z) + 0.5) * EditGridStep;
 				if (BlockEditCenterSnapshot.IsValid())
 				{
 					if (const FVector* EditCenter = BlockEditCenterSnapshot->Find(Edit.Key))
 					{
-						LocalEditCenters.Add(Edit.Key, *EditCenter);
+						EditX = EditCenter->X;
+						EditY = EditCenter->Y;
+						EditZ = EditCenter->Z;
+					}
+				}
+				if (EditX >= MinX && EditX <= MaxX &&
+					EditY >= MinY && EditY <= MaxY &&
+					EditZ >= MinZ && EditZ <= MaxZ)
+				{
+					LocalEdits.Add(Edit.Key, Edit.Value);
+					if (BlockEditCenterSnapshot.IsValid())
+					{
+						if (const FVector* EditCenter = BlockEditCenterSnapshot->Find(Edit.Key))
+						{
+							LocalEditCenters.Add(Edit.Key, *EditCenter);
+						}
 					}
 				}
 			}
 		}
+
+		FSVoxelMinedNodeSet LocalMinedNodes;
+		if (bHasMinedNodes)
+		{
+			for (const FIntVector& Node : *MinedNodeSnapshot)
+			{
+				const double NodeX = static_cast<double>(Node.X) * EditGridStep;
+				const double NodeY = static_cast<double>(Node.Y) * EditGridStep;
+				const double NodeZ = static_cast<double>(Node.Z) * EditGridStep;
+				if (NodeX >= MinX && NodeX <= MaxX &&
+					NodeY >= MinY && NodeY <= MaxY &&
+					NodeZ >= MinZ && NodeZ <= MaxZ)
+				{
+					LocalMinedNodes.Add(Node);
+				}
+			}
+		}
+
 		if (LocalEdits.Num() > 0)
 		{
-			Settings.BlockEdits = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(LocalEdits);
-			if (LocalEditCenters.Num() > 0)
-			{
-				Settings.BlockEditCenters =
-					MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(LocalEditCenters);
-			}
+			Settings.BlockEdits =
+				MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(LocalEdits);
+		}
+		if (LocalEditCenters.Num() > 0)
+		{
+			Settings.BlockEditCenters =
+				MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(LocalEditCenters);
+		}
+		if (LocalMinedNodes.Num() > 0)
+		{
+			Settings.MinedNodes =
+				MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(LocalMinedNodes);
 		}
 	}
 	return Settings;
@@ -555,10 +585,10 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() cons
 	const float Step = GetEffectiveBlockSize();
 	FSVoxelGenerationSettings Settings =
 		MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step, false);
-	// Point queries for interaction can occur anywhere in the finite world, so
-	// use the complete edit snapshot rather than a per-chunk filtered subset.
+	// Interaction probes need the complete immutable world snapshots.
 	Settings.BlockEdits = BlockEditSnapshot;
 	Settings.BlockEditCenters = BlockEditCenterSnapshot;
+	Settings.MinedNodes = MinedNodeSnapshot;
 	return Settings;
 }
 
