@@ -187,6 +187,12 @@ public:
 		double WorldY,
 		const FSVoxelGenerationSettings& Settings);
 
+	/** Deterministic location of the POI candidate whose grid cell contains this world position. */
+	static FVector2D SamplePOISitePosition(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
 	/** 0..1: high values indicate a generated flat clearing suitable for a POI. */
 	static float SamplePOISuitability(
 		double WorldX,
