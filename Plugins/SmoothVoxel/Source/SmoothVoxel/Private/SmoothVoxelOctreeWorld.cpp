@@ -437,7 +437,8 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	const FVector& ChunkOrigin,
 	const FIntVector& ChunkOriginCells,
 	float EffectiveBaseVoxelSize,
-	float VoxelSize) const
+	float VoxelSize,
+	bool bFilterBlockEdits) const
 {
 	FSVoxelGenerationSettings Settings;
 	Settings.CellsPerAxis = CellsPerAxis;
@@ -469,7 +470,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	// Only carry edits near this chunk into the worker snapshot. Without this
 	// spatial filtering, every unrelated chunk generated after a single edit
 	// would pay for edit-map lookups at every density sample.
-	if (BlockEditSnapshot.IsValid() && BlockEditSnapshot->Num() > 0)
+	if (bFilterBlockEdits && BlockEditSnapshot.IsValid() && BlockEditSnapshot->Num() > 0)
 	{
 		const double EditGridStep = FMath::Max(1.0, static_cast<double>(EffectiveBaseVoxelSize));
 		const double Padding = static_cast<double>(VoxelSize) + EditGridStep;
@@ -553,7 +554,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() cons
 {
 	const float Step = GetEffectiveBlockSize();
 	FSVoxelGenerationSettings Settings =
-		MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step);
+		MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step, false);
 	// Point queries for interaction can occur anywhere in the finite world, so
 	// use the complete edit snapshot rather than a per-chunk filtered subset.
 	Settings.BlockEdits = BlockEditSnapshot;
