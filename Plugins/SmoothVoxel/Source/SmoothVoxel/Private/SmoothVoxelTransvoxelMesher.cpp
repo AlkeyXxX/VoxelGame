@@ -116,6 +116,13 @@ namespace
 		{
 			for (const TPair<FIntVector, int8>& Edit : *Settings.BlockEdits)
 			{
+				// A hard cube (state +2) is rendered as its own actor and does
+				// not alter terrain density. It must not switch surrounding
+				// terrain normals to the sharper edited-SDF sampling radius.
+				if (Edit.Value == 0 || Edit.Value == 2)
+				{
+					continue;
+				}
 				if (FMath::Abs(Edit.Key.X - CellX) <= 2 &&
 					FMath::Abs(Edit.Key.Y - CellY) <= 2 &&
 					FMath::Abs(Edit.Key.Z - CellZ) <= 2)
@@ -132,9 +139,13 @@ namespace
 			{
 				for (int32 DX = -2; DX <= 2; ++DX)
 				{
-					if (Settings.BlockEdits->Contains(FIntVector(CellX + DX, CellY + DY, CellZ + DZ)))
+					if (const int8* EditState = Settings.BlockEdits->Find(
+						FIntVector(CellX + DX, CellY + DY, CellZ + DZ)))
 					{
-						return true;
+						if (*EditState != 0 && *EditState != 2)
+						{
+							return true;
+						}
 					}
 				}
 			}
