@@ -144,8 +144,8 @@ public:
 };
 
 /**
- * Separate opt-in octree terrain manager. Existing AVoxelWorld generation is
- * not changed: place this actor in a test level to exercise the new path.
+ * Primary procedural world. Owns Octree selection, Transvoxel mesh streaming,
+ * biome sampling, and block editing without depending on the legacy AVoxelWorld.
  */
 UCLASS(BlueprintType, Blueprintable)
 class SMOOTHVOXEL_API ASmoothVoxelOctreeWorld : public AActor
