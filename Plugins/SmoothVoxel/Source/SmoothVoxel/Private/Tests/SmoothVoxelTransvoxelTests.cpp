@@ -636,4 +636,48 @@ bool FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest::RunTest(const FString& Para
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelMixedBoundaryOffsetTest,
+	"SmoothVoxel.Transvoxel.TransitionOffsetPreservesAdjacentSameLodFace",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelMixedBoundaryOffsetTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.ChunkWorldOrigin = FVector::ZeroVector;
+	Settings.BaseHeight = 75.0f;
+	Settings.HeightAmplitude = 0.0f;
+	Settings.DetailAmplitude = 0.0f;
+	Settings.BottomDepth = 2000.0f;
+	Settings.bEnableCaves = false;
+	Settings.IsoLevel = 0.0f;
+
+	constexpr int32 CellsPerAxis = 4;
+	constexpr float CoarseStep = 200.0f;
+	const float ChunkSize = CellsPerAxis * CoarseStep;
+
+	// The -Y face transitions to finer terrain, while +X remains adjacent to
+	// a same-LOD chunk. Boundary vertices must move for -Y without leaving +X.
+	FSVoxelMeshData Mesh;
+	FSVoxelTransvoxelMesher::Generate(
+		Settings, CellsPerAxis, CoarseStep, SVoxelTransitionFace_NegativeY, Mesh);
+
+	bool bFoundOffsetAtMixedFaceJunction = false;
+	for (const FVector& Vertex : Mesh.Vertices)
+	{
+		if (FMath::IsNearlyEqual(Vertex.X, ChunkSize, 0.01f) &&
+			FMath::IsNearlyEqual(Vertex.Y, CoarseStep * 0.25f, 0.01f) &&
+			FMath::IsNearlyEqual(Vertex.Z, Settings.BaseHeight, 0.01f))
+		{
+			bFoundOffsetAtMixedFaceJunction = true;
+			break;
+		}
+	}
+
+	TestTrue(
+		TEXT("A vertex on a same-LOD face must retain that face while still receiving the adjacent LOD transition offset"),
+		bFoundOffsetAtMixedFaceJunction);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
