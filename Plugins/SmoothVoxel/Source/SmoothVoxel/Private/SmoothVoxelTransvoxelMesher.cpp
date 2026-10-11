@@ -37,6 +37,45 @@ namespace
 		return X + Y * N + Z * N * N;
 	}
 
+	bool HasBlockEditNearPosition(
+		const FVector& LocalPosition,
+		const FSVoxelGenerationSettings& Settings)
+	{
+		if (!Settings.BlockEdits.IsValid() || Settings.BlockEdits->Num() == 0)
+		{
+			return false;
+		}
+
+		const double BaseStep = FMath::Max(1.0, static_cast<double>(Settings.BaseVoxelSize));
+		const double WorldX = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep + LocalPosition.X
+			: static_cast<double>(Settings.ChunkWorldOrigin.X) + LocalPosition.X;
+		const double WorldY = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep + LocalPosition.Y
+			: static_cast<double>(Settings.ChunkWorldOrigin.Y) + LocalPosition.Y;
+		const double WorldZ = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Z) * BaseStep + LocalPosition.Z
+			: static_cast<double>(Settings.ChunkWorldOrigin.Z) + LocalPosition.Z;
+
+		const int32 CellX = static_cast<int32>(std::floor(WorldX / BaseStep));
+		const int32 CellY = static_cast<int32>(std::floor(WorldY / BaseStep));
+		const int32 CellZ = static_cast<int32>(std::floor(WorldZ / BaseStep));
+		for (int32 DZ = -1; DZ <= 1; ++DZ)
+		{
+			for (int32 DY = -1; DY <= 1; ++DY)
+			{
+				for (int32 DX = -1; DX <= 1; ++DX)
+				{
+					if (Settings.BlockEdits->Contains(FIntVector(CellX + DX, CellY + DY, CellZ + DZ)))
+					{
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
 	FVector SampleOutwardNormal(
 		const FVector& LocalPosition,
 		const FSVoxelGenerationSettings& Settings,
@@ -52,14 +91,13 @@ namespace
 		const double HeightYM = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
 			LocalPosition - FVector(0.0f, H, 0.0f), Settings);
 
-		const bool bHasBlockEdits =
-			Settings.BlockEdits.IsValid() && Settings.BlockEdits->Num() > 0;
+		const bool bNearBlockEdit = HasBlockEditNearPosition(LocalPosition, Settings);
 
 		// A plain height field has an inexpensive analytical finite-difference
 		// normal. Once mining/placement has modified the SDF, that shortcut is
 		// no longer valid: it ignores the cut walls and made freshly exposed
 		// triangles shade as if the original hill were still present.
-		if ((!Settings.bEnableCaves || Settings.CaveStrength <= 0.0f) && !bHasBlockEdits)
+		if ((!Settings.bEnableCaves || Settings.CaveStrength <= 0.0f) && !bNearBlockEdit)
 		{
 			return FVector(
 				-static_cast<float>(HeightXP - HeightXM),
