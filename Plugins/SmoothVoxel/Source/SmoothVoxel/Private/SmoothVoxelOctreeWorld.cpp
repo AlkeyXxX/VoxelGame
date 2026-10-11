@@ -833,14 +833,13 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		EditState = bRemoveBlock ? int8(-5) : (bSmoothBlock ? int8(1) : int8(2));
 	}
 
-	// Breaking a placed hard cube leaves its cell explicitly empty. The
-	// placement API only accepts an air cell, so dropping the edit here would
-	// let the procedural field refill that cell and create apparent block dupes.
+	// The edit map also tracks explicit legacy air cuts. Hard cubes are
+	// separately rendered and never alter the density field by themselves.
 
 	if (bRemoveBlock)
 	{
-		// Leave an explicit air override so procedural terrain cannot refill a
-		// mined cell when adjacent chunks rebuild.
+		// Explicit removals without a placed cube leave an air override. When
+		// breaking a cube, the saved pre-placement edit is restored below instead.
 		if (IsValid(ExistingCube))
 		{
 			ExistingCube->Destroy();
@@ -868,8 +867,9 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 	}
 	else
 	{
-		// Hard blocks reserve an air-shaped cell in the terrain SDF; their actual
-		// visible/collidable shape is a separate flat-shaded cube mesh.
+		// Hard blocks reserve a logical cell and use a separate flat-shaded cube
+		// mesh. State +2 is intentionally ignored by the terrain density sampler,
+		// so placing a cube cannot excavate soil underneath it.
 		ASmoothVoxelPlacedCubeBlock* Cube = ExistingCube;
 		if (!IsValid(Cube))
 		{
@@ -933,9 +933,8 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		EditState = EditStateOverride != 0 ? EditStateOverride : int8(2);
 	}
 
-	// Placing a block must not undo terrain mining. Mined terrain nodes are
-	// persistent world edits and remain carved out underneath/around the placed
-	// block; otherwise placement can regenerate grass/soil and duplicate drops.
+	// Mined-cell cuts are persistent terrain edits, independent from hard-cube
+	// occupancy. A cube can cover an already mined cell without restoring it.
 
 	if (bRemovingPlacedCube)
 	{
