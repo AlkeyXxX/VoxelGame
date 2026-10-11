@@ -52,6 +52,13 @@ struct FSVoxelGenerationSettings
 	float DetailScale = 0.0000375f;
 	float DetailAmplitude = 60.0f;
 
+	// Seed-stable river network shared by every chunk and every LOD. River
+	// half-width and depth are centimetres in world space.
+	bool bEnableRivers = true;
+	float RiverScale = 0.00001f;
+	float RiverHalfWidth = 7500.0f;
+	float RiverDepth = 350.0f;
+
 	// Solid bottom
 	float BottomDepth = 2000.0f;
 
@@ -97,6 +104,12 @@ public:
 
 	/** Evaluate the deterministic world-space terrain surface height for a column. */
 	static double SampleSurfaceHeight(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
+	/** Deterministic 0..1 river-channel mask used by both terrain carving and water rendering. */
+	static float SampleRiverInfluence(
 		double WorldX,
 		double WorldY,
 		const FSVoxelGenerationSettings& Settings);
