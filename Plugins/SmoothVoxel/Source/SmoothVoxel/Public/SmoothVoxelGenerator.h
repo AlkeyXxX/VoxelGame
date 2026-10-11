@@ -68,6 +68,12 @@ public:
 		const FVector& LocalPosition,
 		const FSVoxelGenerationSettings& Settings);
 
+	/** Evaluate the deterministic world-space terrain surface height for a column. */
+	static double SampleSurfaceHeight(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
 	/** Height-only surface sample, shared by every Z sample in one vertical column. */
 	static double SampleSurfaceHeightAtChunkLocal(
 		const FVector& LocalPosition,
