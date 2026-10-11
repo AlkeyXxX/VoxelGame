@@ -415,15 +415,20 @@ bool FSmoothVoxelMiningCellCutTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The selected voxel cell becomes air"), InsideCut < 0.0f);
 	TestTrue(TEXT("The neighbouring cell remains solid"), AdjacentCell > 0.0f);
 
+	FSVoxelGenerationSettings PlacementSettings = Settings;
+	PlacementSettings.MinedNodes.Reset();
+	const float TerrainBeforePlacement =
+		FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, PlacementSettings);
+
 	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEdits =
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
 	BlockEdits->Add(FIntVector(1, 0, 0), int8(2));
-	Settings.BlockEdits = BlockEdits;
+	PlacementSettings.BlockEdits = BlockEdits;
 	const float DensityWithPlacedCube =
-		FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, Settings);
+		FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, PlacementSettings);
 	TestTrue(
 		TEXT("A placed hard cube does not carve the procedural density field"),
-		FMath::IsNearlyEqual(DensityWithPlacedCube, AdjacentCell, KINDA_SMALL_NUMBER));
+		FMath::IsNearlyEqual(DensityWithPlacedCube, TerrainBeforePlacement, KINDA_SMALL_NUMBER));
 
 	return true;
 }
