@@ -33,9 +33,9 @@ The rewrite lives beside the current world and does not replace the legacy
    fixed world-space gradient step across all LODs; world-XY UVs stay stable and
    tangent frames derive from that same projection at every vertex.
 8. Terrain noise bandwidth is clamped globally for the coarsest supported sample
-   step (maximum leaf LOD 4 / 16 m per cell). The streaming root has a separate
-   LOD (default 6), retaining a 2.048 km-wide window without allowing rendered
-   chunks to exceed the 16 m sample spacing.
+   step (maximum leaf LOD 4 / about 16 m per cell). The fixed world root defaults
+   to LOD 7 and exactly 4 km × 4 km horizontally; the effective base step is
+   reduced to fit the strict world-size limit without increasing leaf LOD.
 9. Completed CPU meshes are queued to the manager and only one procedural mesh
    section is committed on the game thread per frame. Worker concurrency is
    capped at two, and LOD reselection has a minimum 10 m movement threshold.
@@ -43,8 +43,9 @@ The rewrite lives beside the current world and does not replace the legacy
 ## Important current limitations
 
 The new mesher and octree selector are attached to a separate, opt-in terrain
-manager that follows a pawn or configured actor and streams chunks as the view
-moves. It rejects stale build results. On initial spawn, chunks become visible
+manager that uses the followed pawn or configured actor only to choose detail
+levels inside fixed world bounds. It does not move the world bounds or create
+new terrain outside that finite area. It rejects stale build results. On initial spawn, chunks become visible
 as they finish; during later LOD replacements, new chunks stay hidden until the
 full desired set is ready, then old leaves are retired and new leaves revealed
 together to avoid overlap and z-fighting between coarse parents and fine children.
