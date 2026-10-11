@@ -549,12 +549,35 @@ namespace
 			const FVector ExpectedNormal =
 				(CellNormals[A] + CellNormals[B] + CellNormals[C]).GetSafeNormal();
 
-			// Unreal's front-face convention for procedural triangles is opposite
-			// to the conventional cross-product direction. Keep supplied shading
-			// normals outward, but only use them for winding when the gradient is
-			// well-defined; an edited SDF can have a zero gradient at a corner.
-			if (ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
-				FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f)
+			// Orient each triangle against the actual signed-density field at its
+			// centroid. Averaged vertex normals can point the wrong way where a
+			// mining cavity meets the original hill, especially on an underside or
+			// at an octahedral corner; that is how back-face-culling made faces
+			// look invisible when mining upward.
+			const FVector TriangleCenter = (
+				CellLocalVertices[A] + CellLocalVertices[B] + CellLocalVertices[C]) / 3.0f;
+			const FVector RawFaceDirection = FaceNormal.GetSafeNormal();
+			const float OrientationProbe = FMath::Max(1.0f, Settings.VoxelSize * 0.02f);
+			const float DensityAlongRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
+				TriangleCenter + RawFaceDirection * OrientationProbe, Settings);
+			const float DensityAgainstRawNormal = FSVoxelGenerator::SampleDensityAtChunkLocal(
+				TriangleCenter - RawFaceDirection * OrientationProbe, Settings);
+
+			bool bReverseForUnrealFrontFace = false;
+			if (FMath::Abs(DensityAlongRawNormal - DensityAgainstRawNormal) > KINDA_SMALL_NUMBER)
+			{
+				// Positive density is solid, negative is air. A conventional cross
+				// pointing into air is outward; UE's procedural-mesh index winding
+				// must be the opposite direction, matching the existing UE4 test.
+				bReverseForUnrealFrontFace = DensityAlongRawNormal < DensityAgainstRawNormal;
+			}
+			else if (ExpectedNormal.SizeSquared() > SMALL_NUMBER)
+			{
+				bReverseForUnrealFrontFace =
+					FVector::DotProduct(FaceNormal, ExpectedNormal) > 0.0f;
+			}
+
+			if (bReverseForUnrealFrontFace)
 			{
 				Swap(B, C);
 			}
