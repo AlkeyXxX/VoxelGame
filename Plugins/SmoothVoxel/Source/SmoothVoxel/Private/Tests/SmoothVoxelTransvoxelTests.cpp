@@ -234,6 +234,51 @@ bool FSmoothVoxelTransvoxelSlopedFacesTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelSharedTransitionEdgeTest,
+	"SmoothVoxel.Transvoxel.MultiFaceTransitionSharesExactEdge",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelSharedTransitionEdgeTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.ChunkWorldOrigin = FVector::ZeroVector;
+	Settings.BaseHeight = 200.0f;
+	Settings.HeightAmplitude = 120.0f;
+	Settings.DetailAmplitude = 30.0f;
+	Settings.NoiseScale = 0.0008f;
+	Settings.DetailScale = 0.0006f;
+	Settings.BottomDepth = 2000.0f;
+	Settings.bEnableCaves = false;
+	Settings.IsoLevel = 0.0f;
+
+	const uint8 CornerMask = static_cast<uint8>(
+		SVoxelTransitionFace_PositiveX | SVoxelTransitionFace_NegativeY);
+	FSVoxelMeshData Mesh;
+	FSVoxelTransvoxelMesher::Generate(Settings, 8, 200.0f, CornerMask, Mesh);
+
+	const float ChunkSize = 1600.0f;
+	int32 EdgeVertices = 0;
+	for (const FVector& Vertex : Mesh.Vertices)
+	{
+		TestTrue(TEXT("Multi-face transition must not emit NaN vertices"), !Vertex.ContainsNaN());
+		if (FMath::IsNearlyEqual(Vertex.X, ChunkSize, 0.01f) &&
+			FMath::IsNearlyZero(Vertex.Y, 0.01f))
+		{
+			++EdgeVertices;
+		}
+	}
+
+	TestTrue(
+		TEXT("Adjacent transition faces must retain a shared exact edge at their intersection"),
+		EdgeVertices > 0);
+	TestEqual(TEXT("Every generated transition vertex has a normal"),
+		Mesh.Normals.Num(), Mesh.Vertices.Num());
+	TestEqual(TEXT("Every generated transition vertex has a tangent"),
+		Mesh.Tangents.Num(), Mesh.Vertices.Num());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest,
 	"SmoothVoxel.Transvoxel.SlopedCoarseFineSeam",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
