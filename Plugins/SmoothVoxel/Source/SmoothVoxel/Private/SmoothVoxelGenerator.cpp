@@ -97,11 +97,11 @@ namespace
 
         // A sample can be influenced by the eight grid cells that touch it.
         // Evaluating only these nearby edits avoids scanning the whole edit map.
-        for (int32 DZ = -1; DZ <= 0; ++DZ)
+        for (int32 DZ = -1; DZ <= 1; ++DZ)
         {
-            for (int32 DY = -1; DY <= 0; ++DY)
+            for (int32 DY = -1; DY <= 1; ++DY)
             {
-                for (int32 DX = -1; DX <= 0; ++DX)
+                for (int32 DX = -1; DX <= 1; ++DX)
                 {
                     const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
                     const int8* EditState = Settings.BlockEdits->Find(Cell);
