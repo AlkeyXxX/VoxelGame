@@ -181,36 +181,37 @@ namespace
         double CandidateSdfs[27];
         int32 CandidateCount = 0;
 
-        // Mining removes complete grid cells, not octahedral point-brushes.
-        // This produces flat floors and vertical walls for straight trenches
-        // and lets the player dig directly down while aiming at their feet.
+        // A mined sample removes one stable voxel-sized region centered exactly
+        // on a density lattice node. The one-node neighborhood matches the
+        // query radius and ensures every rebuilt LOD sees the same world-space
+        // modification instead of a hit-point-dependent diamond.
         if (bHasMinedNodes)
         {
+            const double MinedNodeRadius = Step * 1.0;
+            const double MinedNodeBlend = Step * 0.08;
             for (int32 DZ = -1; DZ <= 1; ++DZ)
             {
                 for (int32 DY = -1; DY <= 1; ++DY)
                 {
                     for (int32 DX = -1; DX <= 1; ++DX)
                     {
-                        const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
-                        if (!Settings.MinedNodes->Contains(Cell))
+                        const FIntVector Node(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        if (!Settings.MinedNodes->Contains(Node))
                         {
                             continue;
                         }
 
-                        const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
-                        const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
-                        const double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
-                        const double CellSdf = BoxSdf(
-                            X, Y, Z, CenterX, CenterY, CenterZ, Step * 0.5, 0.0);
-                        // Positive density means solid; min with the negative
-                        // box interior cuts out this exact axis-aligned cell.
-                        Density = FMath::Min(Density, static_cast<float>(CellSdf));
+                        const double NodeX = static_cast<double>(Node.X) * Step;
+                        const double NodeY = static_cast<double>(Node.Y) * Step;
+                        const double NodeZ = static_cast<double>(Node.Z) * Step;
+                        const double NodeSdf = OctahedronSdf(
+                            X, Y, Z, NodeX, NodeY, NodeZ, MinedNodeRadius);
+                        Density = static_cast<float>(SmoothMinimum(
+                            static_cast<double>(Density), NodeSdf, MinedNodeBlend));
                     }
                 }
             }
         }
-
 
         if (bHasBlockEdits)
         {
