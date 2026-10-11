@@ -288,8 +288,7 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 	const FIntVector& InCell,
 	float InBlockSize,
 	UMaterialInterface* InMaterial,
-	int32 InDamageStage,
-	const FVector* InWorldOriginOverride)
+	int32 InDamageStage)
 {
 	BlockType = InBlockType;
 	BlockCell = InCell;
@@ -305,7 +304,8 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 		static_cast<float>(InCell.X) * Size,
 		static_cast<float>(InCell.Y) * Size,
 		static_cast<float>(InCell.Z) * Size);
-	SetActorLocation(InWorldOriginOverride ? *InWorldOriginOverride : GridAlignedOrigin);
+	// Keep the actor transform consistent with the logical voxel cell.
+	SetActorLocation(GridAlignedOrigin);
 
 	if (!Mesh)
 	{
@@ -817,8 +817,7 @@ bool ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 	const FIntVector& Cell,
 	EVoxelBlock Block,
 	int8 EditStateOverride,
-	const FVector* EditCenterOverride,
-	const FVector* CubeWorldOriginOverride)
+	const FVector* EditCenterOverride)
 {
 	ASmoothVoxelPlacedCubeBlock* ExistingCube = PlacedCubeBlocks.FindRef(Cell);
 	const bool bRemoveBlock = Block == EVoxelBlock::Air;
@@ -918,17 +917,9 @@ bool ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 			}
 		}
 
-		const FVector ExistingCubeOrigin = !bCreatedCube
-			? Cube->GetActorLocation()
-			: FVector::ZeroVector;
-		const FVector* EffectiveCubeOrigin = CubeWorldOriginOverride;
-		if (!EffectiveCubeOrigin && !bCreatedCube)
-		{
-			EffectiveCubeOrigin = &ExistingCubeOrigin;
-		}
 		Cube->ConfigureBlock(
 			Block, Cell, GetEffectiveBlockSize(), TerrainMaterial,
-			Cube->GetDamageStage(), EffectiveCubeOrigin);
+			Cube->GetDamageStage());
 		EditedBlockCenters.Remove(Cell);
 		EditedBlockTypes.Add(Cell, Block);
 		EditState = EditStateOverride != 0 ? EditStateOverride : int8(2);
@@ -1122,10 +1113,9 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		if (HitCube->GetDamageStage() + 1 < HitsRequired)
 		{
 			const int32 NewDamageStage = HitCube->RegisterDamageHit();
-			const FVector CubeOrigin = HitCube->GetActorLocation();
 			HitCube->ConfigureBlock(
 				HitBlock, Cell, GetEffectiveBlockSize(), TerrainMaterial,
-				NewDamageStage, &CubeOrigin);
+				NewDamageStage);
 			return true;
 		}
 
@@ -1249,10 +1239,9 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 			return false;
 		}
 
-		// Use the actual origin rather than a snapped cell coordinate. Blocks
-		// attached to a terrain surface may be offset from the global voxel grid.
-		CubeWorldOrigin = HitCube->GetActorLocation() + FaceDirection * Step;
-		Cell = WorldPositionToBlockCell(CubeWorldOrigin);
+		// Continue from the cube's logical cell, not its transform. This keeps
+		// towers and walls aligned even when the ray hits an edge.
+		Cell = HitCube->BlockCell + FaceStep;
 	}
 	else
 	{
@@ -1262,13 +1251,15 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 			return false;
 		}
 
-		// Put the adjacent cube face directly on the terrain hit point. Snapping
-		// its origin to the global lattice can leave a half-cell gap on slopes.
-		// The terrain density is not altered to make room for this cube.
-		CubeWorldOrigin = Hit.ImpactPoint +
-			FaceDirection * (Step * 0.5f) - FVector(Step * 0.5f);
-		Cell = WorldPositionToBlockCell(CubeWorldOrigin);
+		// Use the dominant face normal to select an adjacent grid cell. The
+		// terrain stays smooth, while all placed cubes remain globally aligned.
+		Cell = WorldPositionToBlockCell(Hit.ImpactPoint) + FaceStep;
 	}
+
+	CubeWorldOrigin = FVector(
+		static_cast<float>(Cell.X) * Step,
+		static_cast<float>(Cell.Y) * Step,
+		static_cast<float>(Cell.Z) * Step);
 
 	// Keep the overlap guard as a safety net for stale or inconsistent edit
 	// state, while allowing exact face-to-face contact for stacking.
@@ -1315,7 +1306,7 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	// landscape to fit a cube. Terrain may overlap the cube around a curved
 	// slope, but the scalar field stays unchanged, so placing/breaking blocks
 	// cannot secretly mine or refill the ground.
-	if (!ApplyBlockCellEdit(Cell, BlockToPlace, 0, nullptr, &CubeWorldOrigin))
+	if (!ApplyBlockCellEdit(Cell, BlockToPlace))
 	{
 		return false;
 	}
