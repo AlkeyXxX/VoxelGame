@@ -557,8 +557,12 @@ float FSVoxelGenerator::SampleFlatlandInfluence(
     float TemperateWeight = 1.0f;
     SampleBiomeRegionWeights(
         X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
+    const float EffectiveFlatlandCoverage = FMath::Clamp(
+        FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f) *
+            FMath::Clamp(S.FlatlandCoverageMultiplier, 0.1f, 1.0f),
+        0.05f, 0.9f);
     const float NonDesertHillCoverage = FMath::Clamp(
-        1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
+        1.0f - EffectiveFlatlandCoverage, 0.0f, 0.95f);
     const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f);
     const float HillCoverage = FMath::Lerp(
         NonDesertHillCoverage, DesertHillCoverage, DesertWeight);
@@ -615,8 +619,12 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     (void)WinterBlend;
     (void)TemperateBlend;
 
+    const float EffectiveFlatlandCoverage = FMath::Clamp(
+        FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f) *
+            FMath::Clamp(S.FlatlandCoverageMultiplier, 0.1f, 1.0f),
+        0.05f, 0.9f);
     const float NonDesertHillCoverage = FMath::Clamp(
-        1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
+        1.0f - EffectiveFlatlandCoverage, 0.0f, 0.95f);
     const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f);
     const float HillCoverage = FMath::Lerp(
         NonDesertHillCoverage, DesertHillCoverage, DesertBlend);
@@ -652,6 +660,19 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     const double HillRelief = HillShape * static_cast<double>(FMath::Abs(S.HillHeight)) *
         static_cast<double>(HillBlend);
 
+    // Replace some perfect plains with broad, gentle rolls instead of turning
+    // every former flatland into a full-sized hill. The long wavelength keeps
+    // slopes mild enough for roads; the hill mask fades this relief smoothly
+    // where the larger hills begin.
+    const double GentleReliefNoise = FBM2D(
+        X * RegionScale * 0.40,
+        Y * RegionScale * 0.40,
+        S.Seed + 6311);
+    const double GentleRelief = GentleReliefNoise *
+        static_cast<double>(FMath::Abs(S.GentleReliefHeight)) *
+        (1.0 - static_cast<double>(HillBlend)) *
+        (1.0 - static_cast<double>(MountainBlend));
+
     // Mountain height is a separate, rare macro-form. Its broad noise is
     // continuous across chunks/LODs and cannot create narrow, jagged peaks.
     const double MountainRegionNoise = FBM2D(
@@ -670,7 +691,8 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         static_cast<double>(FMath::Abs(S.FlatlandNoiseAmplitude)) *
         1.5 * static_cast<double>(DesertBlend);
 
-    return static_cast<double>(S.BaseHeight) + MicroRelief + HillRelief + MountainLift + DuneLift;
+    return static_cast<double>(S.BaseHeight) + MicroRelief + HillRelief +
+        GentleRelief + MountainLift + DuneLift;
 }
 
 
