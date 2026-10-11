@@ -392,6 +392,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	const int32 OriginalNormalCount = Data.Normals.Num();
 	const int32 OriginalUVCount = Data.UV0.Num();
 	const int32 OriginalTangentCount = Data.Tangents.Num();
+	const int32 OriginalVertexColorCount = Data.VertexColors.Num();
 	FSVoxelMeshData EditedBackfaceData;
 	const int32 TwoSidedTriangleCount =
 		FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(PendingSettings, Data);
@@ -421,6 +422,10 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		{
 			EditedBackfaceData.Tangents.Add(Data.Tangents[Index]);
 		}
+		for (int32 Index = OriginalVertexColorCount; Index < Data.VertexColors.Num(); ++Index)
+		{
+			EditedBackfaceData.VertexColors.Add(Data.VertexColors[Index]);
+		}
 
 		// Strip the render-only copies back out of the main terrain data. Section
 		// zero retains the original collision topology; section one is visual only.
@@ -429,6 +434,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		Data.Normals.SetNum(OriginalNormalCount);
 		Data.UV0.SetNum(OriginalUVCount);
 		Data.Tangents.SetNum(OriginalTangentCount);
+		Data.VertexColors.SetNum(OriginalVertexColorCount);
 
 		UE_LOG(LogTemp, Verbose,
 			TEXT("SmoothVoxel: added render-only two-sided coverage for %d edited terrain triangles."),
@@ -450,7 +456,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			TArray<FVector2D>(),
 			TArray<FVector2D>(),
 			TArray<FVector2D>(),
-			TArray<FLinearColor>(),
+			Data.VertexColors,
 			Data.Tangents,
 			bCreateCollision);
 	}
@@ -466,7 +472,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			TArray<FVector2D>(),
 			TArray<FVector2D>(),
 			TArray<FVector2D>(),
-			TArray<FLinearColor>(),
+			EditedBackfaceData.VertexColors,
 			EditedBackfaceData.Tangents,
 			false);
 		Mesh->SetMaterial(1, Mesh->GetMaterial(0));
@@ -659,6 +665,28 @@ float ASmoothVoxelOctreeWorld::GetWorldSizeCentimeters() const
 	return GetWorldSizeCentimetersForPreset(WorldSize);
 }
 
+ESVoxelBiome ASmoothVoxelOctreeWorld::GetBiomeAtWorldPosition(const FVector& WorldPosition) const
+{
+	const float Step = FMath::Max(1.0f, BaseVoxelSize);
+	const FSVoxelGenerationSettings Settings =
+		MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step, false);
+	return FSVoxelGenerator::SampleBiome(
+		static_cast<double>(WorldPosition.X),
+		static_cast<double>(WorldPosition.Y),
+		Settings);
+}
+
+float ASmoothVoxelOctreeWorld::GetPOISuitabilityAtWorldPosition(const FVector& WorldPosition) const
+{
+	const float Step = FMath::Max(1.0f, BaseVoxelSize);
+	const FSVoxelGenerationSettings Settings =
+		MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step, false);
+	return FSVoxelGenerator::SamplePOISuitability(
+		static_cast<double>(WorldPosition.X),
+		static_cast<double>(WorldPosition.Y),
+		Settings);
+}
+
 float ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(
 	ESmoothVoxelWorldSize InWorldSize)
 {
@@ -732,6 +760,12 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.NormalSampleStep = FMath::Max(5.0f, EffectiveBaseVoxelSize * 0.5f);
 	Settings.IsoLevel = 0.0f;
 	Settings.Seed = Seed;
+	Settings.bEnableBiomes = bEnableBiomes;
+	Settings.BiomeScale = BiomeScale;
+	Settings.bEnablePOIPlateaus = bEnablePOIPlateaus;
+	Settings.POISiteSpacing = POISiteSpacing;
+	Settings.POIPlateauRadius = POIPlateauRadius;
+	Settings.POIPlateauBlendDistance = POIPlateauBlendDistance;
 	Settings.BaseHeight = BaseHeight;
 	Settings.HeightAmplitude = HeightAmplitude;
 	Settings.NoiseScale = NoiseScale;
@@ -2053,6 +2087,36 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 		{
 			Chunk->SetTerrainMaterial(TerrainMaterial);
 		}
+
+		FSVoxelGenerationSettings BiomeSettings;
+		BiomeSettings.Seed = Seed;
+		BiomeSettings.bEnableBiomes = bEnableBiomes;
+		BiomeSettings.BiomeScale = BiomeScale;
+		const double ChunkCenterX = static_cast<double>(ChunkOrigin->X) +
+			static_cast<double>(DesiredCellsPerAxis) * static_cast<double>(*VoxelSize) * 0.5;
+		const double ChunkCenterY = static_cast<double>(ChunkOrigin->Y) +
+			static_cast<double>(DesiredCellsPerAxis) * static_cast<double>(*VoxelSize) * 0.5;
+		UMaterialInterface* SelectedBiomeMaterial = TerrainMaterial;
+		switch (FSVoxelGenerator::SampleBiome(ChunkCenterX, ChunkCenterY, BiomeSettings))
+		{
+		case ESVoxelBiome::Forest:
+			SelectedBiomeMaterial = ForestBiomeMaterial ? ForestBiomeMaterial : TerrainMaterial;
+			break;
+		case ESVoxelBiome::Desert:
+			SelectedBiomeMaterial = DesertBiomeMaterial ? DesertBiomeMaterial : TerrainMaterial;
+			break;
+		case ESVoxelBiome::Mountain:
+			SelectedBiomeMaterial = MountainBiomeMaterial ? MountainBiomeMaterial : TerrainMaterial;
+			break;
+		case ESVoxelBiome::Snow:
+			SelectedBiomeMaterial = SnowBiomeMaterial ? SnowBiomeMaterial : TerrainMaterial;
+			break;
+		case ESVoxelBiome::Plains:
+		default:
+			SelectedBiomeMaterial = PlainsBiomeMaterial ? PlainsBiomeMaterial : TerrainMaterial;
+			break;
+		}
+		Chunk->SetTerrainMaterial(SelectedBiomeMaterial);
 
 		if (bForceBuildDesiredSelection || !Chunk->IsConfiguredFor(
 			Node, DesiredCellsPerAxis, *ChunkOrigin, *FaceMask, *VoxelSize, *bCollision))
