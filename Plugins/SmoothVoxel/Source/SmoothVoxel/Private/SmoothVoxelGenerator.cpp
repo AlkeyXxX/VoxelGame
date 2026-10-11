@@ -792,10 +792,15 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     double Y,
     const FSVoxelGenerationSettings& S,
     float& OutInfluence,
-    float& OutSignedField)
+    float& OutSignedField,
+    float* OutBankInfluence)
 {
     OutInfluence = 0.0f;
     OutSignedField = 0.0f;
+    if (OutBankInfluence)
+    {
+        *OutBankInfluence = 0.0f;
+    }
     if (!S.bEnableRivers)
     {
         return;
@@ -823,9 +828,14 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
         (Y + WarpY * WarpDistance) * Scale,
         S.Seed + 8329);
 
-    // Convert world-space channel width into a dimensionless band around the
-    // field's zero-contour. Smooth falloff avoids hard cliffs at the carved banks.
+    // Convert channel and broad valley widths into dimensionless bands around
+    // the same signed field. The inner mask stays narrow enough for a riverbed;
+    // the outer bank mask spans tens of metres and is faded at its outer edge.
     const double Threshold = FMath::Clamp(HalfWidth * Scale * 2.0, 0.0001, 0.20);
+    const double BankHalfWidth = FMath::Max(HalfWidth * 10.0, 5000.0);
+    const double BankThreshold = FMath::Max(
+        Threshold,
+        FMath::Min(BankHalfWidth * Scale * 2.0, 0.20));
     const float T = FMath::Clamp(
         static_cast<float>(std::abs(Field) / Threshold),
         0.0f,
@@ -834,14 +844,28 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     OutInfluence = 1.0f - SmoothT;
     OutSignedField = static_cast<float>(Field);
 
+    if (OutBankInfluence)
+    {
+        const float BankDistance01 = FMath::Clamp(
+            static_cast<float>(std::abs(Field) / BankThreshold), 0.0f, 1.0f);
+        const float BankFadeT = FMath::Clamp((BankDistance01 - 0.70f) / 0.30f, 0.0f, 1.0f);
+        const float BankFade = BankFadeT * BankFadeT * (3.0f - 2.0f * BankFadeT);
+        *OutBankInfluence = 1.0f - BankFade;
+    }
+
     float DesertWeight = 0.0f;
     float WinterWeight = 0.0f;
     float TemperateWeight = 1.0f;
     SampleBiomeRegionWeights(
         X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
-    // Fade candidates through the same broad desert transition as terrain height,
-    // instead of cutting the river mesh off at a categorical biome edge.
-    OutInfluence *= (1.0f - DesertWeight);
+    // Fade river channels and valley shoulders through the same broad desert
+    // transition instead of cutting either off at a categorical biome edge.
+    const float NonDesertWeight = 1.0f - DesertWeight;
+    OutInfluence *= NonDesertWeight;
+    if (OutBankInfluence)
+    {
+        *OutBankInfluence *= NonDesertWeight;
+    }
 
     // Do not gate the channel by flatland coverage: at high hill coverage that
     // gate reduced the channel mask, so terrain could be cut without reaching
@@ -1060,10 +1084,49 @@ double FSVoxelGenerator::SampleSurfaceHeight(
 
     if (S.bEnableRivers)
     {
-        const double RiverInfluence = FMath::Clamp(
-            static_cast<double>(SampleRiverInfluence(X, Y, S)),
-            0.0,
-            1.0);
+        float RiverInfluence = 0.0f;
+        float RiverSignedField = 0.0f;
+        float RiverBankInfluence = 0.0f;
+        SampleRiverMaskAndField(
+            X, Y, S, RiverInfluence, RiverSignedField, &RiverBankInfluence);
+        RiverInfluence = FMath::Clamp(RiverInfluence, 0.0f, 1.0f);
+        RiverBankInfluence = FMath::Clamp(RiverBankInfluence, 0.0f, 1.0f);
+
+        // Carve a broad, smooth river valley into high ground before cutting the
+        // narrow water channel. The bank profile starts just above water level at
+        // the channel edge and rises smoothly back toward the surrounding hills.
+        // This turns a sharp canyon into sloping banks and lets hills split into
+        // two rounded shoulders when a river crosses a hilltop.
+        if (RiverBankInfluence > 0.0001f)
+        {
+            const double RiverScale = FMath::Max(
+                0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
+            const double RiverHalfWidth = FMath::Max(
+                0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
+            const double ChannelThreshold = FMath::Clamp(
+                RiverHalfWidth * RiverScale * 2.0, 0.0001, 0.20);
+            const double BankHalfWidth = FMath::Max(RiverHalfWidth * 10.0, 5000.0);
+            const double BankThreshold = FMath::Max(
+                ChannelThreshold,
+                FMath::Min(BankHalfWidth * RiverScale * 2.0, 0.20));
+            const double BankProgress = FMath::Clamp(
+                (std::abs(static_cast<double>(RiverSignedField)) - ChannelThreshold) /
+                    FMath::Max(0.0001, BankThreshold - ChannelThreshold),
+                0.0,
+                1.0);
+            const double SmoothBankProgress = BankProgress * BankProgress *
+                (3.0 - 2.0 * BankProgress);
+            const double BankRise = FMath::Clamp(
+                std::abs(static_cast<double>(S.HillHeight)) * 1.15, 1500.0, 7000.0);
+            const double BankProfileHeight = static_cast<double>(S.RiverWaterLevel) +
+                150.0 + BankRise * SmoothBankProgress;
+            const double CarvedBankHeight = FMath::Min(SurfaceHeight, BankProfileHeight);
+            SurfaceHeight = FMath::Lerp(
+                SurfaceHeight, CarvedBankHeight, static_cast<double>(RiverBankInfluence));
+        }
+
+        // Keep the actual narrow channel at its configured bed level. The broad
+        // bank profile affects adjacent terrain only, not the water-channel depth.
         const double RiverBedLevel = static_cast<double>(S.RiverWaterLevel) -
             std::abs(static_cast<double>(S.RiverDepth));
         SurfaceHeight = FMath::Lerp(SurfaceHeight, RiverBedLevel, RiverInfluence);
