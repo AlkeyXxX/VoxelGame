@@ -160,19 +160,21 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Water")
 	UProceduralMeshComponent* Mesh = nullptr;
 
-	/** Builds one perfectly level water sheet clipped visually by the terrain. */
+	/** Builds level lake/ocean water plus continuous, terrain-following river ribbons. */
 	void ConfigureSurface(
 		const FVector& WorldCenter,
 		float WorldSize,
 		float InSeaLevel,
 		float InTileSize,
 		UMaterialInterface* InMaterial,
+		const FSVoxelGenerationSettings& InGenerationSettings,
 		bool bEnableCollision);
 
 private:
 	void BuildSurfaceMesh(
 		float WorldSize,
 		float InTileSize,
+		const FSVoxelGenerationSettings& GenerationSettings,
 		bool bEnableCollision);
 
 	UPROPERTY()
@@ -185,6 +187,7 @@ private:
 	float ConfiguredWorldSize = -1.0f;
 	float ConfiguredSeaLevel = 0.0f;
 	float ConfiguredTileSize = 5000.0f;
+	FSVoxelGenerationSettings ConfiguredGenerationSettings;
 	bool bConfiguredCollision = false;
 	bool bHasConfiguration = false;
 };
