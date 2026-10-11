@@ -11,7 +11,7 @@ struct FSVoxelGenerationSettings
 
 	// World-space gradient distance shared by every LOD to keep surface normals
 	// consistent when adjacent chunks use different sample spacings.
-	float NormalSampleStep = 100.0f;
+	float NormalSampleStep = 50.0f;
 
 	float IsoLevel = 0.0f;
 
