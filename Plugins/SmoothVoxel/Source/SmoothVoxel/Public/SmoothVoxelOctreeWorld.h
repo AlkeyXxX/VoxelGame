@@ -304,6 +304,7 @@ private:
 		int8 EditStateOverride = 0,
 		const FVector* EditCenterOverride = nullptr);
 	void RebuildChunksNearEditedCell(const FIntVector& Cell, bool bGridNode = false);
+	void SchedulePostMiningMeshRepair(const FIntVector& Cell);
 
 	FSVoxelGenerationSettings MakeGenerationSettings(
 		const FVector& ChunkOrigin,
