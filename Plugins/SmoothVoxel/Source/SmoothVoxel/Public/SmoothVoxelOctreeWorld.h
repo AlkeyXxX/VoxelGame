@@ -160,7 +160,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Water")
 	UProceduralMeshComponent* Mesh = nullptr;
 
-	/** Builds level lake/ocean water plus continuous river ribbons near the terrain surface. */
+	/** Builds a level sea plane plus fixed-elevation rivers and sparse deterministic lakes. */
 	void ConfigureSurface(
 		const FVector& WorldCenter,
 		float WorldSize,
@@ -259,23 +259,53 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
 	int32 Seed = 1337;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
 	float BaseHeight = 900.0f;
 
-	/** Terrain relief amplitude in centimetres. 200 means only 2 m either side of BaseHeight. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
+	/** Legacy compatibility only; use HillHeight and MountainHeight for new terrain. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm", DeprecatedProperty, DeprecationMessage="Use Hill Height and Mountain Height"))
 	float HeightAmplitude = 2500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
-	// Frequencies are in inverse centimetres. These defaults keep the third
-	// FBM octave representable up to the supported 16 m cell spacing.
 	float NoiseScale = 0.00005f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
-	float DetailScale = 0.0000375f;
+	float DetailScale = 0.0000125f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
 	float DetailAmplitude = 60.0f;
+
+	/** Target flatland share outside deserts and mountain ranges. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.1", ClampMax="0.9"))
+	float FlatlandCoverage = 0.62f;
+
+	/** Scale of broad flatland/hill region borders. Smaller values create larger regions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0000001", ClampMax="0.00002"))
+	float FlatlandRegionScale = 0.0000045f;
+
+	/** Maximum small-scale variation over flatlands, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="100.0", Units="cm"))
+	float FlatlandNoiseAmplitude = 35.0f;
+
+	/** Scale of broad, smooth hills. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0000001", ClampMax="0.00002"))
+	float HillScale = 0.0000035f;
+
+	/** Maximum hill height above surrounding flats, in centimetres (30–40 blocks is about 3000–4000 cm). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="100000.0", Units="cm"))
+	float HillHeight = 3500.0f;
+
+	/** Share of desert occupied by hills; keep low for mostly flat desert terrain. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="0.3"))
+	float DesertHillCoverage = 0.06f;
+
+	/** Higher threshold means mountain climate regions are rarer. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.3", ClampMax="0.95"))
+	float MountainBiomeThreshold = 0.72f;
+
+	/** Large-scale mountain relief, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="200000.0", Units="cm"))
+	float MountainHeight = 18000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
 	float BottomDepth = 2000.0f;
@@ -316,7 +346,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="100.0", Units="cm"))
 	float WaterTileSize = 5000.0f;
 
-	/** Resolution of the continuous river ribbons; the sea/lake surface remains a single quad. */
+	/** Resolution of the fixed-level river/lake water sheet; the sea plane remains a single quad. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="16", ClampMax="512"))
 	int32 WaterGridResolution = 512;
 
@@ -328,20 +358,47 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
 	UMaterialInterface* WaterMaterial = nullptr;
 
-	/** Enable seed-stable carved river valleys; the level sea plane fills them. */
+	/** Sparse deterministic river network, restricted to flatlands in plains, forest and snow biomes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
 	bool bEnableRivers = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.000001", ClampMax="0.00005"))
-	float RiverScale = 0.00001f;
+	float RiverScale = 0.0000045f;
 
-	/** Approximate river half-width in centimetres. Keep channels narrow relative to the map. */
+	/** River half-width in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
-	float RiverHalfWidth = 4000.0f;
+	float RiverHalfWidth = 2500.0f;
 
-	/** Channel bed target is this far below SeaLevel, in centimetres. */
+	/** Carved river bed depth, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", Units="cm"))
 	float RiverDepth = 600.0f;
+
+	/** Absolute world-space Z shared by every river surface; separate from SeaLevel. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(Units="cm"))
+	float RiverWaterLevel = 850.0f;
+
+	/** Generate rare small lakes in plains/forest/snow, never in desert or mountains. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	bool bEnableLakes = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="20000.0", Units="cm"))
+	float LakeSiteSpacing = 90000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
+	float LakeRadius = 4500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.0", Units="cm"))
+	float LakeShoreBlendDistance = 1800.0f;
+
+	/** Lake depth; default 500 cm is about five one-metre blocks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", Units="cm"))
+	float LakeDepth = 500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float LakeChance = 0.12f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float HillLakeChance = 0.07f;
 
 	/** Enables deterministic forest/plains/desert/mountain/snow terrain masks. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
