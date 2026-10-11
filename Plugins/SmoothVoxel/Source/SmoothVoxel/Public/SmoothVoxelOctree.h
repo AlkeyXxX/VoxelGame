@@ -84,8 +84,8 @@ struct FSVoxelOctreeSelectionSettings
 	/** Camera-to-node distance threshold, measured in node side lengths. */
 	float SplitDistanceMultiplier = 0.75f;
 
-	/** Hard safety cap for the number of selected leaves. */
-	int32 MaxLeafCount = 8192;
+	/** Conservative hard safety cap for selected leaves while streaming is being optimized. */
+	int32 MaxLeafCount = 2048;
 
 	/** World-space location represented by base-lattice cell coordinate (0,0,0). */
 	FVector WorldOrigin = FVector::ZeroVector;
