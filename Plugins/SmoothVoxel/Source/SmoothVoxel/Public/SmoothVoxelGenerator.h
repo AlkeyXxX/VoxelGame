@@ -13,6 +13,12 @@ struct FSVoxelGenerationSettings
 	// consistent when adjacent chunks use different sample spacings.
 	float NormalSampleStep = 50.0f;
 
+	// Used to reconstruct precise noise coordinates from the absolute voxel
+	// lattice instead of adding small local offsets to a large float origin.
+	float BaseVoxelSize = 100.0f;
+	FIntVector ChunkOriginCells = FIntVector::ZeroValue;
+	bool bUseChunkLatticeCoordinates = false;
+
 	float IsoLevel = 0.0f;
 
 	int32 Seed = 1337;
@@ -52,9 +58,14 @@ public:
 	 * Coordinates are world-space Unreal units (centimetres by default).
 	 */
 	static float SampleDensity(
-		float WorldX,
-		float WorldY,
-		float WorldZ,
+		double WorldX,
+		double WorldY,
+		double WorldZ,
+		const FSVoxelGenerationSettings& Settings);
+
+	/** Sample using chunk-local centimetres and an integer absolute chunk origin. */
+	static float SampleDensityAtChunkLocal(
+		const FVector& LocalPosition,
 		const FSVoxelGenerationSettings& Settings);
 
 	/** Clamp the FBM frequencies so its highest octave is representable at the
@@ -71,9 +82,9 @@ public:
 private:
 
 	static float Density(
-		float X,
-		float Y,
-		float Z,
+		double X,
+		double Y,
+		double Z,
 		const FSVoxelGenerationSettings& S);
 
 	static FVector Interpolate(
@@ -84,40 +95,40 @@ private:
 		float Iso);
 
 	static FVector DensityGradient(
-		float X,
-		float Y,
-		float Z,
+		double X,
+		double Y,
+		double Z,
 		float Step,
 		const FSVoxelGenerationSettings& S);
 
 	// 2D terrain noise
 	static float HashNoise2D(
-		float X,
-		float Y,
+		double X,
+		double Y,
 		int32 Seed);
 
 	static float FBM2D(
-		float X,
-		float Y,
+		double X,
+		double Y,
 		int32 Seed);
 
 	// Continuous 3D noise for caves
 	static float HashNoise3D(
-		int32 X,
-		int32 Y,
-		int32 Z,
+		int64 X,
+		int64 Y,
+		int64 Z,
 		int32 Seed);
 
 	static float SmoothNoise3D(
-		float X,
-		float Y,
-		float Z,
+		double X,
+		double Y,
+		double Z,
 		int32 Seed);
 
 	static float FBM3D(
-		float X,
-		float Y,
-		float Z,
+		double X,
+		double Y,
+		double Z,
 		int32 Seed);
 };
 
