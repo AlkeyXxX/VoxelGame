@@ -738,6 +738,86 @@ namespace
 	}
 }
 
+
+int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
+	const FSVoxelGenerationSettings& Settings,
+	FSVoxelMeshData& Mesh)
+{
+	const int32 OriginalIndexCount = Mesh.Triangles.Num();
+	const int32 OriginalVertexCount = Mesh.Vertices.Num();
+	if (OriginalIndexCount < 3 || OriginalVertexCount == 0)
+	{
+		return 0;
+	}
+
+	// The base mesher always emits these arrays together. Keep the helper safe
+	// for callers that intentionally omit one of the optional vertex streams.
+	const bool bHasNormals = Mesh.Normals.Num() == OriginalVertexCount;
+	const bool bHasUV0 = Mesh.UV0.Num() == OriginalVertexCount;
+	const bool bHasTangents = Mesh.Tangents.Num() == OriginalVertexCount;
+
+	const auto AddBackFaceVertex = [&](int32 SourceIndex) -> int32
+	{
+		const FVector Position = Mesh.Vertices[SourceIndex];
+		const FVector Normal = bHasNormals ? Mesh.Normals[SourceIndex] : FVector::UpVector;
+		const FVector2D UV = bHasUV0 ? Mesh.UV0[SourceIndex] : FVector2D::ZeroVector;
+		const FProcMeshTangent Tangent = bHasTangents
+			? Mesh.Tangents[SourceIndex]
+			: FProcMeshTangent();
+
+		const int32 NewIndex = Mesh.Vertices.Num();
+		Mesh.Vertices.Add(Position);
+		if (bHasNormals)
+		{
+			Mesh.Normals.Add(-Normal);
+		}
+		if (bHasUV0)
+		{
+			Mesh.UV0.Add(UV);
+		}
+		if (bHasTangents)
+		{
+			// Flip the tangent-frame handedness along with the back-face normal.
+			Mesh.Tangents.Add(FProcMeshTangent(
+				Tangent.TangentX, !Tangent.bFlipTangentY));
+		}
+		return NewIndex;
+	};
+
+	int32 DuplicatedTriangles = 0;
+	// Iterate only the original triangles; appended back faces must not be
+	// duplicated again. The duplicate vertices have their normals reversed too,
+	// so the thin roof shades correctly when viewed from inside the tunnel.
+	for (int32 Index = 0; Index + 2 < OriginalIndexCount; Index += 3)
+	{
+		const int32 A = Mesh.Triangles[Index];
+		const int32 B = Mesh.Triangles[Index + 1];
+		const int32 C = Mesh.Triangles[Index + 2];
+		if (!Mesh.Vertices.IsValidIndex(A) ||
+			!Mesh.Vertices.IsValidIndex(B) ||
+			!Mesh.Vertices.IsValidIndex(C))
+		{
+			continue;
+		}
+
+		const FVector Center = (
+			Mesh.Vertices[A] + Mesh.Vertices[B] + Mesh.Vertices[C]) / 3.0f;
+		if (!HasBlockEditNearPosition(Center, Settings))
+		{
+			continue;
+		}
+
+		const int32 BackA = AddBackFaceVertex(A);
+		const int32 BackB = AddBackFaceVertex(B);
+		const int32 BackC = AddBackFaceVertex(C);
+		Mesh.Triangles.Add(BackA);
+		Mesh.Triangles.Add(BackC);
+		Mesh.Triangles.Add(BackB);
+		++DuplicatedTriangles;
+	}
+	return DuplicatedTriangles;
+}
+
 bool FSVoxelTransvoxelMesher::ValidateLookupTables()
 {
 	using namespace SVoxelOfficialTransvoxel;
