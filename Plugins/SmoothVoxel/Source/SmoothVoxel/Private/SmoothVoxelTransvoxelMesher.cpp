@@ -192,6 +192,41 @@ namespace
 		const float Step = FMath::Max(1.0f, VoxelSize);
 		const float BorderWidth = Step;
 		const float BorderOffset = Step * 0.25f;
+
+		// A regular vertex that also lies on a chunk face without a transition
+		// must not move; otherwise it would open a crack against a same-LOD
+		// neighbour. This matches the border-mask guard in reference
+		// Transvoxel implementations.
+		uint8 VertexBorderMask = 0;
+		if (FMath::IsNearlyZero(PrimaryPosition.X, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_NegativeX;
+		}
+		if (FMath::IsNearlyEqual(PrimaryPosition.X, ChunkSize, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_PositiveX;
+		}
+		if (FMath::IsNearlyZero(PrimaryPosition.Y, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_NegativeY;
+		}
+		if (FMath::IsNearlyEqual(PrimaryPosition.Y, ChunkSize, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_PositiveY;
+		}
+		if (FMath::IsNearlyZero(PrimaryPosition.Z, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_NegativeZ;
+		}
+		if (FMath::IsNearlyEqual(PrimaryPosition.Z, ChunkSize, 0.01f))
+		{
+			VertexBorderMask |= SVoxelTransitionFace_PositiveZ;
+		}
+		if ((VertexBorderMask & static_cast<uint8>(~TransitionFaceMask)) != 0)
+		{
+			return PrimaryPosition;
+		}
+
 		FVector Delta = FVector::ZeroVector;
 
 		if ((TransitionFaceMask & SVoxelTransitionFace_NegativeX) &&
