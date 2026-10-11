@@ -28,8 +28,12 @@ The rewrite lives beside the current world and does not replace the legacy
 7. Regular mesh vertices use projected secondary positions in transition
    boundary cells instead of moving density sample corners before interpolation.
    Adjacent transition faces remain on their shared edge lattice. Vertex-normal
-   sampling scales with LOD; world-XY UVs stay stable and per-vertex tangents are
-   generated for normal-mapped terrain materials.
+   sampling scales with LOD; world-XY UVs stay stable and tangent frames now come
+   directly from the same projection derivatives at every vertex.
+8. Terrain noise bandwidth is clamped globally for the coarsest supported sample
+   step (maximum LOD 3 / 8 m per cell). This avoids aliasing at distant LOD while
+   keeping the exact same density function across the entire terrain and all
+   transition faces.
 8. Completed CPU meshes are queued to the manager and only one procedural mesh
    section is committed on the game thread per frame. Worker concurrency is
    capped at two, and LOD reselection has a minimum 10 m movement threshold.
@@ -47,9 +51,9 @@ capped at two to reduce game-thread upload bursts and CPU contention.
 The root is a rolling finite window, not an unbounded world at once: it shifts
 horizontally by half its width and keeps 50% overlap to avoid stopping terrain
 generation at the original root boundary. Its vertical interval remains
-anchored to `RootWorldCenter.Z`. The default maximum LOD is 6 (up to 64 m
-between samples with a 1 m base voxel) to reduce distant faceting compared with
-the former 128 m maximum step.
+anchored to `RootWorldCenter.Z`. Maximum runtime LOD is capped at 3 (up to 8 m
+between samples with a 1 m base voxel). The cap also applies to serialized actor
+instances so old Details-panel values cannot restore highly aliased coarse LODs.
 It has not been compiled or run in UE4.27 in this environment, so automation
 tests are added but **not verified in Unreal Editor yet**. No claim is made that
 all seams, collision contacts, edge/corner junctions, material boundaries or
@@ -75,9 +79,15 @@ winding separately from the stored outward normals.
 ## Runtime tuning notes
 
 - Terrain frequency parameters are in inverse centimetres because the density
-  function samples Unreal world coordinates directly. With 100 cm base voxels,
-  the default `NoiseScale=0.0008` and `DetailScale=0.0006` reduce aliasing at
-  LOD 0; they cannot preserve full geometric detail at very coarse LODs.
+  function samples Unreal world coordinates directly. The default values are
+  `NoiseScale=0.0001` and `DetailScale=0.000075`. The world manager also calls
+  `ClampNoiseScalesForMaxSampleStep` with the coarsest supported step, limiting
+  the highest FBM octave to 0.35 noise-lattice units per sample. That is a global
+  cap shared by every LOD—not a different density function per LOD—so adjacent
+  chunks and Transvoxel transitions still use the same scalar field.
+- This intentionally trades some fine geometric noise for stable distant terrain.
+  Add high-frequency albedo/normal detail in the material rather than raising the
+  geometry noise scales beyond the supported sampling bandwidth.
 - Normal finite-difference distance now grows with voxel spacing, reducing
   high-frequency shading noise on triangles that no longer represent those
   small details. At coarse/fine boundaries it blends to the fine neighbour's
@@ -86,6 +96,10 @@ winding separately from the stored outward normals.
   vertices, with displacement projected along the surface tangent rather than
   moving sampled cube corners before isosurface interpolation. Vertices shared
   with a non-transition face remain fixed to preserve neighbouring seams.
+- Same-LOD chunk-border vertices now keep the coarse normal-sampling step even
+  when another face of that chunk transitions to a finer LOD. This avoids a
+  normal-step change along a neighbouring same-LOD edge, which could appear as
+  dark square patches.
 - Stream selection has a minimum 10 m movement threshold, at most two CPU
   workers, and a one-mesh-section-per-frame commit budget. These safeguards
   reduce repeated rebuilds and completion bursts but cannot guarantee zero
@@ -95,10 +109,12 @@ winding separately from the stored outward normals.
   switching projection axes at individual vertices. It may stretch on near-
   vertical cliffs; use a triplanar material for cliffs/caves. Distant textures
   can still soften naturally because of mip filtering and screen-space limits.
-- Tangents are now calculated from the generated UVs instead of passing an empty
-  tangent array to the procedural mesh component, so normal-map lighting has a
-  defined tangent basis. The UE4.27 editor build and material-specific result
-  still need to be checked locally.
+- Tangents are derived from the UV0 world-XY projection and the smoothed surface
+  normal, rather than accumulated independently from each cell's triangle list.
+  Duplicate vertices at adjacent cells therefore get the same tangent frame,
+  which should prevent normal-map lighting from producing cell-sized dark squares.
+  A near-vertical wall is singular for XY projection; use a triplanar material
+  for cliffs/caves. The UE4.27 material result still needs local verification.
 - `BaseHeight=900` places the average surface at about Z=900 cm. With
   `HeightAmplitude=850` and `DetailAmplitude=60`, a test PlayerStart should be
   placed above roughly Z=2000 cm, with additional clearance for the capsule.
