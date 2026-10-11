@@ -137,6 +137,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0", ClampMax="4"))
 	int32 MaxLod = 4;
 
+	/** Streaming window scale, independent of the maximum LOD used by visible chunks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="8"))
+	int32 RootWindowLod = 6;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0.05", ClampMax="4.0"))
 	float SplitDistanceMultiplier = 0.75f;
 
