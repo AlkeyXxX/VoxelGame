@@ -416,21 +416,251 @@ float FSVoxelGenerator::FBM3D(
 // DENSITY
 // ============================================================
 
-double FSVoxelGenerator::SampleSurfaceHeight(double X, double Y, const FSVoxelGenerationSettings& S)
+void FSVoxelGenerator::SampleBiomeClimate(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    float& OutTemperature,
+    float& OutMoisture,
+    float& OutMountainSignal)
+{
+    const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.BiomeScale)));
+    OutTemperature = FBM2D(X * Scale * 0.60, Y * Scale * 0.60, S.Seed + 1709);
+    OutMoisture = HashNoise2D(X * Scale * 0.85, Y * Scale * 0.85, S.Seed + 2903);
+    OutMountainSignal = HashNoise2D(X * Scale * 1.45, Y * Scale * 1.45, S.Seed + 3907);
+}
+
+ESVoxelBiome FSVoxelGenerator::SampleBiome(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    if (!S.bEnableBiomes)
+    {
+        return ESVoxelBiome::Plains;
+    }
+
+    float Temperature = 0.0f;
+    float Moisture = 0.0f;
+    float MountainSignal = 0.0f;
+    SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
+
+    if (Temperature < -0.38f || (MountainSignal > 0.26f && Temperature < -0.08f))
+    {
+        return ESVoxelBiome::Snow;
+    }
+    if (Temperature > 0.18f && Moisture < 0.05f)
+    {
+        return ESVoxelBiome::Desert;
+    }
+    if (MountainSignal > 0.32f)
+    {
+        return ESVoxelBiome::Mountain;
+    }
+    if (Moisture > 0.12f)
+    {
+        return ESVoxelBiome::Forest;
+    }
+    return ESVoxelBiome::Plains;
+}
+
+double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
 {
     const double Macro = FBM2D(
         X * static_cast<double>(S.NoiseScale),
         Y * static_cast<double>(S.NoiseScale),
         S.Seed);
-
     const double Detail = FBM2D(
         X * static_cast<double>(S.DetailScale),
         Y * static_cast<double>(S.DetailScale),
         S.Seed + 777);
 
+    double ReliefMultiplier = 1.0;
+    double DetailMultiplier = 1.0;
+    double MountainLift = 0.0;
+    double DuneLift = 0.0;
+
+    if (S.bEnableBiomes)
+    {
+        float Temperature = 0.0f;
+        float Moisture = 0.0f;
+        float MountainSignal = 0.0f;
+        SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
+
+        const auto SmoothStep = [](float Edge0, float Edge1, float Value)
+        {
+            const float T = FMath::Clamp(
+                (Value - Edge0) / FMath::Max(0.0001f, Edge1 - Edge0), 0.0f, 1.0f);
+            return T * T * (3.0f - 2.0f * T);
+        };
+
+        // The continuous climate masks shape the terrain; discrete biome labels
+        // are for gameplay and materials. Smooth masks prevent cliffs at borders.
+        const float MountainBlend = SmoothStep(0.10f, 0.52f, MountainSignal);
+        const float ForestBlend = SmoothStep(-0.10f, 0.48f, Moisture);
+        const float DesertBlend = SmoothStep(0.05f, 0.50f, Temperature) *
+            (1.0f - SmoothStep(-0.18f, 0.42f, Moisture));
+        const float ColdBlend = SmoothStep(0.12f, 0.58f, -Temperature);
+
+        ReliefMultiplier = 0.42f + ForestBlend * 0.22f + DesertBlend * 0.08f +
+            MountainBlend * 1.25f + ColdBlend * 0.14f;
+        DetailMultiplier = 1.0f + DesertBlend * 0.65f + MountainBlend * 0.15f;
+        MountainLift = static_cast<double>(FMath::Max(0.0f, MountainSignal)) *
+            static_cast<double>(FMath::Abs(S.HeightAmplitude)) * 0.30 *
+            static_cast<double>(MountainBlend);
+
+        if (DesertBlend > 0.001f)
+        {
+            const float Dune = FMath::Abs(HashNoise2D(
+                X * static_cast<double>(S.BiomeScale) * 2.3,
+                Y * static_cast<double>(S.BiomeScale) * 2.3,
+                S.Seed + 4909));
+            DuneLift = static_cast<double>(Dune) *
+                static_cast<double>(FMath::Abs(S.HeightAmplitude)) * 0.10 *
+                static_cast<double>(DesertBlend);
+        }
+    }
+
     return static_cast<double>(S.BaseHeight) +
-        Macro * static_cast<double>(S.HeightAmplitude) +
-        Detail * static_cast<double>(S.DetailAmplitude);
+        Macro * static_cast<double>(S.HeightAmplitude) * ReliefMultiplier +
+        Detail * static_cast<double>(S.DetailAmplitude) * DetailMultiplier +
+        MountainLift + DuneLift;
+}
+
+float FSVoxelGenerator::GetPOIPlateauInfluence(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    double& OutSiteX,
+    double& OutSiteY)
+{
+    OutSiteX = X;
+    OutSiteY = Y;
+    if (!S.bEnablePOIPlateaus)
+    {
+        return 0.0f;
+    }
+
+    const double Spacing = FMath::Max(20000.0, std::abs(static_cast<double>(S.POISiteSpacing)));
+    const int64 GridX = static_cast<int64>(std::round(X / Spacing));
+    const int64 GridY = static_cast<int64>(std::round(Y / Spacing));
+    const uint32 SiteHash = HashLattice2D(GridX, GridY, S.Seed + 5167);
+
+    // Split one stable hash into two bounded jitters. Radius plus jitter stays
+    // under half the grid spacing, so no terrain sample is influenced by two sites.
+    const double JitterX = (static_cast<double>(SiteHash & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    const double JitterY = (static_cast<double>((SiteHash >> 12) & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    OutSiteX = static_cast<double>(GridX) * Spacing + JitterX * Spacing;
+    OutSiteY = static_cast<double>(GridY) * Spacing + JitterY * Spacing;
+
+    const double CoreRadius = FMath::Clamp(static_cast<double>(S.POIPlateauRadius), 0.0, Spacing * 0.25);
+    const double MaximumInfluenceRadius = Spacing * 0.30;
+    const double BlendDistance = FMath::Clamp(
+        static_cast<double>(S.POIPlateauBlendDistance),
+        0.0,
+        FMath::Max(0.0, MaximumInfluenceRadius - CoreRadius));
+    const double OuterRadius = CoreRadius + BlendDistance;
+    if (OuterRadius <= 0.0)
+    {
+        return 0.0f;
+    }
+
+    const double DX = X - OutSiteX;
+    const double DY = Y - OutSiteY;
+    const double DistanceSquared = DX * DX + DY * DY;
+    if (DistanceSquared > OuterRadius * OuterRadius)
+    {
+        return 0.0f;
+    }
+
+    // Protect steep mountain zones, but allow clearings in plains, forests,
+    // deserts and snowy biomes.
+    if (SampleBiome(OutSiteX, OutSiteY, S) == ESVoxelBiome::Mountain)
+    {
+        return 0.0f;
+    }
+
+    const double Distance = std::sqrt(DistanceSquared);
+    if (Distance <= CoreRadius)
+    {
+        return 1.0f;
+    }
+    if (BlendDistance <= SMALL_NUMBER)
+    {
+        return 0.0f;
+    }
+
+    const float T = FMath::Clamp(static_cast<float>((Distance - CoreRadius) / BlendDistance), 0.0f, 1.0f);
+    return 1.0f - T * T * (3.0f - 2.0f * T);
+}
+
+float FSVoxelGenerator::SamplePOISuitability(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    double SiteX = X;
+    double SiteY = Y;
+    return GetPOIPlateauInfluence(X, Y, S, SiteX, SiteY);
+}
+
+FLinearColor FSVoxelGenerator::GetBiomeTint(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    if (!S.bEnableBiomes)
+    {
+        return FLinearColor::White;
+    }
+
+    FLinearColor Tint;
+    switch (SampleBiome(X, Y, S))
+    {
+    case ESVoxelBiome::Forest:
+        Tint = FLinearColor(0.22f, 0.39f, 0.16f, 1.0f);
+        break;
+    case ESVoxelBiome::Desert:
+        Tint = FLinearColor(0.68f, 0.48f, 0.25f, 1.0f);
+        break;
+    case ESVoxelBiome::Mountain:
+        Tint = FLinearColor(0.38f, 0.36f, 0.33f, 1.0f);
+        break;
+    case ESVoxelBiome::Snow:
+        Tint = FLinearColor(0.78f, 0.83f, 0.88f, 1.0f);
+        break;
+    case ESVoxelBiome::Plains:
+    default:
+        Tint = FLinearColor(0.46f, 0.49f, 0.25f, 1.0f);
+        break;
+    }
+
+    const float ClearingWeight = SamplePOISuitability(X, Y, S);
+    const FLinearColor BareEarth(0.40f, 0.32f, 0.22f, 1.0f);
+    return FMath::Lerp(Tint, BareEarth, ClearingWeight * 0.45f);
+}
+
+double FSVoxelGenerator::SampleSurfaceHeight(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    const double NaturalHeight = SampleUnflattenedSurfaceHeight(X, Y, S);
+    double SiteX = X;
+    double SiteY = Y;
+    const float PlateauWeight = GetPOIPlateauInfluence(X, Y, S, SiteX, SiteY);
+    if (PlateauWeight <= 0.0f)
+    {
+        return NaturalHeight;
+    }
+
+    // Keep the clearing at the terrain's natural centre height, with a smooth
+    // falloff into surrounding ground. Interior samples are exactly planar.
+    const double PlateauHeight = SampleUnflattenedSurfaceHeight(SiteX, SiteY, S);
+    return FMath::Lerp(NaturalHeight, PlateauHeight, static_cast<double>(PlateauWeight));
 }
 
 double FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
