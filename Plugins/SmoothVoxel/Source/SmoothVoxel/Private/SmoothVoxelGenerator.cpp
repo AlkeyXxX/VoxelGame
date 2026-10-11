@@ -427,7 +427,7 @@ void FSVoxelGenerator::SampleBiomeClimate(
     const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.BiomeScale)));
     OutTemperature = FBM2D(X * Scale * 0.60, Y * Scale * 0.60, S.Seed + 1709);
     OutMoisture = HashNoise2D(X * Scale * 0.85, Y * Scale * 0.85, S.Seed + 2903);
-    OutMountainSignal = HashNoise2D(X * Scale * 1.45, Y * Scale * 1.45, S.Seed + 3907);
+    OutMountainSignal = HashNoise2D(X * Scale * 1.15, Y * Scale * 1.15, S.Seed + 3907);
 }
 
 ESVoxelBiome FSVoxelGenerator::SampleBiome(
@@ -453,7 +453,7 @@ ESVoxelBiome FSVoxelGenerator::SampleBiome(
     {
         return ESVoxelBiome::Desert;
     }
-    if (MountainSignal > 0.32f)
+    if (MountainSignal > 0.28f)
     {
         return ESVoxelBiome::Mountain;
     }
