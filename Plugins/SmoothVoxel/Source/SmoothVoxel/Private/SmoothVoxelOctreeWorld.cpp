@@ -869,7 +869,7 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 		SeaColors,
 		SeaTangents,
 		bEnableCollision);
-	if (GenerationSettings.bEnableRivers && !RiverTriangles.IsEmpty())
+	if (GenerationSettings.bEnableRivers && RiverTriangles.Num() > 0)
 	{
 		Mesh->CreateMeshSection_LinearColor(
 			1,
@@ -887,7 +887,7 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	if (ActiveMaterial)
 	{
 		Mesh->SetMaterial(0, ActiveMaterial);
-		if (GenerationSettings.bEnableRivers && !RiverTriangles.IsEmpty())
+		if (GenerationSettings.bEnableRivers && RiverTriangles.Num() > 0)
 		{
 			Mesh->SetMaterial(1, ActiveMaterial);
 		}
