@@ -111,6 +111,45 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelLargeCoordinateUVTest,
+	"SmoothVoxel.Transvoxel.UVsStayBoundedAtLargeWorldCoordinates",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.ChunkWorldOrigin = FVector::ZeroVector;
+	Settings.ChunkOriginCells = FIntVector(2000000, 2000000, 0);
+	Settings.BaseVoxelSize = 100.0f;
+	Settings.bUseChunkLatticeCoordinates = true;
+	Settings.BaseHeight = 75.0f;
+	Settings.HeightAmplitude = 0.0f;
+	Settings.DetailAmplitude = 0.0f;
+	Settings.BottomDepth = 2000.0f;
+	Settings.bEnableCaves = false;
+	Settings.IsoLevel = 0.0f;
+
+	FSVoxelMeshData Mesh;
+	// The absolute world coordinate here is 2000 km, so unrebased UVs would
+	// be around 100,000. The rendered UV values should instead remain bounded
+	// because each emitted cell removes one common integer tile offset.
+	FSVoxelTransvoxelMesher::Generate(Settings, 4, 1600.0f, 0, Mesh);
+	TestTrue(TEXT("Large-coordinate fixture should generate terrain triangles"), Mesh.Triangles.Num() > 0);
+	TestEqual(TEXT("Each generated vertex has a UV"), Mesh.UV0.Num(), Mesh.Vertices.Num());
+
+	float MaxAbsoluteUv = 0.0f;
+	for (const FVector2D& UV : Mesh.UV0)
+	{
+		TestTrue(TEXT("UV coordinates must remain finite"), FMath::IsFinite(UV.X) && FMath::IsFinite(UV.Y));
+		MaxAbsoluteUv = FMath::Max(MaxAbsoluteUv, FMath::Max(FMath::Abs(UV.X), FMath::Abs(UV.Y)));
+	}
+	TestTrue(
+		TEXT("Large absolute world coordinates must not produce large GPU UV values"),
+		MaxAbsoluteUv < 2.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelTransvoxelFlatInterfaceTest,
 	"SmoothVoxel.Transvoxel.FlatCoarseFineInterface",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
