@@ -726,7 +726,7 @@ bool FSmoothVoxelMinedCellDensityTest::RunTest(const FString& Parameters)
 		FSVoxelGenerator::SampleDensity(125.0, 125.0, 225.0, Settings);
 	const float OutsideMinedCell =
 		FSVoxelGenerator::SampleDensity(225.0, 125.0, 225.0, Settings);
-	TestTrue(TEXT("A mined voxel cell must become air at its centre"), AtMinedCell < 0.0f);
+	TestTrue(TEXT("A mined voxel cell must become air at its centre"), AtMinedCellCenter < 0.0f);
 	TestTrue(TEXT("Mining one voxel cell must not clear a distant cell"), OutsideMinedCell > 0.0f);
 	TestTrue(TEXT("Fixture must be solid before applying the mined-node snapshot"), BeforeCut > 0.0f);
 	return true;
