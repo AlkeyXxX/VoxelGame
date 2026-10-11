@@ -756,6 +756,61 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 	const bool bHasUV0 = Mesh.UV0.Num() == OriginalVertexCount;
 	const bool bHasTangents = Mesh.Tangents.Num() == OriginalVertexCount;
 
+	const TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodes = Settings.MinedNodes;
+	TSet<FIntVector> EditedNeighborhood;
+	const auto AddEditedNeighborhood = [&EditedNeighborhood](const FIntVector& Cell)
+	{
+		for (int32 DZ = -2; DZ <= 2; ++DZ)
+		{
+			for (int32 DY = -2; DY <= 2; ++DY)
+			{
+				for (int32 DX = -2; DX <= 2; ++DX)
+				{
+					EditedNeighborhood.Add(Cell + FIntVector(DX, DY, DZ));
+				}
+			}
+		}
+	};
+	if (MinedNodes.IsValid())
+	{
+		for (const FIntVector& Cell : *MinedNodes)
+		{
+			AddEditedNeighborhood(Cell);
+		}
+	}
+	if (Settings.BlockEdits.IsValid())
+	{
+		for (const TPair<FIntVector, int8>& Edit : *Settings.BlockEdits)
+		{
+			if (Edit.Value != 0 && Edit.Value != 2)
+			{
+				AddEditedNeighborhood(Edit.Key);
+			}
+		}
+	}
+	if (EditedNeighborhood.Num() == 0)
+	{
+		return 0;
+	}
+
+	const double BaseStep = FMath::Max(1.0, static_cast<double>(Settings.BaseVoxelSize));
+	const auto LocalPositionToCell = [&Settings, BaseStep](const FVector& LocalPosition)
+	{
+		const double WorldX = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep + LocalPosition.X
+			: static_cast<double>(Settings.ChunkWorldOrigin.X) + LocalPosition.X;
+		const double WorldY = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep + LocalPosition.Y
+			: static_cast<double>(Settings.ChunkWorldOrigin.Y) + LocalPosition.Y;
+		const double WorldZ = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Z) * BaseStep + LocalPosition.Z
+			: static_cast<double>(Settings.ChunkWorldOrigin.Z) + LocalPosition.Z;
+		return FIntVector(
+			FMath::FloorToInt(WorldX / BaseStep),
+			FMath::FloorToInt(WorldY / BaseStep),
+			FMath::FloorToInt(WorldZ / BaseStep));
+	};
+
 	const auto AddBackFaceVertex = [&](int32 SourceIndex) -> int32
 	{
 		const FVector Position = Mesh.Vertices[SourceIndex];
@@ -802,7 +857,7 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 
 		const FVector Center = (
 			Mesh.Vertices[A] + Mesh.Vertices[B] + Mesh.Vertices[C]) / 3.0f;
-		if (!HasBlockEditNearPosition(Center, Settings))
+		if (!EditedNeighborhood.Contains(LocalPositionToCell(Center)))
 		{
 			continue;
 		}
