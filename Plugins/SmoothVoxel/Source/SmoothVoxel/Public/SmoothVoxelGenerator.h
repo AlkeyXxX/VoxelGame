@@ -4,11 +4,12 @@
 #include "CoreMinimal.h"
 #include "SmoothVoxelTypes.h"
 
-// Sparse block-cell edits: +1 adds smooth Dirt/Sand, negative values preserve legacy cell-removal calls, +2 reserves a separately rendered cube. Ray mining uses FSVoxelMinedNodeSet.
+// Sparse block-cell edits: +1 adds smooth Dirt/Sand, negative values preserve legacy air cuts, and +2 reserves a separately rendered cube without changing terrain density. Ray mining uses FSVoxelMinedNodeSet.
 using FSVoxelBlockEditMap = TMap<FIntVector, int8>;
 using FSVoxelBlockEditCenterMap = TMap<FIntVector, FVector>;
-// Fully mined density-lattice nodes. Keys identify exact grid sample coordinates,
-// so terrain mining does not depend on a moving fractional ray-hit location.
+// Fully mined voxel cells. Keys are integer cell coordinates (not density-grid
+// corners), so each cut is centred at (Cell + 0.5) * BaseVoxelSize and stays
+// aligned as the ray marches down through a shaft.
 using FSVoxelMinedNodeSet = TSet<FIntVector>;
 
 struct FSVoxelGenerationSettings
@@ -58,9 +59,9 @@ struct FSVoxelGenerationSettings
 	// Immutable snapshots shared safely with asynchronous mesh workers.
 	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEdits;
 	// Optional centres for explicit block-cell edits. The ray-mining path uses
-	// exact density-grid nodes instead, stored in MinedNodes below.
+	// integer voxel cells instead, stored in MinedNodes below.
 	TSharedPtr<const FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> BlockEditCenters;
-	// Immutable grid-node cuts are separate from placed-cell edits so mining
+	// Immutable mined-cell cuts are separate from placed-cell occupancy so mining
 	// progress can never collide with a block placement at the same integer key.
 	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodes;
 };
