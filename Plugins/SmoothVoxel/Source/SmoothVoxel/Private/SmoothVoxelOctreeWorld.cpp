@@ -972,12 +972,11 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 
 	FIntVector Cell = FIntVector::ZeroValue;
 	EVoxelBlock HitBlock = EVoxelBlock::Air;
-	FVector MiningEditCenter = FVector::ZeroVector;
+	FVector InsidePoint = Hit.ImpactPoint;
 	ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor());
 	if (IsValid(HitCube) && HitCube->GetOwner() == this)
 	{
-		// Cube collision is exact, so use the cell stored on the actor rather
-		// than trying to infer it again from a collision-face normal.
+		// Cube collision already identifies the exact logical cell.
 		Cell = HitCube->BlockCell;
 		HitBlock = HitCube->BlockType;
 	}
@@ -997,26 +996,12 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		const float DensityAlong = SampleCurrentDensityAt(ProbeAlongNormal);
 		const float DensityAgainst = SampleCurrentDensityAt(ProbeAgainstNormal);
 
-		// Collision normals can be flipped on the underside of a surface.
-		// Pick the side that the density field confirms is solid instead of
-		// trusting the triangle winding, which caused mining from below to miss
-		// the interior and leave seemingly invisible faces.
 		if (FMath::Max(DensityAlong, DensityAgainst) <= 0.0f)
 		{
 			return false;
 		}
-		const FVector InsidePoint = DensityAlong >= DensityAgainst
-			? ProbeAlongNormal
-			: ProbeAgainstNormal;
-		MiningEditCenter = InsidePoint;
+		InsidePoint = DensityAlong >= DensityAgainst ? ProbeAlongNormal : ProbeAgainstNormal;
 		Cell = WorldPositionToBlockCell(InsidePoint);
-
-		const int8* ExistingEdit = EditedBlockCells.Find(Cell);
-		if (ExistingEdit && *ExistingEdit <= -5)
-		{
-			return false;
-		}
-
 		HitBlock = GetBlockTypeForCell(Cell);
 		if (HitBlock == EVoxelBlock::Air)
 		{
@@ -1041,53 +1026,109 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		? PlayerPawn->FindComponentByClass<UVoxelInventoryComponent>()
 		: nullptr;
 	const EVoxelBlock DropBlock = UVoxelBlockLibrary::GetBlockDropFromTable(BlockDataTable, HitBlock);
+	const float ToolDamage = FMath::Max(0.1f, TerrainMiningToolDamage);
+	const float Durability = FMath::Max(
+		0.0f, UVoxelBlockLibrary::GetBlockDurabilityFromTable(BlockDataTable, HitBlock));
+	const int32 HitsRequired = FMath::Max(
+		1, FMath::CeilToInt(Durability / ToolDamage));
 
 	if (IsValid(HitCube))
 	{
-		const int32 HitsToBreak = FMath::Clamp(
-			FMath::CeilToInt(UVoxelBlockLibrary::GetBlockDurabilityFromTable(BlockDataTable, HitBlock)) + 1,
-			2,
-			6);
-		if (HitCube->GetDamageStage() + 1 < HitsToBreak)
+		if (HitCube->GetDamageStage() + 1 < HitsRequired)
 		{
 			const int32 NewDamageStage = HitCube->RegisterDamageHit();
 			HitCube->ConfigureBlock(
 				HitBlock, Cell, GetEffectiveBlockSize(), TerrainMaterial, NewDamageStage);
 			return true;
 		}
+
+		if (Inventory && DropBlock != EVoxelBlock::Air &&
+			!Inventory->CanAddBlock(DropBlock, 1))
+		{
+			return false;
+		}
+
+		// Removing a placed cube clears its terrain reservation and reveals the
+		// procedural density field that was there before placement.
+		ApplyBlockCellEdit(Cell, EVoxelBlock::Air);
+		if (Inventory && DropBlock != EVoxelBlock::Air)
+		{
+			Inventory->AddBlock(DropBlock, 1);
+		}
+		return true;
 	}
 
-	int8 NextMiningState = -1;
-	if (!IsValid(HitCube))
+	// Select a real density sample on the shared integer lattice instead of
+	// assigning progress to floor(InsidePoint / Step). Surface motion after a
+	// hit can change that floored cell, while the nearest unmined solid sample
+	// remains stable until the current node has actually been removed.
+	const float Step = GetEffectiveBlockSize();
+	const FIntVector BaseNode = WorldPositionToBlockCell(InsidePoint);
+	FIntVector BestNode = FIntVector::ZeroValue;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	for (int32 DZ = -1; DZ <= 1; ++DZ)
 	{
-		if (const int8* ExistingEdit = EditedBlockCells.Find(Cell))
+		for (int32 DY = -1; DY <= 1; ++DY)
 		{
-			NextMiningState = *ExistingEdit < 0
-				? static_cast<int8>(FMath::Max<int32>(-5, static_cast<int32>(*ExistingEdit) - 1))
-				: int8(-1);
+			for (int32 DX = -1; DX <= 1; ++DX)
+			{
+				const FIntVector Candidate = BaseNode + FIntVector(DX, DY, DZ);
+				if (MinedTerrainNodes.Contains(Candidate))
+				{
+					continue;
+				}
+
+				const FVector NodePosition(
+					static_cast<float>(Candidate.X) * Step,
+					static_cast<float>(Candidate.Y) * Step,
+					static_cast<float>(Candidate.Z) * Step);
+				if (SampleCurrentDensityAt(NodePosition) <= 0.0f)
+				{
+					continue;
+				}
+
+				const float DistanceSquared = FVector::DistSquared(
+					NodePosition, Hit.ImpactPoint);
+				if (DistanceSquared < BestDistanceSquared)
+				{
+					BestDistanceSquared = DistanceSquared;
+					BestNode = Candidate;
+				}
+			}
 		}
 	}
 
-	const bool bFinishesMiningCell = IsValid(HitCube) || NextMiningState <= -5;
-	if (Inventory && bFinishesMiningCell && DropBlock != EVoxelBlock::Air &&
-		!Inventory->CanAddBlock(DropBlock, 1))
+	if (BestDistanceSquared == TNumericLimits<float>::Max() ||
+		BestDistanceSquared > Step * Step * 3.0f)
 	{
-		// Never remove a block if its drop cannot fit into the inventory.
+		// No current solid grid sample near this surface: this can happen if a
+		// stale physical collision reports a face that is already fully mined.
 		return false;
 	}
 
-	if (IsValid(HitCube))
+	float& Progress = TerrainMiningProgress.FindOrAdd(BestNode);
+	const float NextProgress = FMath::Min(1.0f, Progress + ToolDamage / FMath::Max(ToolDamage, Durability));
+	if (NextProgress < 1.0f)
 	{
-		// Destroying a placed cube removes its override and reveals whatever
-		// procedural terrain originally occupied that cell.
-		ApplyBlockCellEdit(Cell, EVoxelBlock::Air);
-	}
-	else
-	{
-		ApplyBlockCellEdit(Cell, EVoxelBlock::Air, NextMiningState, &MiningEditCenter);
+		Progress = NextProgress;
+		return true;
 	}
 
-	if (Inventory && bFinishesMiningCell && DropBlock != EVoxelBlock::Air)
+	if (Inventory && DropBlock != EVoxelBlock::Air &&
+		!Inventory->CanAddBlock(DropBlock, 1))
+	{
+		// Do not consume the last mining hit when the resulting drop cannot fit.
+		Progress = FMath::Min(Progress, 0.999f);
+		return false;
+	}
+
+	TerrainMiningProgress.Remove(BestNode);
+	MinedTerrainNodes.Add(BestNode);
+	MinedNodeSnapshot =
+		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
+	RebuildChunksNearEditedCell(BestNode, true);
+
+	if (Inventory && DropBlock != EVoxelBlock::Air)
 	{
 		Inventory->AddBlock(DropBlock, 1);
 	}
