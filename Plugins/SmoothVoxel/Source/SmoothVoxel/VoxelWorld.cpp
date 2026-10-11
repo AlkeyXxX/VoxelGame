@@ -640,6 +640,12 @@ bool AVoxelWorld::GetBlockDebugInfoAtWorld(
     FIntVector& OutLocalBlock,
     FIntVector& OutChunkCoord) const
 {
+    if (!bEnableLegacyWorld)
+    {
+        OutBlock = EVoxelBlock::Air;
+        return false;
+    }
+
     if (!WorldToBlock(
             WorldPosition,
             OutWorldBlock))
@@ -684,6 +690,16 @@ void AVoxelWorld::GetTerrainDebugInfo(
     float& OutMoisture,
     FString& OutBiomeName) const
 {
+    if (!bEnableLegacyWorld)
+    {
+        OutSurfaceHeight = 0;
+        OutTerrainNoise = 0.0f;
+        OutTemperature = 0.0f;
+        OutMoisture = 0.0f;
+        OutBiomeName = TEXT("Legacy world disabled");
+        return;
+    }
+
     OutSurfaceHeight =
         WorldGenerator.GetSurfaceHeight(
             WorldX,
@@ -1145,6 +1161,11 @@ bool AVoxelWorld::GetPersistentObjectState(
 AVoxelChunk* AVoxelWorld::GetChunk(
     const FIntVector& ChunkCoord)
 {
+    if (!bEnableLegacyWorld)
+    {
+        return nullptr;
+    }
+
     AVoxelChunk* const* Found =
         Chunks.Find(ChunkCoord);
 
