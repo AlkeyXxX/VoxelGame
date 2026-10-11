@@ -202,6 +202,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const int32 WorldGridMinY = FMath::CeilToInt(MinY / RouteGridStep);
     const int32 WorldGridMaxY = FMath::FloorToInt(MaxY / RouteGridStep);
     const double MaxRouteGrade = 0.30; // Preferred maximum for ordinary road segments.
+    constexpr int32 RoadRingPointCount = 16;
     const double SiteConnectionRadius = FMath::Min(
         std::abs(static_cast<double>(GenerationSettings.POIPlateauRadius)) +
             std::abs(static_cast<double>(GenerationSettings.POIPlateauBlendDistance)) +
@@ -273,6 +274,42 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         return RouteGridCache.Add(GridCell, Sample);
     };
 
+    // A lake may overlap only the outer edge of a POI clearing even if its
+    // centre is dry. Reject the whole ring if any gate is inside the lake mask;
+    // otherwise some arcs disappear and disconnect incoming roads from each other.
+    TArray<FIntPoint> SitesWithBlockedRings;
+    for (const FIntPoint& SiteCell : POIRingSites)
+    {
+        const FVector2D* Site = Sites.Find(SiteCell);
+        if (!Site)
+        {
+            SitesWithBlockedRings.Add(SiteCell);
+            continue;
+        }
+
+        for (int32 RingIndex = 0; RingIndex < RoadRingPointCount; ++RingIndex)
+        {
+            const double Angle = static_cast<double>(RingIndex) *
+                6.283185307179586 / static_cast<double>(RoadRingPointCount);
+            const FVector2D Gate(
+                static_cast<float>(Site->X + std::cos(Angle) * SiteConnectionRadius),
+                static_cast<float>(Site->Y + std::sin(Angle) * SiteConnectionRadius));
+            const FIntPoint GateCell(
+                FMath::RoundToInt(Gate.X / RouteGridStep),
+                FMath::RoundToInt(Gate.Y / RouteGridStep));
+            if (!GetRouteGridSample(GateCell).bAllowed)
+            {
+                SitesWithBlockedRings.Add(SiteCell);
+                break;
+            }
+        }
+    }
+    for (const FIntPoint& SiteCell : SitesWithBlockedRings)
+    {
+        Sites.Remove(SiteCell);
+        POIRingSites.Remove(SiteCell);
+    }
+
     auto FindSiteGate = [&](
         const FIntPoint& SiteCell,
         const FVector2D& Site,
@@ -293,7 +330,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // Match one of the generated ring vertices, not an arbitrary radial
         // point. Seed jitter can rotate the approach away from the cardinal
         // axes; choosing the nearest safe gate prevents tiny gaps at the ring.
-        for (int32 RingIndex = 0; RingIndex < RingPointCount; ++RingIndex)
+        for (int32 RingIndex = 0; RingIndex < RoadRingPointCount; ++RingIndex)
         {
             const double Angle = static_cast<double>(RingIndex) *
                 0.39269908169872415;
@@ -1077,7 +1114,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             for (int32 RingIndex = 0; RingIndex < RingPointCount; ++RingIndex)
             {
                 const double Angle = static_cast<double>(RingIndex) *
-                    0.39269908169872415; // 22.5 degrees.
+                    (6.283185307179586 / static_cast<double>(RoadRingPointCount)); // 22.5 degrees.
                 RingPoints[RingIndex] = FVector2D(
                     static_cast<float>(Site->X + std::cos(Angle) * SiteConnectionRadius),
                     static_cast<float>(Site->Y + std::sin(Angle) * SiteConnectionRadius));
@@ -1085,7 +1122,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
             for (int32 RingIndex = 0; RingIndex < RingPointCount; ++RingIndex)
             {
-                const int32 NextRingIndex = (RingIndex + 1) % RingPointCount;
+                const int32 NextRingIndex = (RingIndex + 1) % RoadRingPointCount;
                 BuildSegment(
                     SiteCell, SiteCell,
                     RingPoints[RingIndex], RingPoints[NextRingIndex], false);
