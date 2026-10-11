@@ -31,9 +31,12 @@ struct FSVoxelGenerationSettings
 
 	int32 Seed = 1337;
 
-	// World-space climate settings: changing map size never rescales biome regions.
+	// Biomes follow one stable layout tied to the finite map rather than independent
+	// climate patches. Distances are normalized to the selected world footprint.
 	bool bEnableBiomes = true;
 	float BiomeScale = 0.0000075f;
+	FVector BiomeWorldCenter = FVector::ZeroVector;
+	float BiomeWorldSize = 400000.0f;
 
 	// Deterministic clearings reserved for future POIs.
 	bool bEnablePOIPlateaus = true;
@@ -58,7 +61,7 @@ struct FSVoxelGenerationSettings
 	float DetailAmplitude = 60.0f;
 
 	bool bEnableRivers = true;
-	float RiverScale = 0.0000025f;
+	float RiverScale = 0.000004f;
 	float RiverHalfWidth = 2500.0f;
 	float RiverDepth = 600.0f;
 	float RiverWaterLevel = 850.0f;
@@ -162,6 +165,15 @@ public:
 		float& OutTemperature,
 		float& OutMoisture,
 		float& OutMountainSignal);
+
+	/** Return world-relative desert, winter, and central temperate biome weights (each 0..1). */
+	static void SampleBiomeRegionWeights(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings,
+		float& OutDesertWeight,
+		float& OutWinterWeight,
+		float& OutTemperateWeight);
 
 	/** Classify biome at a deterministic global XY coordinate. */
 	static ESVoxelBiome SampleBiome(
