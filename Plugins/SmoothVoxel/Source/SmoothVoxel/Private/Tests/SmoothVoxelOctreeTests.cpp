@@ -250,6 +250,40 @@ bool FSmoothVoxelOctreeStreamingWindowOverlapTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelNoiseBandwidthTest,
+	"SmoothVoxel.Density.NoiseFitsMaximumLodBandwidth",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelNoiseBandwidthTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.NoiseScale = 0.0008f;  // Simulate an older Blueprint instance value.
+	Settings.DetailScale = 0.0006f;
+
+	const float CoarsestVoxelStep = 800.0f; // 8 m with a 1 m base voxel (MaxLod 3).
+	FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(Settings, CoarsestVoxelStep);
+
+	TestTrue(
+		TEXT("Highest macro-noise octave must stay below the coarse-grid aliasing limit"),
+		Settings.NoiseScale * 4.0f * CoarsestVoxelStep <= 0.3501f);
+	TestTrue(
+		TEXT("Highest detail-noise octave must stay below the coarse-grid aliasing limit"),
+		Settings.DetailScale * 4.0f * CoarsestVoxelStep <= 0.2626f);
+	TestTrue(TEXT("Older high noise settings should be clamped"),
+		Settings.NoiseScale < 0.0008f && Settings.DetailScale < 0.0006f);
+
+	const float AtFineLod = FSVoxelGenerator::SampleDensity(1234.0f, -567.0f, 900.0f, Settings);
+	FSVoxelGenerationSettings CoarseSettings = Settings;
+	CoarseSettings.VoxelSize = CoarsestVoxelStep;
+	const float AtCoarseLod = FSVoxelGenerator::SampleDensity(1234.0f, -567.0f, 900.0f, CoarseSettings);
+	TestTrue(
+		TEXT("All LODs must sample the same density field at a shared world coordinate"),
+		FMath::IsNearlyEqual(AtFineLod, AtCoarseLod, KINDA_SMALL_NUMBER));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelDensityDeterminismTest,
 	"SmoothVoxel.Density.DeterministicSampling",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
