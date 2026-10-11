@@ -2,8 +2,7 @@
 
 #include "VoxelBlockLibrary.h"
 #include "VoxelInventoryComponent.h"
-#include "VoxelWorld.h"
-#include "VoxelChunk.h"
+#include "SmoothVoxelOctreeWorld.h"
 
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -61,12 +60,12 @@ void UVoxelDebugComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (!VoxelWorld)
+    if (!IsValid(OctreeWorld))
     {
-        VoxelWorld = Cast<AVoxelWorld>(
+        OctreeWorld = Cast<ASmoothVoxelOctreeWorld>(
             UGameplayStatics::GetActorOfClass(
                 GetWorld(),
-                AVoxelWorld::StaticClass()));
+                ASmoothVoxelOctreeWorld::StaticClass()));
     }
 
     SetComponentTickEnabled(false);
@@ -177,6 +176,7 @@ void UVoxelDebugComponent::ResetTargetData()
 {
     DebugData.bHasTargetBlock = false;
     DebugData.TargetBlock = EVoxelBlock::Air;
+    DebugData.TargetLod = INDEX_NONE;
     DebugData.TargetBlockName = FText::FromString(TEXT("-"));
     DebugData.TargetDistance = 0.0f;
     DebugData.TargetWorldBlock = FIntVector::ZeroValue;
@@ -202,111 +202,95 @@ void UVoxelDebugComponent::ResetTargetData()
 
 void UVoxelDebugComponent::RefreshDebugData()
 {
-    if (!VoxelWorld)
+    if (!IsValid(OctreeWorld))
     {
-        VoxelWorld = Cast<AVoxelWorld>(
+        OctreeWorld = Cast<ASmoothVoxelOctreeWorld>(
             UGameplayStatics::GetActorOfClass(
                 GetWorld(),
-                AVoxelWorld::StaticClass()));
+                ASmoothVoxelOctreeWorld::StaticClass()));
+    }
+    if (!IsValid(OctreeWorld))
+    {
+        OctreeWorld = nullptr;
     }
 
     APawn* PlayerPawn = GetPlayerPawn();
-
     DebugData.PlayerLocation =
-        PlayerPawn
-        ? PlayerPawn->GetActorLocation()
-        : FVector::ZeroVector;
-
+        PlayerPawn ? PlayerPawn->GetActorLocation() : FVector::ZeroVector;
     DebugData.PlayerRotation =
-        PlayerPawn
-        ? PlayerPawn->GetActorRotation()
-        : FRotator::ZeroRotator;
+        PlayerPawn ? PlayerPawn->GetActorRotation() : FRotator::ZeroRotator;
 
-    DebugData.LoadedChunkCount =
-        VoxelWorld
-        ? VoxelWorld->GetLoadedChunkCount()
-        : 0;
+    DebugData.LoadedChunkCount = OctreeWorld ? OctreeWorld->GetActiveChunkCount() : 0;
+    DebugData.WorldSeed = OctreeWorld ? OctreeWorld->Seed : 0;
+    DebugData.ChunkSize = OctreeWorld ? OctreeWorld->CellsPerAxis : 0;
+    DebugData.VoxelSize = OctreeWorld ? OctreeWorld->BaseVoxelSize : 0.0f;
+    DebugData.InteractionDistance = OctreeWorld ? OctreeWorld->InteractionDistance : 0.0f;
+    // The old streaming/unload radii do not exist in the Octree selector.
+    DebugData.StreamingRadius = 0;
+    DebugData.UnloadRadius = 0;
+    DebugData.WorldSizeX = 0;
+    DebugData.WorldSizeY = 0;
+    DebugData.WorldSizeZ = 0;
+    DebugData.WorldSizeKilometers = OctreeWorld
+        ? OctreeWorld->GetWorldSizeCentimeters() / 100000.0f
+        : 0.0f;
+    DebugData.MaxLod = OctreeWorld ? OctreeWorld->MaxLod : 0;
+    DebugData.MaxLeafCount = OctreeWorld ? OctreeWorld->MaxLeafCount : 0;
+    DebugData.MaxConcurrentBuilds = OctreeWorld ? OctreeWorld->MaxConcurrentBuilds : 0;
+    DebugData.CollisionMaxLod = OctreeWorld ? OctreeWorld->CollisionMaxLod : 0;
+    DebugData.CollisionRadius = OctreeWorld ? OctreeWorld->CollisionRadius : 0.0f;
+    DebugData.RootWorldCenter = OctreeWorld ? OctreeWorld->RootWorldCenter : FVector::ZeroVector;
 
-    DebugData.StreamingCenterChunk =
-        VoxelWorld
-        ? VoxelWorld->GetStreamingCenterChunkDebug()
-        : FIntVector::ZeroValue;
-
-    if (VoxelWorld)
+    if (OctreeWorld)
     {
-        DebugData.WorldSeed = VoxelWorld->Seed;
-        DebugData.ChunkSize = VoxelWorld->ChunkSize;
-        DebugData.VoxelSize = VoxelWorld->VoxelSize;
-        DebugData.StreamingRadius =
-            VoxelWorld->StreamingRadius;
-        DebugData.UnloadRadius =
-            VoxelWorld->UnloadRadius;
-        DebugData.WorldSizeX = VoxelWorld->WorldSizeX;
-        DebugData.WorldSizeY = VoxelWorld->WorldSizeY;
-        DebugData.WorldSizeZ = VoxelWorld->WorldSizeZ;
-        DebugData.InteractionDistance =
-            VoxelWorld->InteractionDistance;
-    }
+        const float SafeVoxelSize = FMath::Max(1.0f, OctreeWorld->BaseVoxelSize);
+        const int32 WorldCells = FMath::RoundToInt(
+            OctreeWorld->GetWorldSizeCentimeters() / SafeVoxelSize);
+        // The Octree root is a finite cube; these are base-cell counts, not legacy chunk-grid dimensions.
+        DebugData.WorldSizeX = WorldCells;
+        DebugData.WorldSizeY = WorldCells;
+        DebugData.WorldSizeZ = WorldCells;
+        DebugData.PlayerWorldBlock = FIntVector(
+            FMath::FloorToInt(DebugData.PlayerLocation.X / SafeVoxelSize),
+            FMath::FloorToInt(DebugData.PlayerLocation.Y / SafeVoxelSize),
+            FMath::FloorToInt(DebugData.PlayerLocation.Z / SafeVoxelSize));
 
-    if (VoxelWorld)
-    {
-        EVoxelBlock PlayerBlock =
-            EVoxelBlock::Air;
-
-        FIntVector PlayerWorldBlock;
-        FIntVector PlayerLocalBlock;
-        FIntVector PlayerChunk;
-
-        if (VoxelWorld->GetBlockDebugInfoAtWorld(
-                DebugData.PlayerLocation,
-                PlayerBlock,
-                PlayerWorldBlock,
-                PlayerLocalBlock,
-                PlayerChunk))
+        FSVoxelOctreeNode PlayerNode;
+        if (OctreeWorld->GetOctreeNodeAtWorldPosition(DebugData.PlayerLocation, PlayerNode))
         {
-            DebugData.PlayerWorldBlock =
-                PlayerWorldBlock;
-
-            DebugData.PlayerChunk =
-                PlayerChunk;
+            DebugData.PlayerChunk = PlayerNode.OriginCells;
+            DebugData.StreamingCenterChunk = PlayerNode.OriginCells;
+            DebugData.PlayerLod = PlayerNode.Lod;
         }
         else
         {
-            DebugData.PlayerWorldBlock =
-                FIntVector::ZeroValue;
-
-            DebugData.PlayerChunk =
-                FIntVector::ZeroValue;
+            DebugData.PlayerChunk = FIntVector::ZeroValue;
+            DebugData.StreamingCenterChunk = FIntVector::ZeroValue;
+            DebugData.PlayerLod = INDEX_NONE;
         }
+    }
+    else
+    {
+        DebugData.PlayerWorldBlock = FIntVector::ZeroValue;
+        DebugData.PlayerChunk = FIntVector::ZeroValue;
+        DebugData.StreamingCenterChunk = FIntVector::ZeroValue;
+        DebugData.PlayerLod = INDEX_NONE;
     }
 
     if (PlayerPawn)
     {
         if (UVoxelInventoryComponent* Inventory =
-            PlayerPawn->FindComponentByClass<
-                UVoxelInventoryComponent>())
+            PlayerPawn->FindComponentByClass<UVoxelInventoryComponent>())
         {
-            DebugData.SelectedSlot =
-                Inventory->GetSelectedSlot();
-
-            DebugData.InventorySlotCount =
-                Inventory->GetSlotCount();
-
-            DebugData.InventoryMaxStackSize =
-                Inventory->MaxStackSize;
-
-            DebugData.SelectedBlock =
-                Inventory->GetSelectedBlock();
-
+            DebugData.SelectedSlot = Inventory->GetSelectedSlot();
+            DebugData.InventorySlotCount = Inventory->GetSlotCount();
+            DebugData.InventoryMaxStackSize = Inventory->MaxStackSize;
+            DebugData.SelectedBlock = Inventory->GetSelectedBlock();
             DebugData.SelectedBlockName =
                 UVoxelBlockLibrary::GetBlockDefinitionFromTable(
-                    VoxelWorld
-                    ? VoxelWorld->BlockDataTable
-                    : nullptr,
+                    OctreeWorld ? OctreeWorld->BlockDataTable : nullptr,
                     DebugData.SelectedBlock).DisplayName;
-
-            DebugData.SelectedQuantity =
-                Inventory->GetSelectedQuantity();
+            DebugData.SelectedQuantity = Inventory->GetSelectedQuantity();
         }
         else
         {
@@ -314,18 +298,14 @@ void UVoxelDebugComponent::RefreshDebugData()
             DebugData.InventorySlotCount = 0;
             DebugData.InventoryMaxStackSize = 0;
             DebugData.SelectedBlock = EVoxelBlock::Air;
-            DebugData.SelectedBlockName =
-                FText::FromString(TEXT("-"));
+            DebugData.SelectedBlockName = FText::FromString(TEXT("-"));
             DebugData.SelectedQuantity = 0;
         }
     }
 
     ResetTargetData();
-
-    APlayerController* PC =
-        GetPlayerController();
-
-    if (!PC || !VoxelWorld)
+    APlayerController* PC = GetPlayerController();
+    if (!PC || !OctreeWorld)
     {
         OnDebugDataUpdated.Broadcast(DebugData);
         return;
@@ -333,76 +313,70 @@ void UVoxelDebugComponent::RefreshDebugData()
 
     FVector Start;
     FVector Direction;
-
-    if (!GetDebugCenterScreenRay(
-        PC,
-        Start,
-        Direction))
+    if (!GetDebugCenterScreenRay(PC, Start, Direction))
     {
         OnDebugDataUpdated.Broadcast(DebugData);
         return;
     }
 
-    const FVector End =
-        Start +
-        Direction * VoxelWorld->InteractionDistance;
-
+    const FVector End = Start + Direction * OctreeWorld->InteractionDistance;
     FHitResult Hit;
-
-    FCollisionQueryParams Params(
-        SCENE_QUERY_STAT(VoxelDebug),
-        true);
-
-    Params.AddIgnoredActor(
-        GetOwner());
-
-    const bool bHit =
-        GetWorld()->LineTraceSingleByChannel(
-            Hit,
-            Start,
-            End,
-            ECC_Visibility,
-            Params);
-
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(VoxelDebug), true);
+    Params.AddIgnoredActor(GetOwner());
+    Params.AddIgnoredActor(OctreeWorld);
+    const bool bHit = GetWorld()->LineTraceSingleByChannel(
+        Hit, Start, End, ECC_Visibility, Params);
     if (!bHit)
     {
         OnDebugDataUpdated.Broadcast(DebugData);
         return;
     }
 
-    AVoxelChunk* HitChunk =
-        Cast<AVoxelChunk>(
-            Hit.GetActor());
-
-    if (!HitChunk)
+    ASmoothVoxelPlacedCubeBlock* HitCube =
+        Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor());
+    ASmoothVoxelTransvoxelChunk* HitChunk =
+        Cast<ASmoothVoxelTransvoxelChunk>(Hit.GetActor());
+    if (!HitCube && !HitChunk)
     {
         OnDebugDataUpdated.Broadcast(DebugData);
         return;
     }
 
-    DebugData.TargetDistance =
-        FVector::Distance(
-            Start,
-            Hit.ImpactPoint);
+    DebugData.TargetDistance = FVector::Distance(Start, Hit.ImpactPoint);
+    const float Step = FMath::Max(1.0f, OctreeWorld->BaseVoxelSize);
+    FVector BlockSamplePoint = Hit.ImpactPoint -
+        Hit.ImpactNormal * (Step * 0.51f);
 
-    const FVector BlockSamplePoint =
-        Hit.ImpactPoint -
-        Hit.ImpactNormal *
-        (VoxelWorld->VoxelSize * 0.51f);
+    EVoxelBlock TargetBlock = EVoxelBlock::Air;
+    FIntVector WorldBlock = FIntVector::ZeroValue;
+    FIntVector NodeOriginCells = FIntVector::ZeroValue;
+    int32 TargetLod = INDEX_NONE;
+    bool bFoundTarget = false;
 
-    EVoxelBlock TargetBlock =
-        EVoxelBlock::Air;
+    if (HitCube)
+    {
+        WorldBlock = HitCube->BlockCell;
+        TargetBlock = HitCube->BlockType;
+        BlockSamplePoint = FVector(
+            (static_cast<double>(WorldBlock.X) + 0.5) * Step,
+            (static_cast<double>(WorldBlock.Y) + 0.5) * Step,
+            (static_cast<double>(WorldBlock.Z) + 0.5) * Step);
 
-    FIntVector WorldBlock;
-    FIntVector LocalBlock;
-    FIntVector ChunkCoord;
+        FSVoxelOctreeNode TargetNode;
+        if (OctreeWorld->GetOctreeNodeAtWorldPosition(BlockSamplePoint, TargetNode))
+        {
+            NodeOriginCells = TargetNode.OriginCells;
+            TargetLod = TargetNode.Lod;
+            bFoundTarget = TargetBlock != EVoxelBlock::Air;
+        }
+    }
+    else
+    {
+        bFoundTarget = OctreeWorld->GetBlockDebugInfoAtWorldPosition(
+            BlockSamplePoint, TargetBlock, WorldBlock, NodeOriginCells, TargetLod);
+    }
 
-    if (!VoxelWorld->GetBlockDebugInfoAtWorld(
-            BlockSamplePoint,
-            TargetBlock,
-            WorldBlock,
-            LocalBlock,
-            ChunkCoord))
+    if (!bFoundTarget)
     {
         OnDebugDataUpdated.Broadcast(DebugData);
         return;
@@ -411,58 +385,30 @@ void UVoxelDebugComponent::RefreshDebugData()
     DebugData.bHasTargetBlock = true;
     DebugData.TargetBlock = TargetBlock;
     DebugData.TargetWorldBlock = WorldBlock;
-    DebugData.TargetLocalBlock = LocalBlock;
-    DebugData.TargetChunk = ChunkCoord;
+    DebugData.TargetLocalBlock = WorldBlock - NodeOriginCells;
+    DebugData.TargetChunk = NodeOriginCells;
+    DebugData.TargetLod = TargetLod;
 
     const FVoxelBlockDefinition Definition =
         UVoxelBlockLibrary::GetBlockDefinitionFromTable(
-            VoxelWorld->BlockDataTable,
-            TargetBlock);
-
-    DebugData.TargetBlockName =
-        Definition.DisplayName;
-
-    DebugData.TargetDropBlock =
-        Definition.DropBlock;
-
+            OctreeWorld->BlockDataTable, TargetBlock);
+    DebugData.TargetBlockName = Definition.DisplayName;
+    DebugData.TargetDropBlock = Definition.DropBlock;
     DebugData.TargetDropBlockName =
         UVoxelBlockLibrary::GetBlockDefinitionFromTable(
-            VoxelWorld->BlockDataTable,
-            Definition.DropBlock).DisplayName;
+            OctreeWorld->BlockDataTable, Definition.DropBlock).DisplayName;
+    DebugData.TargetDurability = Definition.Durability;
+    DebugData.bTargetIsSolid = Definition.bIsSolid;
+    DebugData.bTargetCanBreak = Definition.bCanBreak;
+    DebugData.bTargetCanPlace = Definition.bCanPlace;
+    DebugData.bTargetIsLiquid = Definition.bIsLiquid;
+    DebugData.TargetMaterialSlot = Definition.MaterialSlot;
+    DebugData.TargetMaterialAsset = SoftObjectPathToString(Definition.Material);
+    DebugData.TargetBreakSoundAsset = SoftObjectPathToString(Definition.BreakSound);
+    DebugData.TargetPlaceSoundAsset = SoftObjectPathToString(Definition.PlaceSound);
 
-    DebugData.TargetDurability =
-        Definition.Durability;
-
-    DebugData.bTargetIsSolid =
-        Definition.bIsSolid;
-
-    DebugData.bTargetCanBreak =
-        Definition.bCanBreak;
-
-    DebugData.bTargetCanPlace =
-        Definition.bCanPlace;
-
-    DebugData.bTargetIsLiquid =
-        Definition.bIsLiquid;
-
-    DebugData.TargetMaterialSlot =
-        Definition.MaterialSlot;
-
-    DebugData.TargetMaterialAsset =
-        SoftObjectPathToString(
-            Definition.Material);
-
-    DebugData.TargetBreakSoundAsset =
-        SoftObjectPathToString(
-            Definition.BreakSound);
-
-    DebugData.TargetPlaceSoundAsset =
-        SoftObjectPathToString(
-            Definition.PlaceSound);
-
-    VoxelWorld->GetTerrainDebugInfo(
-        WorldBlock.X,
-        WorldBlock.Y,
+    OctreeWorld->GetTerrainDebugInfoAtWorldPosition(
+        Hit.ImpactPoint,
         DebugData.TargetSurfaceHeight,
         DebugData.TargetTerrainNoise,
         DebugData.TargetTemperature,

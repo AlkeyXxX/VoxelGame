@@ -101,6 +101,21 @@ public:
 		double WorldY,
 		const FSVoxelGenerationSettings& Settings);
 
+	/** Sample the macro terrain noise at a global XY coordinate. */
+	static float SampleTerrainNoise(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
+	/** Return the signed temperature, moisture, and mountain climate signals. */
+	static void SampleBiomeClimate(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings,
+		float& OutTemperature,
+		float& OutMoisture,
+		float& OutMountainSignal);
+
 	/** Classify biome at a deterministic global XY coordinate. */
 	static ESVoxelBiome SampleBiome(
 		double WorldX,
@@ -154,14 +169,6 @@ private:
 		const FSVoxelGenerationSettings& Settings,
 		double& OutSiteX,
 		double& OutSiteY);
-
-	static void SampleBiomeClimate(
-		double WorldX,
-		double WorldY,
-		const FSVoxelGenerationSettings& Settings,
-		float& OutTemperature,
-		float& OutMoisture,
-		float& OutMountainSignal);
 
 	static float Density(
 		double X,

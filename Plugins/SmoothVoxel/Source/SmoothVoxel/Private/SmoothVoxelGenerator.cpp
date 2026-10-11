@@ -430,6 +430,17 @@ void FSVoxelGenerator::SampleBiomeClimate(
     OutMountainSignal = HashNoise2D(X * Scale * 1.45, Y * Scale * 1.45, S.Seed + 3907);
 }
 
+float FSVoxelGenerator::SampleTerrainNoise(
+    double WorldX,
+    double WorldY,
+    const FSVoxelGenerationSettings& Settings)
+{
+    return FBM2D(
+        WorldX * static_cast<double>(Settings.NoiseScale),
+        WorldY * static_cast<double>(Settings.NoiseScale),
+        Settings.Seed);
+}
+
 ESVoxelBiome FSVoxelGenerator::SampleBiome(
     double X,
     double Y,

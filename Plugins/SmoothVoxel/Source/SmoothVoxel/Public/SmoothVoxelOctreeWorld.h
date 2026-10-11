@@ -296,6 +296,33 @@ public:
 	UFUNCTION(BlueprintPure, Category="Voxel|POI")
 	float GetPOISuitabilityAtWorldPosition(const FVector& WorldPosition) const;
 
+	/** Query the currently selected Octree leaf containing a world-space position. */
+	bool GetOctreeNodeAtWorldPosition(
+		const FVector& WorldPosition,
+		FSVoxelOctreeNode& OutNode) const;
+
+	/** Query the current block interpretation and Octree leaf for an absolute base-cell coordinate. */
+	bool GetBlockDebugInfoForCell(
+		const FIntVector& Cell,
+		EVoxelBlock& OutBlock,
+		FIntVector& OutNodeOriginCells,
+		int32& OutLod) const;
+
+	bool GetBlockDebugInfoAtWorldPosition(
+		const FVector& WorldPosition,
+		EVoxelBlock& OutBlock,
+		FIntVector& OutCell,
+		FIntVector& OutNodeOriginCells,
+		int32& OutLod) const;
+
+	void GetTerrainDebugInfoAtWorldPosition(
+		const FVector& WorldPosition,
+		int32& OutSurfaceHeight,
+		float& OutTerrainNoise,
+		float& OutTemperature,
+		float& OutMoisture,
+		FString& OutBiomeName) const;
+
 	UFUNCTION(BlueprintCallable, Category="Voxel|Streaming")
 	void RegenerateWorld();
 

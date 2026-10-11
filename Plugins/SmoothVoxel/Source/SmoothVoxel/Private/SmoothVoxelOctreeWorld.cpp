@@ -771,6 +771,141 @@ float ASmoothVoxelOctreeWorld::GetPOISuitabilityAtWorldPosition(const FVector& W
 		Settings);
 }
 
+bool ASmoothVoxelOctreeWorld::GetOctreeNodeAtWorldPosition(
+	const FVector& WorldPosition,
+	FSVoxelOctreeNode& OutNode) const
+{
+	OutNode = FSVoxelOctreeNode();
+
+	const float HalfSize = GetWorldSizeCentimeters() * 0.5f;
+	const FVector WorldMin = RootWorldCenter - FVector(HalfSize);
+	const FVector WorldMax = RootWorldCenter + FVector(HalfSize);
+	if (WorldPosition.X < WorldMin.X || WorldPosition.Y < WorldMin.Y ||
+		WorldPosition.Z < WorldMin.Z || WorldPosition.X >= WorldMax.X ||
+		WorldPosition.Y >= WorldMax.Y || WorldPosition.Z >= WorldMax.Z)
+	{
+		return false;
+	}
+
+	const FIntVector Cell = WorldPositionToBlockCell(WorldPosition);
+	for (const FSVoxelOctreeNode& Node : DesiredNodes)
+	{
+		if (!IsValid(ActiveChunks.FindRef(Node)))
+		{
+			continue;
+		}
+
+		const int32 Span = Node.GetSpanInBaseCells(CellsPerAxis);
+		if (Cell.X >= Node.OriginCells.X && Cell.X < Node.OriginCells.X + Span &&
+			Cell.Y >= Node.OriginCells.Y && Cell.Y < Node.OriginCells.Y + Span &&
+			Cell.Z >= Node.OriginCells.Z && Cell.Z < Node.OriginCells.Z + Span)
+		{
+			OutNode = Node;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool ASmoothVoxelOctreeWorld::GetBlockDebugInfoForCell(
+	const FIntVector& Cell,
+	EVoxelBlock& OutBlock,
+	FIntVector& OutNodeOriginCells,
+	int32& OutLod) const
+{
+	OutBlock = EVoxelBlock::Air;
+	OutNodeOriginCells = FIntVector::ZeroValue;
+	OutLod = INDEX_NONE;
+
+	FSVoxelOctreeNode Node;
+	if (!GetOctreeNodeAtWorldPosition(BlockCellCenter(Cell), Node))
+	{
+		return false;
+	}
+
+	const EVoxelBlock Block = GetBlockTypeForCell(Cell);
+	if (Block == EVoxelBlock::Air)
+	{
+		return false;
+	}
+
+	OutBlock = Block;
+	OutNodeOriginCells = Node.OriginCells;
+	OutLod = Node.Lod;
+	return true;
+}
+
+bool ASmoothVoxelOctreeWorld::GetBlockDebugInfoAtWorldPosition(
+	const FVector& WorldPosition,
+	EVoxelBlock& OutBlock,
+	FIntVector& OutCell,
+	FIntVector& OutNodeOriginCells,
+	int32& OutLod) const
+{
+	OutCell = WorldPositionToBlockCell(WorldPosition);
+	return GetBlockDebugInfoForCell(OutCell, OutBlock, OutNodeOriginCells, OutLod);
+}
+
+void ASmoothVoxelOctreeWorld::GetTerrainDebugInfoAtWorldPosition(
+	const FVector& WorldPosition,
+	int32& OutSurfaceHeight,
+	float& OutTerrainNoise,
+	float& OutTemperature,
+	float& OutMoisture,
+	FString& OutBiomeName) const
+{
+	const float Step = GetEffectiveBlockSize();
+	const FSVoxelGenerationSettings Settings =
+		MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step, false);
+
+	const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
+		static_cast<double>(WorldPosition.X),
+		static_cast<double>(WorldPosition.Y),
+		Settings);
+	OutSurfaceHeight = FMath::RoundToInt(SurfaceHeight / static_cast<double>(Step));
+	OutTerrainNoise = FSVoxelGenerator::SampleTerrainNoise(
+		static_cast<double>(WorldPosition.X),
+		static_cast<double>(WorldPosition.Y),
+		Settings);
+
+	float SignedTemperature = 0.0f;
+	float SignedMoisture = 0.0f;
+	float MountainSignal = 0.0f;
+	FSVoxelGenerator::SampleBiomeClimate(
+		static_cast<double>(WorldPosition.X),
+		static_cast<double>(WorldPosition.Y),
+		Settings,
+		SignedTemperature,
+		SignedMoisture,
+		MountainSignal);
+	OutTemperature = FMath::Clamp(SignedTemperature * 0.5f + 0.5f, 0.0f, 1.0f);
+	OutMoisture = FMath::Clamp(SignedMoisture * 0.5f + 0.5f, 0.0f, 1.0f);
+
+	switch (FSVoxelGenerator::SampleBiome(
+		static_cast<double>(WorldPosition.X),
+		static_cast<double>(WorldPosition.Y),
+		Settings))
+	{
+	case ESVoxelBiome::Forest:
+		OutBiomeName = TEXT("Forest");
+		break;
+	case ESVoxelBiome::Desert:
+		OutBiomeName = TEXT("Desert");
+		break;
+	case ESVoxelBiome::Mountain:
+		OutBiomeName = TEXT("Mountain");
+		break;
+	case ESVoxelBiome::Snow:
+		OutBiomeName = TEXT("Snow");
+		break;
+	case ESVoxelBiome::Plains:
+	default:
+		OutBiomeName = TEXT("Plains");
+		break;
+	}
+}
+
 float ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(
 	ESmoothVoxelWorldSize InWorldSize)
 {
