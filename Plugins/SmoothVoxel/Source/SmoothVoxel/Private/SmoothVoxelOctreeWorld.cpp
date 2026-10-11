@@ -1889,10 +1889,14 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	// only the air-above-terrain test is safe because cave carving can extend
 	// into otherwise solid columns.
 	const float HeightSafetyMargin = SelectionSettings.BaseVoxelSize * 2.0f;
-	const float MinSurfaceHeight = BaseHeight -
-		FMath::Abs(HeightAmplitude) - FMath::Abs(DetailAmplitude);
-	const float MaxSurfaceHeight = BaseHeight +
-		FMath::Abs(HeightAmplitude) + FMath::Abs(DetailAmplitude);
+	// Biome shaping can amplify mountain relief and add dune/mountain lift.
+	// Bound that full range here, otherwise high mountain chunks could be
+	// culled above the old plains-only height envelope.
+	const float MaxBiomeRelief =
+		FMath::Abs(HeightAmplitude) * 2.6f +
+		FMath::Abs(DetailAmplitude) * 1.9f;
+	const float MinSurfaceHeight = BaseHeight - MaxBiomeRelief;
+	const float MaxSurfaceHeight = BaseHeight + MaxBiomeRelief;
 	Leaves.RemoveAll([&](const FSVoxelOctreeNode& Node)
 	{
 		const FVector NodeOrigin = SelectionSettings.WorldOrigin +
