@@ -13,7 +13,7 @@ void UVoxelMainMenuWidget::StartNewGame()
                 GetWorld(),
                 ASmoothVoxelOctreeWorld::StaticClass())))
     {
-        World->RegenerateWorld();
+        World->StartNewGame();
     }
     else
     {

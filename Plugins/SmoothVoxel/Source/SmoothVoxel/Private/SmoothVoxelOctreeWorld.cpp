@@ -744,6 +744,34 @@ void ASmoothVoxelOctreeWorld::RegenerateWorld()
 	bForceUpdate = true;
 }
 
+void ASmoothVoxelOctreeWorld::StartNewGame()
+{
+	for (TPair<FIntVector, ASmoothVoxelPlacedCubeBlock*>& Pair : PlacedCubeBlocks)
+	{
+		if (IsValid(Pair.Value))
+		{
+			Pair.Value->Destroy();
+		}
+	}
+	PlacedCubeBlocks.Reset();
+
+	EditedBlockCells.Reset();
+	EditedBlockCenters.Reset();
+	EditedBlockTypes.Reset();
+	PrePlacedBlockEditStates.Reset();
+	PrePlacedBlockEditCenters.Reset();
+	PrePlacedBlockEditTypes.Reset();
+	MinedTerrainNodes.Reset();
+
+	// Workers only receive immutable snapshots. Resetting these pointers ensures
+	// all new builds use the untouched deterministic terrain for this seed.
+	BlockEditSnapshot.Reset();
+	BlockEditCenterSnapshot.Reset();
+	MinedNodeSnapshot.Reset();
+
+	bForceUpdate = true;
+}
+
 float ASmoothVoxelOctreeWorld::GetWorldSizeCentimeters() const
 {
 	return GetWorldSizeCentimetersForPreset(WorldSize);

@@ -326,6 +326,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Voxel|Streaming")
 	void RegenerateWorld();
 
+	/** Clear runtime terrain edits and placed cubes, then rebuild the seed-defined base world. */
+	UFUNCTION(BlueprintCallable, Category="Voxel|World")
+	void StartNewGame();
+
 	UFUNCTION(BlueprintPure, Category="Voxel|World")
 	float GetWorldSizeCentimeters() const;
 
