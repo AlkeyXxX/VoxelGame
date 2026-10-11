@@ -500,7 +500,7 @@ float FSVoxelGenerator::SampleFlatlandInfluence(
         0.0f, 1.0f);
     const float HillCoverage = Biome == ESVoxelBiome::Desert
         ? FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f)
-        : FMath::Clamp(1.0f - FMath::Clamp(S.FlatlandCoverage, 0.5f, 0.9f), 0.0f, 0.5f);
+        : FMath::Clamp(1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
     const float BorderWidth = Biome == ESVoxelBiome::Desert ? 0.025f : 0.075f;
     const float T = FMath::Clamp(
         (Region01 - (1.0f - HillCoverage - BorderWidth)) /
@@ -534,7 +534,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
 
     const float HillCoverage = Biome == ESVoxelBiome::Desert
         ? FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f)
-        : FMath::Clamp(1.0f - FMath::Clamp(S.FlatlandCoverage, 0.5f, 0.9f), 0.0f, 0.5f);
+        : FMath::Clamp(1.0f - FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f), 0.0f, 0.8f);
     const float BorderWidth = Biome == ESVoxelBiome::Desert ? 0.025f : 0.075f;
     const float HillBlend = SmoothStep(
         1.0f - HillCoverage - BorderWidth,
