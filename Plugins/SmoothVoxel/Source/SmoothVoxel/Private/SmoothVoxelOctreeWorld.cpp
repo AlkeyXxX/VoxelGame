@@ -888,7 +888,7 @@ bool ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 				SpawnParams);
 			if (!IsValid(Cube))
 			{
-				return;
+				return false;
 			}
 			PlacedCubeBlocks.Add(Cell, Cube);
 
