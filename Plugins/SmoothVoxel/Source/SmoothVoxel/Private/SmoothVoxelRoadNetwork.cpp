@@ -195,8 +195,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             Path.Add(Point);
 
             const double Ground = FSVoxelGenerator::SampleSurfaceHeight(
-                static_cast<double>(WorldCenter.X) + static_cast<double>(Point.X) - WorldCenter.X,
-                static_cast<double>(WorldCenter.Y) + static_cast<double>(Point.Y) - WorldCenter.Y,
+                static_cast<double>(Point.X),
+                static_cast<double>(Point.Y),
                 GenerationSettings);
             GroundHeights.Add(Ground);
 
@@ -255,7 +255,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const double RightGround = FSVoxelGenerator::SampleSurfaceHeight(
                 static_cast<double>(RightXY.X), static_cast<double>(RightXY.Y), GenerationSettings);
             const double Lift = RoadLifts[SampleIndex];
-            const double RoadCenterHeight = GroundHeights[SampleIndex] + Lift + SafeSurfaceOffset;
             const double LeftZ = LeftGround + Lift + SafeSurfaceOffset;
             const double RightZ = RightGround + Lift + SafeSurfaceOffset;
 
