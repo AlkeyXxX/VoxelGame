@@ -103,14 +103,13 @@ winding separately from the stored outward normals.
   their Details-panel values.
 - Chunk streaming work is spread across frames: at most `MaxChunkRequestsPerFrame`
   chunks are spawned/reconfigured per frame, obsolete chunks are retired in
-  batches, and terrain normals are cached by local vertex position. Regular
-  vertices that are not moved by a Transvoxel transition no longer calculate an
-  extra density gradient. This reduces hitches but still needs profiling in UE4.27.
+  batches, and identical mesh vertices are indexed once per chunk to reduce GPU
+  vertex data and upload size. Normals are reused with those shared vertices.
+  This reduces overhead but still needs profiling in UE4.27.
 - `SplitDistanceMultiplier` controls how early the octree refines a chunk.
-  A default of 1.0 begins subdivision farther from the player than 0.75, moving
-  LOD transition boundaries away from the immediate view without increasing
-  the maximum mesh density everywhere. Existing placed Blueprint/level instances
-  may retain a serialized Details-panel value; set it to 1.0 there if needed.
+  The default is 0.75; raising it increases the number of fine chunks and LOD
+  boundaries and can reduce frame rate. Existing placed Blueprint/level instances
+  may retain serialized Details-panel values, so check this setting on the actor.
 - This intentionally trades some fine geometric noise for stable distant terrain.
   Add high-frequency albedo/normal detail in the material rather than raising the
   geometry noise scales beyond the supported sampling bandwidth.
