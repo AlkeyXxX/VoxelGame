@@ -71,16 +71,34 @@ namespace
 		// gradient radius even when there are no ordinary block-cell edits.
 		if (bHasMinedNodes)
 		{
-			for (int32 DZ = -2; DZ <= 2; ++DZ)
+			// Edit snapshots are spatially filtered per chunk; most contain only
+			// a handful of mined nodes, so a short linear scan avoids 125 hash
+			// lookups for every emitted vertex near an edited chunk.
+			if (Settings.MinedNodes->Num() <= 32)
 			{
-				for (int32 DY = -2; DY <= 2; ++DY)
+				for (const FIntVector& Node : *Settings.MinedNodes)
 				{
-					for (int32 DX = -2; DX <= 2; ++DX)
+					if (FMath::Abs(Node.X - CellX) <= 2 &&
+						FMath::Abs(Node.Y - CellY) <= 2 &&
+						FMath::Abs(Node.Z - CellZ) <= 2)
 					{
-						if (Settings.MinedNodes->Contains(FIntVector(
-							CellX + DX, CellY + DY, CellZ + DZ)))
+						return true;
+					}
+				}
+			}
+			else
+			{
+				for (int32 DZ = -2; DZ <= 2; ++DZ)
+				{
+					for (int32 DY = -2; DY <= 2; ++DY)
+					{
+						for (int32 DX = -2; DX <= 2; ++DX)
 						{
-							return true;
+							if (Settings.MinedNodes->Contains(FIntVector(
+								CellX + DX, CellY + DY, CellZ + DZ)))
+							{
+								return true;
+							}
 						}
 					}
 				}
