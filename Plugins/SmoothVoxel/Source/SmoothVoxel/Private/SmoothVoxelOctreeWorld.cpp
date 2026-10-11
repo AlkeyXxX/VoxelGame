@@ -655,7 +655,13 @@ void ASmoothVoxelOctreeWorld::RegenerateWorld()
 
 float ASmoothVoxelOctreeWorld::GetWorldSizeCentimeters() const
 {
-	switch (WorldSize)
+	return GetWorldSizeCentimetersForPreset(WorldSize);
+}
+
+float ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(
+	ESmoothVoxelWorldSize InWorldSize)
+{
+	switch (InWorldSize)
 	{
 	case ESmoothVoxelWorldSize::Size2Km:
 		return 200000.0f;
@@ -1784,13 +1790,10 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	BaseVoxelSize = SelectionSettings.BaseVoxelSize;
 
 	SelectionSettings.SplitDistanceMultiplier = FMath::Clamp(SplitDistanceMultiplier, 0.05f, 4.0f);
-	// At 8K, a root at LOD 8 needs at least 8^(8-4) = 4096 leaves just
-	// to bring the whole tree down to the default maximum leaf LOD.
+	// At 8K, the default LOD 4 root coverage requires at least 4096 leaves.
+	// Keep the editor-set safety budget authoritative; an intentionally smaller
+	// cap fails selection safely instead of silently allocating a huge tree.
 	SelectionSettings.MaxLeafCount = FMath::Max(32, MaxLeafCount);
-	const int32 RequiredRootLeaves = 1 << (3 * FMath::Max(
-		0, SelectionSettings.RootLod - SelectionSettings.MaxLod));
-	SelectionSettings.MaxLeafCount = FMath::Max(
-		SelectionSettings.MaxLeafCount, RequiredRootLeaves);
 
 	const float RootSize = static_cast<float>(SelectionSettings.CellsPerAxis) *
 		static_cast<float>(1 << SelectionSettings.RootLod) *
