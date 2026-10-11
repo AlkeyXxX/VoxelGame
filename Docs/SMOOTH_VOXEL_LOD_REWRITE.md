@@ -167,11 +167,11 @@ winding separately from the stored outward normals.
   workers, and a one-mesh-section-per-frame commit budget. These safeguards
   reduce repeated rebuilds and completion bursts but cannot guarantee zero
   frame-time cost for every terrain/material configuration.
-- UVs use dominant-axis world-space planar projection at a fixed world scale:
-  XY for horizontal faces, XZ for Y-facing walls and YZ for X-facing walls.
-  Coordinates are reconstructed from the chunk's integer lattice origin in
-  double precision and rebased by integer tile offsets. This avoids the severe
-  stretch caused by the previous world-XY-only mapping on vertical pit walls.
+- UVs use dominant-axis world-space planar projection: XY for horizontal faces,
+  XZ for Y-facing walls and YZ for X-facing walls. Vertical walls use a tighter
+  repeat (one tile per 400 cm versus 2000 cm on floors) to prevent texture scale
+  from looking oversized in pits. Coordinates are reconstructed from the chunk's
+  integer lattice origin in double precision and rebased by integer tile offsets.
   Axis changes on strongly sloped surfaces can still produce projection seams;
   true material-level triplanar blending remains the better long-term solution.
 - Tangents are derived from the UV0 world-XY projection and the smoothed surface
