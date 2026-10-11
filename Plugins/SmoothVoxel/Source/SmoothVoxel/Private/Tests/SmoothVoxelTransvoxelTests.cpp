@@ -335,6 +335,73 @@ bool FSmoothVoxelTransvoxelTangentContinuityTest::RunTest(const FString& Paramet
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelTransvoxelSameLodNormalSeamTest,
+	"SmoothVoxel.Transvoxel.NormalsMatchAcrossSameLodSeam",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelTransvoxelSameLodNormalSeamTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings LeftSettings;
+	LeftSettings.ChunkWorldOrigin = FVector::ZeroVector;
+	LeftSettings.BaseHeight = 200.0f;
+	LeftSettings.HeightAmplitude = 160.0f;
+	LeftSettings.DetailAmplitude = 25.0f;
+	LeftSettings.NoiseScale = 0.0008f;
+	LeftSettings.DetailScale = 0.0006f;
+	LeftSettings.BottomDepth = 2000.0f;
+	LeftSettings.bEnableCaves = false;
+	LeftSettings.IsoLevel = 0.0f;
+
+	FSVoxelMeshData LeftMesh;
+	// This chunk transitions on -Y but shares its +X face with a same-LOD
+	// neighbour. Border normals along +X must not inherit the -Y fine step.
+	FSVoxelTransvoxelMesher::Generate(
+		LeftSettings, 8, 100.0f, SVoxelTransitionFace_NegativeY, LeftMesh);
+
+	FSVoxelGenerationSettings RightSettings = LeftSettings;
+	RightSettings.ChunkWorldOrigin = FVector(800.0f, 0.0f, 0.0f);
+	FSVoxelMeshData RightMesh;
+	FSVoxelTransvoxelMesher::Generate(RightSettings, 8, 100.0f, 0, RightMesh);
+
+	TMap<FIntPoint, FVector> LeftNormals;
+	TMap<FIntPoint, FVector> RightNormals;
+	for (int32 Index = 0; Index < LeftMesh.Vertices.Num(); ++Index)
+	{
+		const FVector& Vertex = LeftMesh.Vertices[Index];
+		if (FMath::IsNearlyEqual(Vertex.X, 800.0f, 0.01f))
+		{
+			LeftNormals.Add(FIntPoint(
+				FMath::RoundToInt(Vertex.Y * 10.0f),
+				FMath::RoundToInt(Vertex.Z * 10.0f)), LeftMesh.Normals[Index]);
+		}
+	}
+	for (int32 Index = 0; Index < RightMesh.Vertices.Num(); ++Index)
+	{
+		const FVector& Vertex = RightMesh.Vertices[Index];
+		if (FMath::IsNearlyZero(Vertex.X, 0.01f))
+		{
+			RightNormals.Add(FIntPoint(
+				FMath::RoundToInt(Vertex.Y * 10.0f),
+				FMath::RoundToInt(Vertex.Z * 10.0f)), RightMesh.Normals[Index]);
+		}
+	}
+
+	int32 ComparedNormals = 0;
+	for (const TPair<FIntPoint, FVector>& Pair : LeftNormals)
+	{
+		if (const FVector* RightNormal = RightNormals.Find(Pair.Key))
+		{
+			++ComparedNormals;
+			TestTrue(
+				TEXT("Same-LOD neighbour must use the same normal sampling step at the shared face"),
+				FVector::DotProduct(Pair.Value, *RightNormal) > 0.999f);
+		}
+	}
+	TestTrue(TEXT("Test fixture must contain shared surface vertices"), ComparedNormals > 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelTransvoxelSlopedCoarseFineSeamTest,
 	"SmoothVoxel.Transvoxel.SlopedCoarseFineSeam",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
