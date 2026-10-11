@@ -484,21 +484,43 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 			static_cast<double>(CellsPerAxis) * VoxelSize + Padding;
 
 		FSVoxelBlockEditMap LocalEdits;
+		FSVoxelBlockEditCenterMap LocalEditCenters;
 		for (const TPair<FIntVector, int8>& Edit : *BlockEditSnapshot)
 		{
-			const double EditX = (static_cast<double>(Edit.Key.X) + 0.5) * EditGridStep;
-			const double EditY = (static_cast<double>(Edit.Key.Y) + 0.5) * EditGridStep;
-			const double EditZ = (static_cast<double>(Edit.Key.Z) + 0.5) * EditGridStep;
+			double EditX = (static_cast<double>(Edit.Key.X) + 0.5) * EditGridStep;
+			double EditY = (static_cast<double>(Edit.Key.Y) + 0.5) * EditGridStep;
+			double EditZ = (static_cast<double>(Edit.Key.Z) + 0.5) * EditGridStep;
+			if (BlockEditCenterSnapshot.IsValid())
+			{
+				if (const FVector* EditCenter = BlockEditCenterSnapshot->Find(Edit.Key))
+				{
+					EditX = EditCenter->X;
+					EditY = EditCenter->Y;
+					EditZ = EditCenter->Z;
+				}
+			}
 			if (EditX >= MinX && EditX <= MaxX &&
 				EditY >= MinY && EditY <= MaxY &&
 				EditZ >= MinZ && EditZ <= MaxZ)
 			{
 				LocalEdits.Add(Edit.Key, Edit.Value);
+				if (BlockEditCenterSnapshot.IsValid())
+				{
+					if (const FVector* EditCenter = BlockEditCenterSnapshot->Find(Edit.Key))
+					{
+						LocalEditCenters.Add(Edit.Key, *EditCenter);
+					}
+				}
 			}
 		}
 		if (LocalEdits.Num() > 0)
 		{
 			Settings.BlockEdits = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(LocalEdits);
+			if (LocalEditCenters.Num() > 0)
+			{
+				Settings.BlockEditCenters =
+					MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(LocalEditCenters);
+			}
 		}
 	}
 	return Settings;
@@ -535,6 +557,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() cons
 	// Point queries for interaction can occur anywhere in the finite world, so
 	// use the complete edit snapshot rather than a per-chunk filtered subset.
 	Settings.BlockEdits = BlockEditSnapshot;
+	Settings.BlockEditCenters = BlockEditCenterSnapshot;
 	return Settings;
 }
 
@@ -636,7 +659,8 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 	const FIntVector& Cell,
 	EVoxelBlock Block,
-	int8 EditStateOverride)
+	int8 EditStateOverride,
+	const FVector* EditCenterOverride)
 {
 	ASmoothVoxelPlacedCubeBlock* ExistingCube = PlacedCubeBlocks.FindRef(Cell);
 	const bool bRemoveBlock = Block == EVoxelBlock::Air;
@@ -655,8 +679,12 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		PlacedCubeBlocks.Remove(Cell);
 		EditedBlockTypes.Remove(Cell);
 		EditedBlockCells.Remove(Cell);
+		EditedBlockCenters.Remove(Cell);
 		BlockEditSnapshot = EditedBlockCells.Num() > 0
 			? MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells)
+			: nullptr;
+		BlockEditCenterSnapshot = EditedBlockCenters.Num() > 0
+			? MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters)
 			: nullptr;
 		RebuildChunksNearEditedCell(Cell);
 		return;
@@ -672,7 +700,10 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		}
 		PlacedCubeBlocks.Remove(Cell);
 		EditedBlockTypes.Remove(Cell);
-		EditedBlockTypes.Remove(Cell);
+		if (EditCenterOverride && !EditedBlockCenters.Contains(Cell))
+		{
+			EditedBlockCenters.Add(Cell, *EditCenterOverride);
+		}
 		EditState = EditStateOverride != 0 ? EditStateOverride : int8(-5);
 	}
 	else if (bSmoothBlock)
@@ -684,6 +715,7 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 			ExistingCube->Destroy();
 		}
 		PlacedCubeBlocks.Remove(Cell);
+		EditedBlockCenters.Remove(Cell);
 		EditedBlockTypes.Add(Cell, Block);
 		EditState = EditStateOverride != 0 ? EditStateOverride : int8(1);
 	}
@@ -715,12 +747,16 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 
 		Cube->ConfigureBlock(
 			Block, Cell, GetEffectiveBlockSize(), TerrainMaterial, Cube->GetDamageStage());
+		EditedBlockCenters.Remove(Cell);
 		EditedBlockTypes.Add(Cell, Block);
 		EditState = EditStateOverride != 0 ? EditStateOverride : int8(2);
 	}
 
 	EditedBlockCells.Add(Cell, EditState);
 	BlockEditSnapshot = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells);
+	BlockEditCenterSnapshot = EditedBlockCenters.Num() > 0
+		? MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters)
+		: nullptr;
 	RebuildChunksNearEditedCell(Cell);
 }
 
@@ -902,7 +938,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	}
 	else
 	{
-		ApplyBlockCellEdit(Cell, EVoxelBlock::Air, NextMiningState);
+		ApplyBlockCellEdit(Cell, EVoxelBlock::Air, NextMiningState, &InsidePoint);
 	}
 
 	if (Inventory && bFinishesMiningCell && DropBlock != EVoxelBlock::Air)
