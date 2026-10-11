@@ -592,13 +592,13 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	Vertices.Add(FVector( HalfExtent,  HalfExtent, 0.0f));
 	Vertices.Add(FVector(-HalfExtent,  HalfExtent, 0.0f));
 
-	// Winding matches the upward-facing normal.
+	// Preserve the winding that was already used by the working lake surface.
 	Triangles.Add(0);
+	Triangles.Add(2);
 	Triangles.Add(1);
-	Triangles.Add(2);
 	Triangles.Add(0);
-	Triangles.Add(2);
 	Triangles.Add(3);
+	Triangles.Add(2);
 
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
