@@ -300,8 +300,8 @@ namespace
 		// All vertices belonging to this cell use the same integer offset.
 		// Since the material tiles on integer UV boundaries, this leaves the
 		// world-aligned texture phase unchanged at cell and chunk boundaries.
-		const double UvOffsetU = static_cast<double>(FMath::FloorToInt64(MeanU));
-		const double UvOffsetV = static_cast<double>(FMath::FloorToInt64(MeanV));
+		const double UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(MeanU)));
+		const double UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(MeanV)));
 
 		TArray<FVector> CellNormals;
 		CellNormals.SetNumUninitialized(VertexCount);
