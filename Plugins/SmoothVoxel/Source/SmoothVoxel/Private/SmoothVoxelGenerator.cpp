@@ -95,8 +95,8 @@ namespace
         const int32 BaseZ = static_cast<int32>(std::floor(Z / Step));
         const double HalfExtent = Step * 0.55;
 
-        // A sample can be influenced by the eight grid cells that touch it.
-        // Evaluating only these nearby edits avoids scanning the whole edit map.
+        // The 0.55-cell half extent slightly overlaps neighbouring cell volumes,
+        // so check the 3x3x3 neighbourhood at boundaries. Never scan the full map.
         for (int32 DZ = -1; DZ <= 1; ++DZ)
         {
             for (int32 DY = -1; DY <= 1; ++DY)
