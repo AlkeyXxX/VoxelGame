@@ -68,6 +68,17 @@ public:
 		const FVector& LocalPosition,
 		const FSVoxelGenerationSettings& Settings);
 
+	/** Height-only surface sample, shared by every Z sample in one vertical column. */
+	static double SampleSurfaceHeightAtChunkLocal(
+		const FVector& LocalPosition,
+		const FSVoxelGenerationSettings& Settings);
+
+	/** Sample density using a precomputed surface height to avoid re-evaluating 2D terrain noise for each Z layer. */
+	static float SampleDensityAtChunkLocalWithSurfaceHeight(
+		const FVector& LocalPosition,
+		double SurfaceHeight,
+		const FSVoxelGenerationSettings& Settings);
+
 	/** Clamp the FBM frequencies so its highest octave is representable at the
 	 * coarsest voxel step, without changing the density field from LOD to LOD.
 	 */
@@ -85,6 +96,13 @@ private:
 		double X,
 		double Y,
 		double Z,
+		const FSVoxelGenerationSettings& S);
+
+	static float DensityFromSurfaceHeight(
+		double X,
+		double Y,
+		double Z,
+		double SurfaceHeight,
 		const FSVoxelGenerationSettings& S);
 
 	static FVector Interpolate(
