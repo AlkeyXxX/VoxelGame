@@ -756,10 +756,24 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		FSVoxelGenerator::SampleDensity(125.0, 125.0, 249.0, Settings);
 	const float FirstHitOutsideRadiusDensity =
 		FSVoxelGenerator::SampleDensity(160.0, 125.0, 249.0, Settings);
+	const float PointOutsideFirstStageDensity =
+		FSVoxelGenerator::SampleDensity(145.0, 125.0, 249.0, Settings);
 	TestTrue(TEXT("A mining hit must remove density around the actual contact point"),
 		FirstHitCenterDensity < 0.0f);
 	TestTrue(TEXT("One mining hit must not hollow out an entire square voxel cell"),
 		FirstHitOutsideRadiusDensity > 0.0f);
+	TestTrue(TEXT("The first damage stage should stay subtle outside its small octahedral radius"),
+		PointOutsideFirstStageDensity > 0.0f);
+
+	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> StageTwoEdits =
+		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(*Edits);
+	StageTwoEdits->Add(FIntVector(2, 2, 4), int8(-2));
+	FSVoxelGenerationSettings StageTwoSettings = Settings;
+	StageTwoSettings.BlockEdits = StageTwoEdits;
+	const float PointInsideSecondStageDensity =
+		FSVoxelGenerator::SampleDensity(145.0, 125.0, 249.0, StageTwoSettings);
+	TestTrue(TEXT("A repeated hit should expand the same terrain depression"),
+		PointInsideSecondStageDensity < 0.0f);
 
 	FSVoxelMeshData Mesh;
 	FSVoxelTransvoxelMesher::Generate(Settings, 16, 50.0f, 0, Mesh);
