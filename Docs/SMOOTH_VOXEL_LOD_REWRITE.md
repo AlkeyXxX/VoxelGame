@@ -25,19 +25,25 @@ The rewrite lives beside the current world and does not replace the legacy
    the followed actor, with 50% overlap. Its vertical range remains anchored so
    upward flight does not move terrain out of the active window; absolute chunk
    keys allow overlapping meshes to be reused.
-7. Vertex-normal sampling scales with LOD and blends to the finer neighbour's
-   sampling distance at transition faces. Stable world-XY UVs prevent per-vertex
-   projection-axis changes, and per-vertex tangents are generated for the chosen
-   UVs to support normal-mapped terrain materials.
+7. Regular mesh vertices use projected secondary positions in transition
+   boundary cells instead of moving density sample corners before interpolation.
+   Adjacent transition faces remain on their shared edge lattice. Vertex-normal
+   sampling scales with LOD; world-XY UVs stay stable and per-vertex tangents are
+   generated for normal-mapped terrain materials.
+8. Completed CPU meshes are queued to the manager and only one procedural mesh
+   section is committed on the game thread per frame. Worker concurrency is
+   capped at two, and LOD reselection has a minimum 10 m movement threshold.
 
 ## Important current limitations
 
 The new mesher and octree selector are attached to a separate, opt-in terrain
 manager that follows a pawn or configured actor and streams chunks as the view
-moves. It uses an async build limit, rejects stale build results, and keeps
-the old mesh set visible while new chunks are built hidden. When the full
-desired set is ready, it retires old leaves and reveals new leaves together,
-avoiding overlap and z-fighting between old coarse parents and new fine children.
+moves. It rejects stale build results and keeps the old mesh set visible while
+new chunks are built hidden. When the full desired set is ready, it retires old
+leaves and reveals new leaves together, avoiding overlap and z-fighting between
+old coarse parents and newly built fine children. Completed CPU meshes are
+committed one per frame, and worker concurrency is capped at two to reduce
+game-thread upload bursts and CPU contention.
 The root is a rolling finite window, not an unbounded world at once: it shifts
 horizontally by half its width and keeps 50% overlap to avoid stopping terrain
 generation at the original root boundary. Its vertical interval remains
@@ -51,10 +57,12 @@ real-world performance are already correct. The legacy gameplay path remains
 unchanged as a fallback.
 
 The transition table encodes topology for a 2:1 resolution change. A balanced
-octree does not by itself make a crack-free surface; the runtime manager must
-derive correct face masks, keep a consistent world-space density field, retain
-old meshes until replacements finish, and test edges/corners where multiple
-transition faces meet.
+octree does not by itself make a crack-free surface: regular cells bordering a
+transition need secondary positions, and multiple transition faces must preserve
+a shared edge lattice. The current branch projects a quarter-cell border offset
+into the regular surface tangent plane and leaves face intersections on exact
+shared coordinates. These changes are new and still require runtime verification
+at all six face orientations and edge/corner combinations.
 
 ## Triangle winding and collision
 
@@ -74,6 +82,14 @@ winding separately from the stored outward normals.
   high-frequency shading noise on triangles that no longer represent those
   small details. At coarse/fine boundaries it blends to the fine neighbour's
   normal-sampling distance to reduce visible lighting discontinuity.
+- Transition faces use secondary-position deformation of regular-surface
+  vertices, with displacement projected along the surface tangent rather than
+  moving sampled cube corners before isosurface interpolation. Vertices shared
+  with a non-transition face remain fixed to preserve neighbouring seams.
+- Stream selection has a minimum 10 m movement threshold, at most two CPU
+  workers, and a one-mesh-section-per-frame commit budget. These safeguards
+  reduce repeated rebuilds and completion bursts but cannot guarantee zero
+  frame-time cost for every terrain/material configuration.
 - UVs use stable world-XY projection at a fixed world scale across cells, LODs
   and chunk seams. This suits the height-field terrain and avoids skew from
   switching projection axes at individual vertices. It may stretch on near-
