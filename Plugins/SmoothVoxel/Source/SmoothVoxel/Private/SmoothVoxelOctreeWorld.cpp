@@ -5,6 +5,8 @@
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 #include "SmoothVoxelTransvoxelMesher.h"
+#include "SmoothVoxelGenerator.h"
+#include "TimerManager.h"
 #include "../VoxelBlockLibrary.h"
 #include "../VoxelInventoryComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -19,6 +21,141 @@ namespace
 	bool IsSmoothTerrainBlock(EVoxelBlock Block)
 	{
 		return false;
+	}
+
+	bool IsNearEditedVoxelCell(
+		const FVector& LocalPosition,
+		const FSVoxelGenerationSettings& Settings)
+	{
+		const double BaseStep = FMath::Max(1.0, static_cast<double>(Settings.BaseVoxelSize));
+		const double WorldX = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep + LocalPosition.X
+			: static_cast<double>(Settings.ChunkWorldOrigin.X) + LocalPosition.X;
+		const double WorldY = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep + LocalPosition.Y
+			: static_cast<double>(Settings.ChunkWorldOrigin.Y) + LocalPosition.Y;
+		const double WorldZ = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Z) * BaseStep + LocalPosition.Z
+			: static_cast<double>(Settings.ChunkWorldOrigin.Z) + LocalPosition.Z;
+		const FIntVector Cell(
+			FMath::FloorToInt(WorldX / BaseStep),
+			FMath::FloorToInt(WorldY / BaseStep),
+			FMath::FloorToInt(WorldZ / BaseStep));
+
+		if ((!Settings.MinedNodes.IsValid() || Settings.MinedNodes->Num() == 0) &&
+			(!Settings.BlockEdits.IsValid() || Settings.BlockEdits->Num() == 0))
+		{
+			return false;
+		}
+
+		// The terrain generator samples edits within two base cells of a point.
+		// Use the same neighbourhood for the commit-time winding repair.
+		for (int32 DZ = -2; DZ <= 2; ++DZ)
+		{
+			for (int32 DY = -2; DY <= 2; ++DY)
+			{
+				for (int32 DX = -2; DX <= 2; ++DX)
+				{
+					const FIntVector Candidate = Cell + FIntVector(DX, DY, DZ);
+					if (Settings.MinedNodes.IsValid() &&
+						Settings.MinedNodes->Contains(Candidate))
+					{
+						return true;
+					}
+					if (Settings.BlockEdits.IsValid())
+					{
+						if (const int8* State = Settings.BlockEdits->Find(Candidate))
+						{
+							// +2 only reserves a separately rendered hard cube.
+							if (*State != 0 && *State != 2)
+							{
+								return true;
+							}
+						}
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	int32 RepairEditedTriangleWinding(
+		FSVoxelMeshData& Data,
+		const FSVoxelGenerationSettings& Settings)
+	{
+		if (Data.Triangles.Num() < 3 || Data.Vertices.Num() == 0)
+		{
+			return 0;
+		}
+
+		const float BaseStep = FMath::Max(1.0f, Settings.BaseVoxelSize);
+		const float LodStep = FMath::Max(BaseStep, Settings.VoxelSize);
+		const float ProbeDistances[] =
+		{
+			FMath::Max(1.0f, BaseStep * 0.025f),
+			FMath::Max(1.0f, BaseStep * 0.05f),
+			FMath::Max(1.0f, BaseStep * 0.1f),
+			FMath::Max(1.0f, BaseStep * 0.2f),
+			FMath::Max(1.0f, BaseStep * 0.4f),
+			FMath::Max(1.0f, BaseStep * 0.8f),
+			FMath::Max(1.0f, LodStep * 0.25f),
+			FMath::Max(1.0f, LodStep * 0.5f)
+		};
+
+		int32 CorrectedTriangles = 0;
+		for (int32 Index = 0; Index + 2 < Data.Triangles.Num(); Index += 3)
+		{
+			const int32 A = Data.Triangles[Index];
+			const int32 B = Data.Triangles[Index + 1];
+			const int32 C = Data.Triangles[Index + 2];
+			if (!Data.Vertices.IsValidIndex(A) ||
+				!Data.Vertices.IsValidIndex(B) ||
+				!Data.Vertices.IsValidIndex(C))
+			{
+				continue;
+			}
+
+			const FVector& PositionA = Data.Vertices[A];
+			const FVector& PositionB = Data.Vertices[B];
+			const FVector& PositionC = Data.Vertices[C];
+			const FVector Cross = FVector::CrossProduct(
+				PositionB - PositionA, PositionC - PositionA);
+			if (Cross.SizeSquared() <= SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const FVector Center = (PositionA + PositionB + PositionC) / 3.0f;
+			if (!IsNearEditedVoxelCell(Center, Settings))
+			{
+				continue;
+			}
+
+			const FVector FaceDirection = Cross.GetSafeNormal();
+			for (const float ProbeDistance : ProbeDistances)
+			{
+				const float AlongDensity = FSVoxelGenerator::SampleDensityAtChunkLocal(
+					Center + FaceDirection * ProbeDistance, Settings);
+				const float AgainstDensity = FSVoxelGenerator::SampleDensityAtChunkLocal(
+					Center - FaceDirection * ProbeDistance, Settings);
+				const bool bAlongIsSolid = AlongDensity > Settings.IsoLevel;
+				const bool bAgainstIsSolid = AgainstDensity > Settings.IsoLevel;
+				if (bAlongIsSolid == bAgainstIsSolid)
+				{
+					continue;
+				}
+
+				// This component's front-face convention expects the raw index
+				// cross product to point into solid. Reverse faces that point into air.
+				if (!bAlongIsSolid && bAgainstIsSolid)
+				{
+					Swap(Data.Triangles[Index + 1], Data.Triangles[Index + 2]);
+					++CorrectedTriangles;
+				}
+				break;
+			}
+		}
+		return CorrectedTriangles;
 	}
 }
 
@@ -234,6 +371,14 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	{
 		bBuildFailed = true;
 		return;
+	}
+
+ 	const int32 CorrectedWindingCount = RepairEditedTriangleWinding(Data, PendingSettings);
+	if (CorrectedWindingCount > 0)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("SmoothVoxel: repaired winding on %d terrain triangles near voxel edits."),
+			CorrectedWindingCount);
 	}
 
 	// Drop the previous render section and its collision body before applying
