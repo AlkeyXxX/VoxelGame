@@ -41,23 +41,35 @@ struct FSVoxelGenerationSettings
 	float POIPlateauRadius = 6500.0f;
 	float POIPlateauBlendDistance = 5000.0f;
 
-	// Terrain
+	// Large-scale landscape layout; flatness is shared by terrain and water masks.
+	float FlatlandRegionScale = 0.0000045f;
+	float FlatlandCoverage = 0.62f;
+	float FlatlandNoiseAmplitude = 35.0f;
+	float HillScale = 0.0000035f;
+	float HillHeight = 3500.0f;
+	float DesertHillCoverage = 0.06f;
+	float MountainBiomeThreshold = 0.72f;
+	float MountainHeight = 18000.0f;
+
 	float BaseHeight = 900.0f;
 	float HeightAmplitude = 850.0f;
-
-	// Frequencies are in inverse centimetres. The values stay representable
-	// up to the 16 m maximum cell size supported by the streaming world.
 	float NoiseScale = 0.00005f;
-
-	float DetailScale = 0.0000375f;
+	float DetailScale = 0.0000125f;
 	float DetailAmplitude = 60.0f;
 
-	// Seed-stable river network shared by every chunk and every LOD. River
-	// half-width and depth are centimetres in world space.
 	bool bEnableRivers = true;
-	float RiverScale = 0.00001f;
-	float RiverHalfWidth = 7500.0f;
-	float RiverDepth = 350.0f;
+	float RiverScale = 0.0000045f;
+	float RiverHalfWidth = 2500.0f;
+	float RiverDepth = 600.0f;
+	float RiverWaterLevel = 850.0f;
+
+	bool bEnableLakes = true;
+	float LakeSiteSpacing = 90000.0f;
+	float LakeRadius = 4500.0f;
+	float LakeShoreBlendDistance = 1800.0f;
+	float LakeDepth = 500.0f;
+	float LakeChance = 0.12f;
+	float HillLakeChance = 0.07f;
 
 	// Solid bottom
 	float BottomDepth = 2000.0f;
@@ -113,6 +125,20 @@ public:
 		double WorldX,
 		double WorldY,
 		const FSVoxelGenerationSettings& Settings);
+
+	/** Flatland suitability mask shared with rivers and POI planning. */
+	static float SampleFlatlandInfluence(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
+	/** Deterministic lake mask and its absolute water elevation. */
+	static void SampleLakeMaskAndLevel(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings,
+		float& OutInfluence,
+		float& OutWaterLevel);
 
 	/** Returns the channel mask and the signed field used to recover the local river direction. */
 	static void SampleRiverMaskAndField(
