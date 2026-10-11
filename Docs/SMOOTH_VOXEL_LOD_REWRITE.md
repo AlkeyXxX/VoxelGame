@@ -27,13 +27,13 @@ The rewrite lives beside the current world and does not replace the legacy
    keys allow overlapping meshes to be reused.
 7. Regular mesh vertices use projected secondary positions in transition
    boundary cells instead of moving density sample corners before interpolation.
-   Adjacent transition faces remain on their shared edge lattice. Vertex-normal
-   sampling scales with LOD; world-XY UVs stay stable and tangent frames now come
-   directly from the same projection derivatives at every vertex.
+   Adjacent transition faces remain on their shared edge lattice. Normals use a
+   fixed world-space gradient step across all LODs; world-XY UVs stay stable and
+   tangent frames derive from that same projection at every vertex.
 8. Terrain noise bandwidth is clamped globally for the coarsest supported sample
-   step (maximum LOD 4 / 16 m per cell). This avoids aliasing at distant LOD while
-   keeping the exact same density function across the entire terrain and all
-   transition faces.
+   step (maximum leaf LOD 4 / 16 m per cell). The streaming root has a separate
+   LOD (default 6), retaining a 2.048 km-wide window without allowing rendered
+   chunks to exceed the 16 m sample spacing.
 9. Completed CPU meshes are queued to the manager and only one procedural mesh
    section is committed on the game thread per frame. Worker concurrency is
    capped at two, and LOD reselection has a minimum 10 m movement threshold.
@@ -48,12 +48,13 @@ full desired set is ready, then old leaves are retired and new leaves revealed
 together to avoid overlap and z-fighting between coarse parents and fine children.
 Completed CPU meshes are committed one per frame, and worker concurrency is
 capped at two to reduce game-thread upload bursts and CPU contention.
-The root is a rolling finite window, not an unbounded world at once: it shifts
-horizontally by half its width and keeps 50% overlap to avoid stopping terrain
-generation at the original root boundary. Its vertical interval remains
-anchored to `RootWorldCenter.Z`. Maximum runtime LOD is capped at 4 (up to 16 m
-between samples with a 1 m base voxel). The cap also applies to serialized actor
-instances so old Details-panel values cannot restore highly aliased coarse LODs.
+The root is a rolling finite window, not an unbounded world at once. By default,
+its separate `RootWindowLod=6` makes it 2.048 km wide at 1 m base cells, and it
+shifts horizontally by half that width (1.024 km) with 50% overlap. Its vertical
+interval remains anchored to `RootWorldCenter.Z`. Rendered leaves are still
+capped at `MaxLod=4` (up to 16 m between samples), restoring draw distance
+without reintroducing coarser mesh sampling. The cap also applies to serialized
+actor instances so old Details-panel values cannot restore highly aliased coarse LODs.
 It has not been compiled or run in UE4.27 in this environment, so automation
 tests are added but **not verified in Unreal Editor yet**. No claim is made that
 all seams, collision contacts, edge/corner junctions, material boundaries or
@@ -88,18 +89,18 @@ winding separately from the stored outward normals.
 - This intentionally trades some fine geometric noise for stable distant terrain.
   Add high-frequency albedo/normal detail in the material rather than raising the
   geometry noise scales beyond the supported sampling bandwidth.
-- Normal finite-difference distance now grows with voxel spacing, reducing
-  high-frequency shading noise on triangles that no longer represent those
-  small details. At coarse/fine boundaries it blends to the fine neighbour's
-  normal-sampling distance to reduce visible lighting discontinuity.
+- Normal finite-difference distance is fixed in world units from `BaseVoxelSize`
+  and shared by every LOD. The same world-space point therefore gets a consistent
+  normal across chunks and LOD changes, reducing square-shaped lighting bands.
+  Geometry noise frequency remains globally capped to limit detail that coarse
+  leaves cannot represent.
 - Transition faces use secondary-position deformation of regular-surface
   vertices, with displacement projected along the surface tangent rather than
   moving sampled cube corners before isosurface interpolation. Vertices shared
   with a non-transition face remain fixed to preserve neighbouring seams.
-- Same-LOD chunk-border vertices now keep the coarse normal-sampling step even
-  when another face of that chunk transitions to a finer LOD. This avoids a
-  normal-step change along a neighbouring same-LOD edge, which could appear as
-  dark square patches.
+- Normal sampling no longer changes at transition faces or per-LOD chunk borders:
+  all chunks use the same world-space sample radius, avoiding normal-step
+  discontinuities that could appear as dark square patches.
 - Stream selection has a minimum 10 m movement threshold, at most two CPU
   workers, and a one-mesh-section-per-frame commit budget. These safeguards
   reduce repeated rebuilds and completion bursts but cannot guarantee zero
