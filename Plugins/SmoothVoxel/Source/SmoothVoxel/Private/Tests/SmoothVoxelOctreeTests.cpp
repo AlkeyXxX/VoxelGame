@@ -346,4 +346,42 @@ bool FSmoothVoxelDensityDeterminismTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelLargeCoordinateSamplingTest,
+	"SmoothVoxel.Density.StableAtLargeChunkCoordinates",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelLargeCoordinateSamplingTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings LeftSettings;
+	LeftSettings.Seed = 1337;
+	LeftSettings.BaseVoxelSize = 100.0f;
+	LeftSettings.bUseChunkLatticeCoordinates = true;
+	LeftSettings.ChunkOriginCells = FIntVector(10000000, -2500000, 0);
+	LeftSettings.NoiseScale = 0.00005f;
+	LeftSettings.DetailScale = 0.0000375f;
+	LeftSettings.bEnableCaves = true;
+
+	FSVoxelGenerationSettings RightSettings = LeftSettings;
+	RightSettings.ChunkOriginCells.X += 32;
+
+	// These are the same absolute point represented as the last edge of one
+	// chunk and the first edge of its neighbour, at a very large world offset.
+	const float LeftDensity = FSVoxelGenerator::SampleDensityAtChunkLocal(
+		FVector(3200.0f, 1234.0f, 900.0f), LeftSettings);
+	const float RightDensity = FSVoxelGenerator::SampleDensityAtChunkLocal(
+		FVector(0.0f, 1234.0f, 900.0f), RightSettings);
+
+	TestTrue(TEXT("Large-coordinate density must remain finite"), FMath::IsFinite(LeftDensity));
+	TestTrue(TEXT("Neighbouring chunks must sample identical density at a shared absolute point"),
+		FMath::IsNearlyEqual(LeftDensity, RightDensity, 0.0001f));
+
+	const float RepeatedDensity = FSVoxelGenerator::SampleDensityAtChunkLocal(
+		FVector(3200.0f, 1234.0f, 900.0f), LeftSettings);
+	TestTrue(TEXT("Large-coordinate density sampling must be deterministic"),
+		LeftDensity == RepeatedDensity);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
