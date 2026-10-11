@@ -1261,6 +1261,55 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		// hit chooses the cell on the solid side, then step outward one cell.
 		const float GridBias = FMath::Max(0.05f, Step * 0.001f);
 		Cell = WorldPositionToBlockCell(Hit.ImpactPoint - FaceDirection * GridBias) + FaceStep;
+
+		// Marching-cubes walls are rounded at cell edges. There the smoothed
+		// impact normal can point mostly upward even when the player is aiming
+		// at the side of a mined pit, which would put the cube one cell too high.
+		// If the normal-based cell is not part of the excavation, prefer the
+		// nearest unoccupied mined cell next to the impact point. Mined cells are
+		// the authoritative voxel grid for the cavity; the mesh surface is not.
+		if (!MinedTerrainNodes.Contains(Cell))
+		{
+			const FIntVector HitCell = WorldPositionToBlockCell(Hit.ImpactPoint);
+			float BestDistanceSquared = FMath::Square(Step * 1.5f);
+			bool bFoundMinedCell = false;
+
+			for (int32 DZ = -1; DZ <= 1; ++DZ)
+			{
+				for (int32 DY = -1; DY <= 1; ++DY)
+				{
+					for (int32 DX = -1; DX <= 1; ++DX)
+					{
+						const FIntVector Candidate = HitCell + FIntVector(DX, DY, DZ);
+						if (!MinedTerrainNodes.Contains(Candidate))
+						{
+							continue;
+						}
+
+						const int8* CandidateEdit = EditedBlockCells.Find(Candidate);
+						if (CandidateEdit && *CandidateEdit > 0)
+						{
+							continue;
+						}
+						if (IsValid(PlacedCubeBlocks.FindRef(Candidate)))
+						{
+							continue;
+						}
+
+						const float CandidateDistanceSquared = FVector::DistSquared(
+							BlockCellCenter(Candidate), Hit.ImpactPoint);
+						if (CandidateDistanceSquared <= BestDistanceSquared)
+						{
+							BestDistanceSquared = CandidateDistanceSquared;
+							Cell = Candidate;
+							bFoundMinedCell = true;
+						}
+					}
+				}
+			}
+
+			(void)bFoundMinedCell;
+		}
 	}
 
 	CubeWorldOrigin = FVector(
