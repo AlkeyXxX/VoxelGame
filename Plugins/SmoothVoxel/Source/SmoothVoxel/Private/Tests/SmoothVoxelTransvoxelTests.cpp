@@ -978,25 +978,40 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		TEXT("Repeated mining edits must not accumulate back-face-culled or collapsed triangles"),
 		HasConsistentGeometry(StageFiveMesh));
 
-	// Regression for a tunnel that breaks through the terrain roof. Edited SDF
-	// corners near LOD transitions must still emit non-degenerate triangles with
-	// consistent winding; otherwise a single face can disappear or become a
-	// one-sided/invisible collision surface.
+	// Regression for a tunnel that breaks through the terrain roof exactly at
+	// a chunk corner. This makes the edited SDF and transition faces meet at the
+	// same place, the worst case for tiny/cull-reversed triangles.
+	FSVoxelGenerationSettings RoofSettings;
+	RoofSettings.BaseHeight = 775.0f;
+	RoofSettings.HeightAmplitude = 0.0f;
+	RoofSettings.DetailAmplitude = 0.0f;
+	RoofSettings.NoiseScale = 0.0f;
+	RoofSettings.DetailScale = 0.0f;
+	RoofSettings.BaseVoxelSize = 50.0f;
+	RoofSettings.NormalSampleStep = 25.0f;
+	RoofSettings.BottomDepth = 2000.0f;
+	RoofSettings.bEnableCaves = false;
+	RoofSettings.IsoLevel = 0.0f;
+	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> RoofMinedNodes =
+		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
+	RoofMinedNodes->Add(FIntVector(0, 0, 15));
+	RoofSettings.MinedNodes = RoofMinedNodes;
+
 	const uint8 EditedTransitionMasks[] =
 	{
 		SVoxelTransitionFace_NegativeX,
-		SVoxelTransitionFace_PositiveY,
-		static_cast<uint8>(SVoxelTransitionFace_NegativeX | SVoxelTransitionFace_PositiveY),
+		SVoxelTransitionFace_NegativeY,
+		static_cast<uint8>(SVoxelTransitionFace_NegativeX | SVoxelTransitionFace_NegativeY),
 		static_cast<uint8>(SVoxelTransitionFace_NegativeX |
-			SVoxelTransitionFace_PositiveY | SVoxelTransitionFace_PositiveZ)
+			SVoxelTransitionFace_NegativeY | SVoxelTransitionFace_PositiveZ)
 	};
 	for (const uint8 FaceMask : EditedTransitionMasks)
 	{
 		FSVoxelMeshData EditedTransitionMesh;
 		FSVoxelTransvoxelMesher::Generate(
-			StageFiveSettings, 16, 50.0f, FaceMask, EditedTransitionMesh);
+			RoofSettings, 16, 50.0f, FaceMask, EditedTransitionMesh);
 		TestTrue(
-			TEXT("A roof-open mining cut must keep valid triangle winding at LOD transitions"),
+			TEXT("A roof-open mining cut at a chunk corner must keep valid triangle winding at LOD transitions"),
 			HasConsistentGeometry(EditedTransitionMesh));
 	}
 
