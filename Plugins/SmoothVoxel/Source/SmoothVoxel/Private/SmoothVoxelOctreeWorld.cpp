@@ -249,12 +249,13 @@ void ASmoothVoxelOctreeWorld::RegenerateWorld()
 FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	const FVector& ChunkOrigin,
 	const FIntVector& ChunkOriginCells,
+	float EffectiveBaseVoxelSize,
 	float VoxelSize) const
 {
 	FSVoxelGenerationSettings Settings;
 	Settings.CellsPerAxis = CellsPerAxis;
 	Settings.VoxelSize = VoxelSize;
-	Settings.BaseVoxelSize = FMath::Max(1.0f, BaseVoxelSize);
+	Settings.BaseVoxelSize = EffectiveBaseVoxelSize;
 	Settings.ChunkOriginCells = ChunkOriginCells;
 	Settings.bUseChunkLatticeCoordinates = true;
 	Settings.NormalSampleStep = FMath::Max(5.0f, BaseVoxelSize * 0.5f);
@@ -356,13 +357,19 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 
 	FSVoxelOctreeSelectionSettings SelectionSettings;
 	SelectionSettings.CellsPerAxis = FMath::Clamp(CellsPerAxis, 4, 128);
-	SelectionSettings.BaseVoxelSize = FMath::Max(1.0f, BaseVoxelSize);
-	// Keep the largest cell spacing within the noise bandwidth used by
-	// MakeGenerationSettings. Serialized actor instances cannot re-enable the
-	// previous very coarse LODs that aliased the terrain into stripes.
+	// The world is a finite, fixed window: never larger than 400,000 cm (4 km)
+	// on an axis. Use the octree's power-of-two lattice but reduce the effective
+	// base step slightly when needed so the default 32-cell, RootLod-7 window is
+	// exactly 4 km rather than 4.096 km.
+	constexpr float MaxWorldSizeCm = 400000.0f;
 	SelectionSettings.MaxLod = FMath::Clamp(MaxLod, 0, 4);
 	SelectionSettings.RootLod = FMath::Clamp(
-		RootWindowLod, SelectionSettings.MaxLod, 8);
+		RootWindowLod, SelectionSettings.MaxLod, 7);
+	const float RootCellCount = static_cast<float>(
+		SelectionSettings.CellsPerAxis * (1 << SelectionSettings.RootLod));
+	const float MaxCellSizeForWorldBound = MaxWorldSizeCm / RootCellCount;
+	SelectionSettings.BaseVoxelSize = FMath::Min(
+		FMath::Max(1.0f, BaseVoxelSize), MaxCellSizeForWorldBound);
 	SelectionSettings.SplitDistanceMultiplier = FMath::Clamp(SplitDistanceMultiplier, 0.05f, 4.0f);
 	SelectionSettings.MaxLeafCount = FMath::Max(32, MaxLeafCount);
 
@@ -370,15 +377,10 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 		static_cast<float>(1 << SelectionSettings.RootLod) *
 		SelectionSettings.BaseVoxelSize;
 
-	// Slide the finite octree window horizontally in half-root-size increments.
-	// Keep its vertical range anchored to RootWorldCenter so flying upward does
-	// not move the terrain density field outside the active world window. The
-	// 50% XY overlap preserves existing chunks, keyed by absolute lattice cells.
-	const float RootShift = RootSize * 0.5f;
-	const FVector RootCenter = RootWorldCenter + FVector(
-		static_cast<float>(FMath::RoundToInt((CameraLocation.X - RootWorldCenter.X) / RootShift)) * RootShift,
-		static_cast<float>(FMath::RoundToInt((CameraLocation.Y - RootWorldCenter.Y) / RootShift)) * RootShift,
-		0.0f);
+	// Fixed finite world: moving the player never shifts the root or creates
+	// more terrain beyond its configured bounds. RootWorldCenter is the centre
+	// of the world window in all three axes.
+	const FVector RootCenter = RootWorldCenter;
 	const FVector RootOrigin = RootCenter - FVector(RootSize * 0.5f);
 	SelectionSettings.WorldOrigin = FVector::ZeroVector;
 	SelectionSettings.RootOriginCells = FIntVector(
@@ -525,7 +527,11 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 			Node, SelectionSettings.CellsPerAxis, ChunkOrigin, FaceMask, VoxelSize, bCollision))
 		{
 			const FSVoxelGenerationSettings GeneratorSettings =
-				MakeGenerationSettings(ChunkOrigin, Node.OriginCells, VoxelSize);
+				MakeGenerationSettings(
+					ChunkOrigin,
+					Node.OriginCells,
+					SelectionSettings.BaseVoxelSize,
+					VoxelSize);
 			Chunk->QueueBuild(
 				Node,
 				SelectionSettings.CellsPerAxis,
