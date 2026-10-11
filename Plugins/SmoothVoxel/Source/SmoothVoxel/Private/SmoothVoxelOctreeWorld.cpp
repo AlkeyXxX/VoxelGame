@@ -1238,6 +1238,10 @@ void ASmoothVoxelOctreeWorld::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ASmoothVoxelOctreeWorld::RegenerateWorld()
 {
+	// Terrain parameters also drive the river/lake masks. Rebuild the water
+	// mesh from the same fresh settings before regenerating terrain chunks;
+	// otherwise the old water surface can be buried by the new terrain.
+	UpdateWaterSurface();
 	bForceUpdate = true;
 }
 
