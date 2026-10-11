@@ -43,25 +43,46 @@ namespace
 		float SampleStep)
 	{
 		const float H = FMath::Max(5.0f, SampleStep);
-		const float Dx =
-			FSVoxelGenerator::SampleDensityAtChunkLocal(
-				LocalPosition + FVector(H, 0.0f, 0.0f), Settings) -
-			FSVoxelGenerator::SampleDensityAtChunkLocal(
-				LocalPosition - FVector(H, 0.0f, 0.0f), Settings);
-		const float Dy =
-			FSVoxelGenerator::SampleDensityAtChunkLocal(
-				LocalPosition + FVector(0.0f, H, 0.0f), Settings) -
-			FSVoxelGenerator::SampleDensityAtChunkLocal(
-				LocalPosition - FVector(0.0f, H, 0.0f), Settings);
-		const float Dz =
-			FSVoxelGenerator::SampleDensityAtChunkLocal(
-				LocalPosition + FVector(0.0f, 0.0f, H), Settings) -
-			FSVoxelGenerator::SampleDensityAtChunkLocal(
-				LocalPosition - FVector(0.0f, 0.0f, H), Settings);
+		const double HeightXP = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
+			LocalPosition + FVector(H, 0.0f, 0.0f), Settings);
+		const double HeightXM = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
+			LocalPosition - FVector(H, 0.0f, 0.0f), Settings);
+		const double HeightYP = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
+			LocalPosition + FVector(0.0f, H, 0.0f), Settings);
+		const double HeightYM = FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
+			LocalPosition - FVector(0.0f, H, 0.0f), Settings);
 
-		// Density is positive inside solid terrain, so its negative gradient
-		// points out of the solid. Sampling relative to the integer chunk lattice
-		// prevents large absolute float coordinates from contaminating normals.
+		// With a height field D(x,y,z)=H(x,y)-z, its exact finite-difference
+		// gradient can be derived from just four 2D height samples. This avoids
+		// six full 3D density evaluations for every surface vertex.
+		if (!Settings.bEnableCaves || Settings.CaveStrength <= 0.0f)
+		{
+			return FVector(
+				-static_cast<float>(HeightXP - HeightXM),
+				-static_cast<float>(HeightYP - HeightYM),
+				2.0f * H).GetSafeNormal();
+		}
+
+		// Caves add a true 3D field. Reuse the surface-height samples so the
+		// gradient only evaluates cave noise at the six offset positions.
+		const double HeightHere =
+			FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(LocalPosition, Settings);
+		const float Dx =
+			FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+				LocalPosition + FVector(H, 0.0f, 0.0f), HeightXP, Settings) -
+			FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+				LocalPosition - FVector(H, 0.0f, 0.0f), HeightXM, Settings);
+		const float Dy =
+			FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+				LocalPosition + FVector(0.0f, H, 0.0f), HeightYP, Settings) -
+			FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+				LocalPosition - FVector(0.0f, H, 0.0f), HeightYM, Settings);
+		const float Dz =
+			FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+				LocalPosition + FVector(0.0f, 0.0f, H), HeightHere, Settings) -
+			FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+				LocalPosition - FVector(0.0f, 0.0f, H), HeightHere, Settings);
+
 		return FVector(-Dx, -Dy, -Dz).GetSafeNormal();
 	}
 
@@ -539,6 +560,24 @@ void FSVoxelTransvoxelMesher::Generate(
 	TArray<float> DensityField;
 	DensityField.SetNumUninitialized(static_cast<int32>(SampleCount64));
 
+	// Terrain height depends on X/Y only. Cache each column once instead of
+	// recalculating two three-octave FBMs for all 33 Z samples in that column.
+	// This preserves the same scalar field (including optional 3D cave carving).
+	TArray<double> SurfaceHeightField;
+	SurfaceHeightField.SetNumUninitialized(SamplesPerAxis * SamplesPerAxis);
+	for (int32 Y = 0; Y < SamplesPerAxis; ++Y)
+	{
+		for (int32 X = 0; X < SamplesPerAxis; ++X)
+		{
+			const FVector LocalPosition(
+				static_cast<float>(X) * VoxelSize,
+				static_cast<float>(Y) * VoxelSize,
+				0.0f);
+			SurfaceHeightField[SampleIndex(X, Y, 0, SamplesPerAxis)] =
+				FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(LocalPosition, MeshSettings);
+		}
+	}
+
 	for (int32 Z = 0; Z < SamplesPerAxis; ++Z)
 	{
 		for (int32 Y = 0; Y < SamplesPerAxis; ++Y)
@@ -550,8 +589,10 @@ void FSVoxelTransvoxelMesher::Generate(
 					static_cast<float>(Y) * VoxelSize,
 					static_cast<float>(Z) * VoxelSize);
 				DensityField[SampleIndex(X, Y, Z, SamplesPerAxis)] =
-					FSVoxelGenerator::SampleDensityAtChunkLocal(
-						LocalPosition, MeshSettings);
+					FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+						LocalPosition,
+						SurfaceHeightField[SampleIndex(X, Y, 0, SamplesPerAxis)],
+						MeshSettings);
 			}
 		}
 	}
