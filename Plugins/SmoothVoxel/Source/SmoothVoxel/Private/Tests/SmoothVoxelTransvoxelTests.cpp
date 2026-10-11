@@ -3,6 +3,85 @@
 #include "Misc/AutomationTest.h"
 #include "SmoothVoxelGenerator.h"
 #include "SmoothVoxelTransvoxelMesher.h"
+#include "SmoothVoxelOctreeWorld.h"
+ 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelWorldConfigurationDeterminismTest,
+	"SmoothVoxel.WorldGeneration.SizePresetsAndGlobalSeedDeterminism",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelWorldConfigurationDeterminismTest::RunTest(const FString& Parameters)
+{
+	TestEqual(
+		TEXT("2K preset must define a 2 km world window"),
+		ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize::Size2Km),
+		200000.0f);
+	TestEqual(
+		TEXT("4K preset must define a 4 km world window"),
+		ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize::Size4Km),
+		400000.0f);
+	TestEqual(
+		TEXT("8K preset must define an 8 km world window"),
+		ASmoothVoxelOctreeWorld::GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize::Size8Km),
+		800000.0f);
+
+	FSVoxelGenerationSettings Settings;
+	Settings.BaseHeight = 900.0f;
+	Settings.HeightAmplitude = 1800.0f;
+	Settings.DetailAmplitude = 60.0f;
+	Settings.NoiseScale = 0.00005f;
+	Settings.DetailScale = 0.0000375f;
+	Settings.BottomDepth = 2000.0f;
+	Settings.bEnableCaves = false;
+	Settings.Seed = 1337;
+
+	const FVector LocalSamples[] =
+	{
+		FVector(1234.25f, 4567.5f, 700.0f),
+		FVector(37891.75f, 8421.25f, 930.0f),
+		FVector(901.5f, 72113.25f, 1200.0f),
+		FVector(65535.0f, 31415.5f, 850.0f)
+	};
+	const double ChunkOriginCm = -100000.0;
+	constexpr float StableBaseVoxelSize = 97.65625f;
+	FSVoxelGenerationSettings ChunkSettings = Settings;
+	ChunkSettings.BaseVoxelSize = StableBaseVoxelSize;
+	ChunkSettings.ChunkOriginCells = FIntVector(-1024, -1024, -1024);
+	ChunkSettings.bUseChunkLatticeCoordinates = true;
+
+	bool bDifferentSeedChangedDensity = false;
+	FSVoxelGenerationSettings DifferentSeedSettings = Settings;
+	DifferentSeedSettings.Seed = Settings.Seed + 1;
+
+	for (const FVector& LocalPosition : LocalSamples)
+	{
+		const double WorldX = ChunkOriginCm + LocalPosition.X;
+		const double WorldY = ChunkOriginCm + LocalPosition.Y;
+		const double WorldZ = ChunkOriginCm + LocalPosition.Z;
+		const float DirectDensity =
+			FSVoxelGenerator::SampleDensity(WorldX, WorldY, WorldZ, Settings);
+		const float RepeatDensity =
+			FSVoxelGenerator::SampleDensity(WorldX, WorldY, WorldZ, Settings);
+		const float ChunkDensity =
+			FSVoxelGenerator::SampleDensityAtChunkLocal(LocalPosition, ChunkSettings);
+		const float DifferentSeedDensity =
+			FSVoxelGenerator::SampleDensity(WorldX, WorldY, WorldZ, DifferentSeedSettings);
+
+		TestTrue(
+			TEXT("A fixed seed and world coordinate must reproduce identical density"),
+			FMath::IsNearlyEqual(DirectDensity, RepeatDensity, 0.0001f));
+		TestTrue(
+			TEXT("Sampling the same global coordinate through a chunk lattice must preserve density"),
+			FMath::IsNearlyEqual(DirectDensity, ChunkDensity, 0.001f));
+		bDifferentSeedChangedDensity |=
+			!FMath::IsNearlyEqual(DirectDensity, DifferentSeedDensity, 0.001f);
+	}
+
+	TestTrue(
+		TEXT("Changing the world seed must alter at least some procedural terrain samples"),
+		bDifferentSeedChangedDensity);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelCachedSurfaceHeightDensityTest,
