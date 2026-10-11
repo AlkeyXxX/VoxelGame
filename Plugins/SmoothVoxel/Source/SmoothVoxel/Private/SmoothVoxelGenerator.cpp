@@ -2,6 +2,7 @@
 #include "SmoothVoxelGenerator.h"
 #include "SmoothVoxelMCTables.h"
 #include "Math/UnrealMathUtility.h"
+#include <cmath>
 
 namespace
 {
@@ -14,34 +15,66 @@ namespace
         return X + Y * N + Z * N * N;
     }
 
-    FORCEINLINE float Fade(float T)
+    FORCEINLINE double Fade(double T)
     {
-        // Smooth C1 interpolation.
-        return T * T * (3.0f - 2.0f * T);
+        return T * T * (3.0 - 2.0 * T);
     }
 
-    FORCEINLINE float Lerp3D(
-        float C000,
-        float C100,
-        float C010,
-        float C110,
-        float C001,
-        float C101,
-        float C011,
-        float C111,
-        float TX,
-        float TY,
-        float TZ)
+    FORCEINLINE double Lerp3D(
+        double C000,
+        double C100,
+        double C010,
+        double C110,
+        double C001,
+        double C101,
+        double C011,
+        double C111,
+        double TX,
+        double TY,
+        double TZ)
     {
-        const float X00 = FMath::Lerp(C000, C100, TX);
-        const float X10 = FMath::Lerp(C010, C110, TX);
-        const float X01 = FMath::Lerp(C001, C101, TX);
-        const float X11 = FMath::Lerp(C011, C111, TX);
+        const double X00 = FMath::Lerp(C000, C100, TX);
+        const double X10 = FMath::Lerp(C010, C110, TX);
+        const double X01 = FMath::Lerp(C001, C101, TX);
+        const double X11 = FMath::Lerp(C011, C111, TX);
 
-        const float Y0 = FMath::Lerp(X00, X10, TY);
-        const float Y1 = FMath::Lerp(X01, X11, TY);
-
+        const double Y0 = FMath::Lerp(X00, X10, TY);
+        const double Y1 = FMath::Lerp(X01, X11, TY);
         return FMath::Lerp(Y0, Y1, TZ);
+    }
+
+    FORCEINLINE int64 FloorToInt64(double Value)
+    {
+        return static_cast<int64>(std::floor(Value));
+    }
+
+    FORCEINLINE uint64 MixHash64(uint64 H)
+    {
+        H ^= H >> 30;
+        H *= 0xBF58476D1CE4E5B9ull;
+        H ^= H >> 27;
+        H *= 0x94D049BB133111EBull;
+        H ^= H >> 31;
+        return H;
+    }
+
+    FORCEINLINE uint32 HashLattice2D(int64 X, int64 Y, int32 Seed)
+    {
+        uint64 H =
+            static_cast<uint64>(X) * 0x9E3779B185EBCA87ull ^
+            static_cast<uint64>(Y) * 0xC2B2AE3D27D4EB4Full ^
+            static_cast<uint64>(static_cast<uint32>(Seed)) * 0x165667B19E3779F9ull;
+        return static_cast<uint32>(MixHash64(H) >> 40) & 0x00FFFFFFu;
+    }
+
+    FORCEINLINE uint32 HashLattice3D(int64 X, int64 Y, int64 Z, int32 Seed)
+    {
+        uint64 H =
+            static_cast<uint64>(X) * 0x9E3779B185EBCA87ull ^
+            static_cast<uint64>(Y) * 0xC2B2AE3D27D4EB4Full ^
+            static_cast<uint64>(Z) * 0x165667B19E3779F9ull ^
+            static_cast<uint64>(static_cast<uint32>(Seed)) * 0x85EBCA77C2B2AE63ull;
+        return static_cast<uint32>(MixHash64(H) >> 40) & 0x00FFFFFFu;
     }
 }
 
@@ -51,40 +84,28 @@ namespace
 // ============================================================
 
 float FSVoxelGenerator::HashNoise2D(
-    float X,
-    float Y,
+    double X,
+    double Y,
     int32 Seed)
 {
-    const float IX = FMath::FloorToFloat(X);
-    const float IY = FMath::FloorToFloat(Y);
+    // Use double for fractional noise coordinates and integer hashing for
+    // lattice points. A sine hash of large float inputs loses mantissa bits and
+    // can cluster/repeat values across distant rows of terrain.
+    const int64 IX = FloorToInt64(X);
+    const int64 IY = FloorToInt64(Y);
+    const double FX = X - static_cast<double>(IX);
+    const double FY = Y - static_cast<double>(IY);
 
-    const float FX = X - IX;
-    const float FY = Y - IY;
+    const double A = static_cast<double>(HashLattice2D(IX,     IY,     Seed)) / 16777215.0;
+    const double B = static_cast<double>(HashLattice2D(IX + 1, IY,     Seed)) / 16777215.0;
+    const double C = static_cast<double>(HashLattice2D(IX,     IY + 1, Seed)) / 16777215.0;
+    const double D = static_cast<double>(HashLattice2D(IX + 1, IY + 1, Seed)) / 16777215.0;
 
-    auto Hash = [Seed](float A, float B)
-    {
-        const float V =
-            FMath::Sin(
-                A * 127.1f +
-                B * 311.7f +
-                float(Seed) * 74.7f)
-            * 43758.5453f;
-
-        return V - FMath::FloorToFloat(V);
-    };
-
-    const float A = Hash(IX,     IY);
-    const float B = Hash(IX + 1, IY);
-    const float C = Hash(IX,     IY + 1);
-    const float D = Hash(IX + 1, IY + 1);
-
-    const float SX = Fade(FX);
-    const float SY = Fade(FY);
-
-    const float AB = FMath::Lerp(A, B, SX);
-    const float CD = FMath::Lerp(C, D, SX);
-
-    return FMath::Lerp(AB, CD, SY) * 2.0f - 1.0f;
+    const double SX = Fade(FX);
+    const double SY = Fade(FY);
+    const double AB = FMath::Lerp(A, B, SX);
+    const double CD = FMath::Lerp(C, D, SX);
+    return static_cast<float>(FMath::Lerp(AB, CD, SY) * 2.0 - 1.0);
 }
 
 
@@ -93,36 +114,28 @@ float FSVoxelGenerator::HashNoise2D(
 // ============================================================
 
 float FSVoxelGenerator::FBM2D(
-    float X,
-    float Y,
+    double X,
+    double Y,
     int32 Seed)
 {
-    float Sum = 0.0f;
-    float Amplitude = 1.0f;
-    float Frequency = 1.0f;
-    float Normalization = 0.0f;
-
-    // 3 octaves instead of 4.
-    //
-    // This is intentional.
-    // With 100-unit voxels, too many high-frequency octaves
-    // create ugly spikes and aliasing.
+    double Sum = 0.0;
+    double Amplitude = 1.0;
+    double Frequency = 1.0;
+    double Normalization = 0.0;
 
     for (int32 Octave = 0; Octave < 3; ++Octave)
     {
-        Sum += HashNoise2D(
+        Sum += static_cast<double>(HashNoise2D(
             X * Frequency,
             Y * Frequency,
-            Seed + Octave * 101)
-            * Amplitude;
+            Seed + Octave * 101)) * Amplitude;
 
         Normalization += Amplitude;
-
-        Amplitude *= 0.5f;
-        Frequency *= 2.0f;
+        Amplitude *= 0.5;
+        Frequency *= 2.0;
     }
 
-    return Sum / Normalization;
+    return static_cast<float>(Sum / Normalization);
 }
 
 
@@ -131,30 +144,12 @@ float FSVoxelGenerator::FBM2D(
 // ============================================================
 
 float FSVoxelGenerator::HashNoise3D(
-    int32 X,
-    int32 Y,
-    int32 Z,
+    int64 X,
+    int64 Y,
+    int64 Z,
     int32 Seed)
 {
-    // Integer hash.
-    //
-    // Unlike the old HashNoise3D(), this function is only used
-    // at lattice points. SmoothNoise3D() interpolates between
-    // them, producing continuous noise.
-
-    uint32 H =
-        uint32(X) * 374761393u +
-        uint32(Y) * 668265263u +
-        uint32(Z) * 2147483647u +
-        uint32(Seed) * 1274126177u;
-
-    H ^= H >> 13;
-    H *= 1274126177u;
-    H ^= H >> 16;
-
-    const uint32 Masked = H & 0x00FFFFFFu;
-
-    return float(Masked) / float(0x00FFFFFFu);
+    return static_cast<float>(HashLattice3D(X, Y, Z, Seed)) / 16777215.0f;
 }
 
 
@@ -163,84 +158,35 @@ float FSVoxelGenerator::HashNoise3D(
 // ============================================================
 
 float FSVoxelGenerator::SmoothNoise3D(
-    float X,
-    float Y,
-    float Z,
+    double X,
+    double Y,
+    double Z,
     int32 Seed)
 {
-    const int32 IX = FMath::FloorToInt(X);
-    const int32 IY = FMath::FloorToInt(Y);
-    const int32 IZ = FMath::FloorToInt(Z);
+    const int64 IX = FloorToInt64(X);
+    const int64 IY = FloorToInt64(Y);
+    const int64 IZ = FloorToInt64(Z);
 
-    const float FX = X - float(IX);
-    const float FY = Y - float(IY);
-    const float FZ = Z - float(IZ);
+    const double FX = X - static_cast<double>(IX);
+    const double FY = Y - static_cast<double>(IY);
+    const double FZ = Z - static_cast<double>(IZ);
 
-    const float TX = Fade(FX);
-    const float TY = Fade(FY);
-    const float TZ = Fade(FZ);
+    const double TX = Fade(FX);
+    const double TY = Fade(FY);
+    const double TZ = Fade(FZ);
 
-    const float C000 = HashNoise3D(
-        IX,
-        IY,
-        IZ,
-        Seed);
+    const double C000 = HashNoise3D(IX,     IY,     IZ,     Seed);
+    const double C100 = HashNoise3D(IX + 1, IY,     IZ,     Seed);
+    const double C010 = HashNoise3D(IX,     IY + 1, IZ,     Seed);
+    const double C110 = HashNoise3D(IX + 1, IY + 1, IZ,     Seed);
+    const double C001 = HashNoise3D(IX,     IY,     IZ + 1, Seed);
+    const double C101 = HashNoise3D(IX + 1, IY,     IZ + 1, Seed);
+    const double C011 = HashNoise3D(IX,     IY + 1, IZ + 1, Seed);
+    const double C111 = HashNoise3D(IX + 1, IY + 1, IZ + 1, Seed);
 
-    const float C100 = HashNoise3D(
-        IX + 1,
-        IY,
-        IZ,
-        Seed);
-
-    const float C010 = HashNoise3D(
-        IX,
-        IY + 1,
-        IZ,
-        Seed);
-
-    const float C110 = HashNoise3D(
-        IX + 1,
-        IY + 1,
-        IZ,
-        Seed);
-
-    const float C001 = HashNoise3D(
-        IX,
-        IY,
-        IZ + 1,
-        Seed);
-
-    const float C101 = HashNoise3D(
-        IX + 1,
-        IY,
-        IZ + 1,
-        Seed);
-
-    const float C011 = HashNoise3D(
-        IX,
-        IY + 1,
-        IZ + 1,
-        Seed);
-
-    const float C111 = HashNoise3D(
-        IX + 1,
-        IY + 1,
-        IZ + 1,
-        Seed);
-
-    return Lerp3D(
-        C000,
-        C100,
-        C010,
-        C110,
-        C001,
-        C101,
-        C011,
-        C111,
-        TX,
-        TY,
-        TZ)
-        * 2.0f - 1.0f;
+    return static_cast<float>(Lerp3D(
+        C000, C100, C010, C110, C001, C101, C011, C111,
+        TX, TY, TZ) * 2.0 - 1.0);
 }
 
 
@@ -249,33 +195,30 @@ float FSVoxelGenerator::SmoothNoise3D(
 // ============================================================
 
 float FSVoxelGenerator::FBM3D(
-    float X,
-    float Y,
-    float Z,
+    double X,
+    double Y,
+    double Z,
     int32 Seed)
 {
-    float Sum = 0.0f;
-    float Amplitude = 1.0f;
-    float Frequency = 1.0f;
-    float Normalization = 0.0f;
+    double Sum = 0.0;
+    double Amplitude = 1.0;
+    double Frequency = 1.0;
+    double Normalization = 0.0;
 
-    // 3 octaves is enough for caves.
     for (int32 Octave = 0; Octave < 3; ++Octave)
     {
-        Sum += SmoothNoise3D(
+        Sum += static_cast<double>(SmoothNoise3D(
             X * Frequency,
             Y * Frequency,
             Z * Frequency,
-            Seed + Octave * 137)
-            * Amplitude;
+            Seed + Octave * 137)) * Amplitude;
 
         Normalization += Amplitude;
-
-        Amplitude *= 0.5f;
-        Frequency *= 2.0f;
+        Amplitude *= 0.5;
+        Frequency *= 2.0;
     }
 
-    return Sum / Normalization;
+    return static_cast<float>(Sum / Normalization);
 }
 
 
@@ -284,9 +227,9 @@ float FSVoxelGenerator::FBM3D(
 // ============================================================
 
 float FSVoxelGenerator::Density(
-    float X,
-    float Y,
-    float Z,
+    double X,
+    double Y,
+    double Z,
     const FSVoxelGenerationSettings& S)
 {
     // Positive = solid.
@@ -296,28 +239,26 @@ float FSVoxelGenerator::Density(
     // TERRAIN HEIGHT
     // --------------------------------------------------------
 
-    const float Macro =
-        FBM2D(
-            X * S.NoiseScale,
-            Y * S.NoiseScale,
-            S.Seed);
+    const double Macro = FBM2D(
+        X * static_cast<double>(S.NoiseScale),
+        Y * static_cast<double>(S.NoiseScale),
+        S.Seed);
 
-    const float Detail =
-        FBM2D(
-            X * S.DetailScale,
-            Y * S.DetailScale,
-            S.Seed + 777);
+    const double Detail = FBM2D(
+        X * static_cast<double>(S.DetailScale),
+        Y * static_cast<double>(S.DetailScale),
+        S.Seed + 777);
 
-    float SurfaceHeight =
-        S.BaseHeight +
-        Macro * S.HeightAmplitude +
-        Detail * S.DetailAmplitude;
+    const double SurfaceHeight =
+        static_cast<double>(S.BaseHeight) +
+        Macro * static_cast<double>(S.HeightAmplitude) +
+        Detail * static_cast<double>(S.DetailAmplitude);
 
     // --------------------------------------------------------
     // BASE DENSITY
     // --------------------------------------------------------
 
-    float D = SurfaceHeight - Z;
+    double D = SurfaceHeight - Z;
 
     // --------------------------------------------------------
     // BOTTOM
@@ -336,9 +277,9 @@ float FSVoxelGenerator::Density(
     {
         const float Cave =
             FBM3D(
-                X * S.CaveScale,
-                Y * S.CaveScale,
-                Z * S.CaveScale,
+                X * static_cast<double>(S.CaveScale),
+                Y * static_cast<double>(S.CaveScale),
+                Z * static_cast<double>(S.CaveScale),
                 S.Seed + 4242);
 
         // Convert cave noise into a smooth 0..1 mask.
@@ -377,16 +318,40 @@ float FSVoxelGenerator::Density(
         }
     }
 
-    return D;
+    return static_cast<float>(D);
 }
 
 
 float FSVoxelGenerator::SampleDensity(
-    float WorldX,
-    float WorldY,
-    float WorldZ,
+    double WorldX,
+    double WorldY,
+    double WorldZ,
     const FSVoxelGenerationSettings& Settings)
 {
+    return Density(WorldX, WorldY, WorldZ, Settings);
+}
+
+float FSVoxelGenerator::SampleDensityAtChunkLocal(
+    const FVector& LocalPosition,
+    const FSVoxelGenerationSettings& Settings)
+{
+    double WorldX;
+    double WorldY;
+    double WorldZ;
+    if (Settings.bUseChunkLatticeCoordinates)
+    {
+        const double BaseStep = static_cast<double>(Settings.BaseVoxelSize);
+        WorldX = static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep + static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep + static_cast<double>(LocalPosition.Y);
+        WorldZ = static_cast<double>(Settings.ChunkOriginCells.Z) * BaseStep + static_cast<double>(LocalPosition.Z);
+    }
+    else
+    {
+        WorldX = static_cast<double>(Settings.ChunkWorldOrigin.X) + static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkWorldOrigin.Y) + static_cast<double>(LocalPosition.Y);
+        WorldZ = static_cast<double>(Settings.ChunkWorldOrigin.Z) + static_cast<double>(LocalPosition.Z);
+    }
+
     return Density(WorldX, WorldY, WorldZ, Settings);
 }
 
@@ -449,9 +414,9 @@ FVector FSVoxelGenerator::Interpolate(
 // ============================================================
 
 FVector FSVoxelGenerator::DensityGradient(
-    float X,
-    float Y,
-    float Z,
+    double X,
+    double Y,
+    double Z,
     float Step,
     const FSVoxelGenerationSettings& S)
 {
