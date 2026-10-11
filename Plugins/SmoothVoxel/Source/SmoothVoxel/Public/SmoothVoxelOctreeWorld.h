@@ -253,7 +253,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks", meta=(ClampMin="100.0"))
 	float InteractionDistance = 600.0f;
 
-	/** Damage dealt to a terrain density node per mining hit. */
+	/** Reserved for future tool-vs-block durability; mining is currently one-hit. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks", meta=(ClampMin="0.1"))
 	float TerrainMiningToolDamage = 1.0f;
 
@@ -339,10 +339,9 @@ private:
 	TMap<FIntVector, FVector> PrePlacedBlockEditCenters;
 	TMap<FIntVector, EVoxelBlock> PrePlacedBlockEditTypes;
 
-	// Mining progress and completed cuts are keyed by absolute integer voxel
-	// cells. Each completed cut removes one axis-aligned cell from the density
-	// field, producing stable floors/walls while looking straight down.
-	TMap<FIntVector, float> TerrainMiningProgress;
+	// Completed mining cuts are keyed by absolute integer voxel cells. Each hit
+	// removes one axis-aligned cell from the density field, producing stable
+	// floors/walls while looking straight down.
 	FSVoxelMinedNodeSet MinedTerrainNodes;
 	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodeSnapshot;
 
