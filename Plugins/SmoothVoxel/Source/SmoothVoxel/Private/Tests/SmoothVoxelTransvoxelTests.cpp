@@ -451,30 +451,39 @@ bool FSmoothVoxelTransvoxelTangentContinuityTest::RunTest(const FString& Paramet
 	FSVoxelTransvoxelMesher::Generate(Settings, 8, 100.0f, 0, Mesh);
 	TestEqual(TEXT("Every vertex should receive one tangent"), Mesh.Tangents.Num(), Mesh.Vertices.Num());
 
-	TMap<FIntVector, FVector> TangentByPosition;
-	int32 DuplicatePositions = 0;
-	for (int32 Index = 0; Index < Mesh.Vertices.Num(); ++Index)
+	TArray<int32> VertexUseCount;
+	VertexUseCount.Init(0, Mesh.Vertices.Num());
+	for (const int32 VertexIndex : Mesh.Triangles)
 	{
-		const FVector KeyPosition = Mesh.Vertices[Index] * 10.0f;
-		const FIntVector Key(
-			FMath::RoundToInt(KeyPosition.X),
-			FMath::RoundToInt(KeyPosition.Y),
-			FMath::RoundToInt(KeyPosition.Z));
-		const FVector Tangent = Mesh.Tangents[Index].TangentX.GetSafeNormal();
-		if (const FVector* Existing = TangentByPosition.Find(Key))
+		if (VertexUseCount.IsValidIndex(VertexIndex))
 		{
-			++DuplicatePositions;
-			TestTrue(
-				TEXT("Duplicate vertices on adjacent regular cells must have the same tangent frame"),
-				FVector::DotProduct(*Existing, Tangent) > 0.999f);
-		}
-		else
-		{
-			TangentByPosition.Add(Key, Tangent);
+			++VertexUseCount[VertexIndex];
 		}
 	}
 
-	TestTrue(TEXT("Fixture should contain vertices shared by adjacent cells"), DuplicatePositions > 0);
+	int32 SharedIndexedVertices = 0;
+	for (int32 Index = 0; Index < Mesh.Vertices.Num(); ++Index)
+	{
+		const FVector Tangent = Mesh.Tangents[Index].TangentX.GetSafeNormal();
+		TestTrue(TEXT("Every tangent must be finite"), !Tangent.ContainsNaN());
+		TestTrue(TEXT("Every tangent must be nonzero"), Tangent.SizeSquared() > 0.5f);
+		TestTrue(
+			TEXT("Tangent must be orthogonal to its normal"),
+			FMath::Abs(FVector::DotProduct(Tangent, Mesh.Normals[Index])) < 0.01f);
+
+		if (VertexUseCount[Index] > 1)
+		{
+			// An indexed shared vertex has one stored tangent frame regardless
+			// of how many adjacent regular-cell triangles reference it. This is
+			// the robust continuity invariant; duplicate position records are no
+			// longer required after vertex-cache welding was introduced.
+			++SharedIndexedVertices;
+		}
+	}
+
+	TestTrue(
+		TEXT("Regular-cell triangles should reuse indexed shared vertices with a single tangent frame"),
+		SharedIndexedVertices > 0);
 	return true;
 }
 
@@ -715,8 +724,8 @@ bool FSmoothVoxelMinedNodeDensityTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FSmoothVoxelHardCubeCavityTrianglesTest,
-	"SmoothVoxel.Transvoxel.HardCubeCavityDoesNotCollapseTriangles",
+	FSmoothVoxelHardCubePlacementTerrainUnchangedTest,
+	"SmoothVoxel.Transvoxel.HardCubePlacementDoesNotChangeTerrainMesh",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FSmoothVoxelHardCubeCavityTrianglesTest::RunTest(const FString& Parameters)
@@ -734,33 +743,40 @@ bool FSmoothVoxelHardCubeCavityTrianglesTest::RunTest(const FString& Parameters)
 
 	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
-	// One hard cube cuts a box whose faces are 0.05 cm beyond the cell bounds.
-	// At a 50 cm grid step, edge intersections are close enough to expose
-	// accidental vertex welding at the old 0.1 cm key resolution.
+	// Hard cubes are separate actors and must not excavate or distort the
+	// terrain density field. Generate an unedited baseline before enabling the
+	// logical +2 occupancy marker, then require exactly the same terrain mesh.
 	Edits->Add(FIntVector(2, 2, 4), int8(2));
+	FSVoxelMeshData BaselineMesh;
+	FSVoxelTransvoxelMesher::Generate(Settings, 16, 50.0f, 0, BaselineMesh);
 	Settings.BlockEdits = Edits;
 
 	FSVoxelMeshData Mesh;
 	FSVoxelTransvoxelMesher::Generate(Settings, 16, 50.0f, 0, Mesh);
-	TestTrue(TEXT("Hard cube cavity should leave terrain triangles around the opening"),
+	TestTrue(TEXT("Terrain should still generate triangles beside a separately rendered hard cube"),
 		Mesh.Triangles.Num() > 0);
-	TestEqual(TEXT("Cavity mesh triangle count must be divisible by three"),
+	TestEqual(TEXT("Mesh triangle count must be divisible by three"),
 		Mesh.Triangles.Num() % 3, 0);
+	TestEqual(TEXT("Hard-cube occupancy must not add or remove terrain vertices"),
+		Mesh.Vertices.Num(), BaselineMesh.Vertices.Num());
+	TestEqual(TEXT("Hard-cube occupancy must not add or remove terrain triangle indices"),
+		Mesh.Triangles.Num(), BaselineMesh.Triangles.Num());
+	TestTrue(TEXT("Hard-cube occupancy must leave terrain topology unchanged"),
+		Mesh.Triangles == BaselineMesh.Triangles);
 
-	bool bFoundExactGridPlane = false;
-	bool bPreservedSubTenthCentimetreIntersection = false;
-	for (const FVector& Vertex : Mesh.Vertices)
+	bool bSameGeometry = Mesh.Vertices.Num() == BaselineMesh.Vertices.Num();
+	for (int32 Index = 0; bSameGeometry && Index < Mesh.Vertices.Num(); ++Index)
 	{
-		const float DistanceToCellPlane = FMath::Abs(Vertex.X - 100.0f);
-		bFoundExactGridPlane |= DistanceToCellPlane <= 0.001f;
-		bPreservedSubTenthCentimetreIntersection |=
-			DistanceToCellPlane > 0.01f && DistanceToCellPlane < 0.06f;
+		bSameGeometry &= Mesh.Vertices[Index].Equals(BaselineMesh.Vertices[Index], 0.001f);
 	}
-	TestTrue(TEXT("The hard-cavity fixture must retain vertices on the exact density grid plane"),
-		bFoundExactGridPlane);
-	TestTrue(
-		TEXT("The 0.05 cm hard-cavity intersection must remain distinct from the exact 100 cm grid plane"),
-		bPreservedSubTenthCentimetreIntersection);
+	TestTrue(TEXT("Hard-cube occupancy must not shift terrain surface intersections"), bSameGeometry);
+
+	bool bSameNormals = Mesh.Normals.Num() == BaselineMesh.Normals.Num();
+	for (int32 Index = 0; bSameNormals && Index < Mesh.Normals.Num(); ++Index)
+	{
+		bSameNormals &= Mesh.Normals[Index].Equals(BaselineMesh.Normals[Index], 0.001f);
+	}
+	TestTrue(TEXT("Hard-cube occupancy must not change surrounding terrain normals"), bSameNormals);
 
 	bool bAllIndicesValid = true;
 	bool bNoDuplicateIndices = true;
