@@ -828,6 +828,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 
 	FIntVector Cell = FIntVector::ZeroValue;
 	EVoxelBlock HitBlock = EVoxelBlock::Air;
+	FVector MiningEditCenter = FVector::ZeroVector;
 	ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor());
 	if (IsValid(HitCube) && HitCube->GetOwner() == this)
 	{
@@ -863,6 +864,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		const FVector InsidePoint = DensityAlong >= DensityAgainst
 			? ProbeAlongNormal
 			: ProbeAgainstNormal;
+		MiningEditCenter = InsidePoint;
 		Cell = WorldPositionToBlockCell(InsidePoint);
 
 		const int8* ExistingEdit = EditedBlockCells.Find(Cell);
@@ -938,7 +940,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	}
 	else
 	{
-		ApplyBlockCellEdit(Cell, EVoxelBlock::Air, NextMiningState, &InsidePoint);
+		ApplyBlockCellEdit(Cell, EVoxelBlock::Air, NextMiningState, &MiningEditCenter);
 	}
 
 	if (Inventory && bFinishesMiningCell && DropBlock != EVoxelBlock::Air)
