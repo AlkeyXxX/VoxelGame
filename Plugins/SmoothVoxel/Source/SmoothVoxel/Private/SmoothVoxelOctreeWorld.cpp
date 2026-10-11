@@ -276,16 +276,29 @@ ASmoothVoxelPlacedCubeBlock::ASmoothVoxelPlacedCubeBlock()
 	Mesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 }
 
+int32 ASmoothVoxelPlacedCubeBlock::RegisterDamageHit()
+{
+	++DamageStage;
+	return DamageStage;
+}
+
 void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 	EVoxelBlock InBlockType,
 	const FIntVector& InCell,
 	float InBlockSize,
-	UMaterialInterface* InMaterial)
+	UMaterialInterface* InMaterial,
+	int32 InDamageStage)
 {
 	BlockType = InBlockType;
 	BlockCell = InCell;
+	DamageStage = FMath::Max(0, InDamageStage);
 
 	const float Size = FMath::Max(1.0f, InBlockSize);
+	// Keep the block cubic but show accumulating damage through a small inset.
+	// The hit-point stages are intentionally subtle, not a sudden full-cell cut.
+	const float Inset = FMath::Min(Size * 0.045f, Size * 0.015f * DamageStage);
+	const float Lo = Inset;
+	const float Hi = Size - Inset;
 	SetActorLocation(FVector(
 		static_cast<float>(InCell.X) * Size,
 		static_cast<float>(InCell.Y) * Size,
@@ -353,22 +366,22 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 	// Every face owns its four vertices: this is deliberate. Reusing shared
 	// corners would average normals and round the block under smooth shading.
 	AddFace(
-		FVector(0, 0, 0), FVector(0, 0, Size), FVector(0, Size, Size), FVector(0, Size, 0),
+		FVector(Lo, Lo, Lo), FVector(Lo, Lo, Hi), FVector(Lo, Hi, Hi), FVector(Lo, Hi, Lo),
 		FVector(-1, 0, 0));
 	AddFace(
-		FVector(Size, 0, 0), FVector(Size, Size, 0), FVector(Size, Size, Size), FVector(Size, 0, Size),
+		FVector(Hi, Lo, Lo), FVector(Hi, Hi, Lo), FVector(Hi, Hi, Hi), FVector(Hi, Lo, Hi),
 		FVector(1, 0, 0));
 	AddFace(
-		FVector(0, 0, 0), FVector(Size, 0, 0), FVector(Size, 0, Size), FVector(0, 0, Size),
+		FVector(Lo, Lo, Lo), FVector(Hi, Lo, Lo), FVector(Hi, Lo, Hi), FVector(Lo, Lo, Hi),
 		FVector(0, -1, 0));
 	AddFace(
-		FVector(0, Size, 0), FVector(0, Size, Size), FVector(Size, Size, Size), FVector(Size, Size, 0),
+		FVector(Lo, Hi, Lo), FVector(Lo, Hi, Hi), FVector(Hi, Hi, Hi), FVector(Hi, Hi, Lo),
 		FVector(0, 1, 0));
 	AddFace(
-		FVector(0, 0, 0), FVector(0, Size, 0), FVector(Size, Size, 0), FVector(Size, 0, 0),
+		FVector(Lo, Lo, Lo), FVector(Lo, Hi, Lo), FVector(Hi, Hi, Lo), FVector(Hi, Lo, Lo),
 		FVector(0, 0, -1));
 	AddFace(
-		FVector(0, 0, Size), FVector(Size, 0, Size), FVector(Size, Size, Size), FVector(0, Size, Size),
+		FVector(Lo, Lo, Hi), FVector(Hi, Lo, Hi), FVector(Hi, Hi, Hi), FVector(Lo, Hi, Hi),
 		FVector(0, 0, 1));
 
 	Mesh->ClearAllMeshSections();
@@ -620,12 +633,34 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 		Params);
 }
 
-void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(const FIntVector& Cell, EVoxelBlock Block)
+void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
+	const FIntVector& Cell,
+	EVoxelBlock Block,
+	int8 EditStateOverride)
 {
 	ASmoothVoxelPlacedCubeBlock* ExistingCube = PlacedCubeBlocks.FindRef(Cell);
 	const bool bRemoveBlock = Block == EVoxelBlock::Air;
 	const bool bSmoothBlock = !bRemoveBlock && IsSmoothTerrainBlock(Block);
-	int8 EditState = -1;
+	int8 EditState = EditStateOverride;
+	if (EditState == 0)
+	{
+		EditState = bRemoveBlock ? int8(-5) : (bSmoothBlock ? int8(1) : int8(2));
+	}
+
+	// Removing a separately rendered hard cube restores the procedural terrain
+	// field under it; only actual terrain mining keeps an explicit air override.
+	if (bRemoveBlock && IsValid(ExistingCube) && EditStateOverride == 0)
+	{
+		ExistingCube->Destroy();
+		PlacedCubeBlocks.Remove(Cell);
+		EditedBlockTypes.Remove(Cell);
+		EditedBlockCells.Remove(Cell);
+		BlockEditSnapshot = EditedBlockCells.Num() > 0
+			? MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells)
+			: nullptr;
+		RebuildChunksNearEditedCell(Cell);
+		return;
+	}
 
 	if (bRemoveBlock)
 	{
@@ -637,7 +672,8 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(const FIntVector& Cell, EVoxelB
 		}
 		PlacedCubeBlocks.Remove(Cell);
 		EditedBlockTypes.Remove(Cell);
-		EditState = -1;
+		EditedBlockTypes.Remove(Cell);
+		EditState = EditStateOverride != 0 ? EditStateOverride : int8(-5);
 	}
 	else if (bSmoothBlock)
 	{
@@ -649,7 +685,7 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(const FIntVector& Cell, EVoxelB
 		}
 		PlacedCubeBlocks.Remove(Cell);
 		EditedBlockTypes.Add(Cell, Block);
-		EditState = 1;
+		EditState = EditStateOverride != 0 ? EditStateOverride : int8(1);
 	}
 	else
 	{
@@ -677,9 +713,10 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(const FIntVector& Cell, EVoxelB
 			PlacedCubeBlocks.Add(Cell, Cube);
 		}
 
-		Cube->ConfigureBlock(Block, Cell, GetEffectiveBlockSize(), TerrainMaterial);
+		Cube->ConfigureBlock(
+			Block, Cell, GetEffectiveBlockSize(), TerrainMaterial, Cube->GetDamageStage());
 		EditedBlockTypes.Add(Cell, Block);
-		EditState = 2;
+		EditState = EditStateOverride != 0 ? EditStateOverride : int8(2);
 	}
 
 	EditedBlockCells.Add(Cell, EditState);
@@ -773,18 +810,27 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 
 		const float Step = GetEffectiveBlockSize();
 		const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
-		const FVector InsidePoint = Hit.ImpactPoint - Normal * FMath::Max(0.5f, Step * 0.2f);
-		// Derive both the occupancy check and cell identity from the same point
-		// inside the hit surface; previously the two different offsets could
-		// test one cell but carve its neighbour on steep slopes.
-		Cell = WorldPositionToBlockCell(InsidePoint);
+		const float ProbeDistance = FMath::Max(1.0f, Step * 0.2f);
+		const FVector ProbeAlongNormal = Hit.ImpactPoint + Normal * ProbeDistance;
+		const FVector ProbeAgainstNormal = Hit.ImpactPoint - Normal * ProbeDistance;
+		const float DensityAlong = SampleCurrentDensityAt(ProbeAlongNormal);
+		const float DensityAgainst = SampleCurrentDensityAt(ProbeAgainstNormal);
 
-		const int8* ExistingEdit = EditedBlockCells.Find(Cell);
-		if (ExistingEdit && *ExistingEdit < 0)
+		// Collision normals can be flipped on the underside of a surface.
+		// Pick the side that the density field confirms is solid instead of
+		// trusting the triangle winding, which caused mining from below to miss
+		// the interior and leave seemingly invisible faces.
+		if (FMath::Max(DensityAlong, DensityAgainst) <= 0.0f)
 		{
 			return false;
 		}
-		if (SampleCurrentDensityAt(InsidePoint) <= 0.0f)
+		const FVector InsidePoint = DensityAlong >= DensityAgainst
+			? ProbeAlongNormal
+			: ProbeAgainstNormal;
+		Cell = WorldPositionToBlockCell(InsidePoint);
+
+		const int8* ExistingEdit = EditedBlockCells.Find(Cell);
+		if (ExistingEdit && *ExistingEdit <= -5)
 		{
 			return false;
 		}
@@ -813,14 +859,51 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		? PlayerPawn->FindComponentByClass<UVoxelInventoryComponent>()
 		: nullptr;
 	const EVoxelBlock DropBlock = UVoxelBlockLibrary::GetBlockDropFromTable(BlockDataTable, HitBlock);
-	if (Inventory && DropBlock != EVoxelBlock::Air && !Inventory->CanAddBlock(DropBlock, 1))
+
+	if (IsValid(HitCube))
+	{
+		const int32 HitsToBreak = FMath::Clamp(
+			FMath::CeilToInt(UVoxelBlockLibrary::GetBlockDurabilityFromTable(BlockDataTable, HitBlock)) + 1,
+			2,
+			6);
+		if (HitCube->GetDamageStage() + 1 < HitsToBreak)
+		{
+			const int32 NewDamageStage = HitCube->RegisterDamageHit();
+			HitCube->ConfigureBlock(
+				HitBlock, Cell, GetEffectiveBlockSize(), TerrainMaterial, NewDamageStage);
+			return true;
+		}
+	}
+
+	int8 NextMiningState = -1;
+	if (!IsValid(HitCube))
+	{
+		if (const int8* ExistingEdit = EditedBlockCells.Find(Cell))
+		{
+			NextMiningState = FMath::Max<int32>(-5, static_cast<int32>(*ExistingEdit) - 1);
+		}
+	}
+
+	const bool bFinishesMiningCell = IsValid(HitCube) || NextMiningState <= -5;
+	if (Inventory && bFinishesMiningCell && DropBlock != EVoxelBlock::Air &&
+		!Inventory->CanAddBlock(DropBlock, 1))
 	{
 		// Never remove a block if its drop cannot fit into the inventory.
 		return false;
 	}
 
-	ApplyBlockCellEdit(Cell, EVoxelBlock::Air);
-	if (Inventory && DropBlock != EVoxelBlock::Air)
+	if (IsValid(HitCube))
+	{
+		// Destroying a placed cube removes its override and reveals whatever
+		// procedural terrain originally occupied that cell.
+		ApplyBlockCellEdit(Cell, EVoxelBlock::Air);
+	}
+	else
+	{
+		ApplyBlockCellEdit(Cell, EVoxelBlock::Air, NextMiningState);
+	}
+
+	if (Inventory && bFinishesMiningCell && DropBlock != EVoxelBlock::Air)
 	{
 		Inventory->AddBlock(DropBlock, 1);
 	}
