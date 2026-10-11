@@ -743,7 +743,7 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 
 	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
-	Edits->Add(FIntVector(2, 2, 6), int8(1));   // Smooth material above the hill.
+	Edits->Add(FIntVector(2, 2, 5), int8(1));   // Smooth material meets the hill surface.
 	Edits->Add(FIntVector(2, 2, 4), int8(-1)); // Cut into the solid side of the hill.
 	Edits->Add(FIntVector(4, 2, 6), int8(2));  // Cubic block cell is air in the SDF.
 	Settings.BlockEdits = Edits;
