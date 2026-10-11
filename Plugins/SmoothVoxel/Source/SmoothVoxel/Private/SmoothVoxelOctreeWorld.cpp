@@ -668,6 +668,7 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 	float PreviousDistance = 0.0f;
 	float PreviousDensity = SampleCurrentDensityAt(RayStart);
 	float HitDistance = -1.0f;
+	FVector HitNormal = -Direction;
 
 	for (float Distance = MarchStep; Distance <= MaxDistance; Distance += MarchStep)
 	{
@@ -693,6 +694,7 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 				}
 			}
 			HitDistance = (Low + High) * 0.5f;
+			HitNormal = bPreviousSolid ? Direction : -Direction;
 			break;
 		}
 
@@ -743,8 +745,8 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 	OutHit.Distance = HitDistance;
 	OutHit.Location = HitPoint;
 	OutHit.ImpactPoint = HitPoint;
-	OutHit.Normal = -Direction;
-	OutHit.ImpactNormal = -Direction;
+	OutHit.Normal = HitNormal;
+	OutHit.ImpactNormal = HitNormal;
 	OutHit.Actor = HitChunk;
 	OutHit.Component = HitChunk->Mesh;
 	return true;
