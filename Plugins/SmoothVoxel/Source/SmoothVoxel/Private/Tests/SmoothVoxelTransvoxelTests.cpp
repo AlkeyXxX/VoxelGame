@@ -982,9 +982,10 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	// a chunk corner. This makes the edited SDF and transition faces meet at the
 	// same place, the worst case for tiny/cull-reversed triangles.
 	FSVoxelGenerationSettings RoofSettings;
-	// Reproduce the reported sequence: dig a three-cell shaft, then a 1-wide,
-	// 2-high horizontal tunnel, leaving exactly one voxel layer as the roof.
-	RoofSettings.BaseHeight = 950.0f;
+	// Reproduce the reported sequence: dig a three-cell shaft from the
+	// surface, then a 1-wide, 2-high horizontal tunnel, leaving cell Z=14 as
+	// one full voxel layer between the tunnel and the sky.
+	RoofSettings.BaseHeight = 750.0f;
 	RoofSettings.HeightAmplitude = 0.0f;
 	RoofSettings.DetailAmplitude = 0.0f;
 	RoofSettings.NoiseScale = 0.0f;
@@ -996,13 +997,13 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	RoofSettings.IsoLevel = 0.0f;
 	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> RoofMinedNodes =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
-	RoofMinedNodes->Add(FIntVector(0, 0, 15));
-	RoofMinedNodes->Add(FIntVector(0, 0, 16));
-	RoofMinedNodes->Add(FIntVector(0, 0, 17));
+	RoofMinedNodes->Add(FIntVector(0, 0, 12));
+	RoofMinedNodes->Add(FIntVector(0, 0, 13));
+	RoofMinedNodes->Add(FIntVector(0, 0, 14));
 	for (int32 X = 1; X <= 3; ++X)
 	{
-		RoofMinedNodes->Add(FIntVector(X, 0, 16));
-		RoofMinedNodes->Add(FIntVector(X, 0, 17));
+		RoofMinedNodes->Add(FIntVector(X, 0, 12));
+		RoofMinedNodes->Add(FIntVector(X, 0, 13));
 	}
 	RoofSettings.MinedNodes = RoofMinedNodes;
 
