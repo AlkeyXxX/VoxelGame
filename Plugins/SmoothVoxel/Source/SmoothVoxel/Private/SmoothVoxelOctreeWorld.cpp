@@ -1243,7 +1243,6 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 
 	FIntVector Cell = FIntVector::ZeroValue;
 	FVector CubeWorldOrigin = FVector::ZeroVector;
-	bool bTargetedPlacedCube = false;
 	if (ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor()))
 	{
 		if (HitCube->GetOwner() != this)
@@ -1255,7 +1254,6 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		// attached to a terrain surface may be offset from the global voxel grid.
 		CubeWorldOrigin = HitCube->GetActorLocation() + FaceDirection * Step;
 		Cell = WorldPositionToBlockCell(CubeWorldOrigin);
-		bTargetedPlacedCube = true;
 	}
 	else
 	{
