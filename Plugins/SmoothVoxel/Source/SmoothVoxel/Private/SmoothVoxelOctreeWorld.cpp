@@ -308,7 +308,42 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.CaveThreshold = CaveThreshold;
 	Settings.CaveStrength = CaveStrength;
 	Settings.ChunkWorldOrigin = ChunkOrigin;
-	Settings.BlockEdits = BlockEditSnapshot;
+
+	// Only carry edits near this chunk into the worker snapshot. Without this
+	// spatial filtering, every unrelated chunk generated after a single edit
+	// would pay for edit-map lookups at every density sample.
+	if (BlockEditSnapshot.IsValid() && BlockEditSnapshot->Num() > 0)
+	{
+		const double EditGridStep = FMath::Max(1.0, static_cast<double>(EffectiveBaseVoxelSize));
+		const double Padding = static_cast<double>(VoxelSize) + EditGridStep;
+		const double MinX = static_cast<double>(ChunkOrigin.X) - Padding;
+		const double MinY = static_cast<double>(ChunkOrigin.Y) - Padding;
+		const double MinZ = static_cast<double>(ChunkOrigin.Z) - Padding;
+		const double MaxX = static_cast<double>(ChunkOrigin.X) +
+			static_cast<double>(CellsPerAxis) * VoxelSize + Padding;
+		const double MaxY = static_cast<double>(ChunkOrigin.Y) +
+			static_cast<double>(CellsPerAxis) * VoxelSize + Padding;
+		const double MaxZ = static_cast<double>(ChunkOrigin.Z) +
+			static_cast<double>(CellsPerAxis) * VoxelSize + Padding;
+
+		FSVoxelBlockEditMap LocalEdits;
+		for (const TPair<FIntVector, int8>& Edit : *BlockEditSnapshot)
+		{
+			const double EditX = (static_cast<double>(Edit.Key.X) + 0.5) * EditGridStep;
+			const double EditY = (static_cast<double>(Edit.Key.Y) + 0.5) * EditGridStep;
+			const double EditZ = (static_cast<double>(Edit.Key.Z) + 0.5) * EditGridStep;
+			if (EditX >= MinX && EditX <= MaxX &&
+				EditY >= MinY && EditY <= MaxY &&
+				EditZ >= MinZ && EditZ <= MaxZ)
+			{
+				LocalEdits.Add(Edit.Key, Edit.Value);
+			}
+		}
+		if (LocalEdits.Num() > 0)
+		{
+			Settings.BlockEdits = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(LocalEdits);
+		}
+	}
 	return Settings;
 }
 
@@ -338,7 +373,12 @@ FVector ASmoothVoxelOctreeWorld::BlockCellCenter(const FIntVector& Cell) const
 FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() const
 {
 	const float Step = GetEffectiveBlockSize();
-	return MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step);
+	FSVoxelGenerationSettings Settings =
+		MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step);
+	// Point queries for interaction can occur anywhere in the finite world, so
+	// use the complete edit snapshot rather than a per-chunk filtered subset.
+	Settings.BlockEdits = BlockEditSnapshot;
+	return Settings;
 }
 
 float ASmoothVoxelOctreeWorld::SampleCurrentDensityAt(const FVector& WorldPosition) const
