@@ -784,6 +784,8 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	bool bAllTriangleIndicesValid = true;
 	bool bNoCollapsedTriangleIndices = true;
 	bool bNoZeroAreaTriangles = true;
+	bool bSampledFacesPointIntoSolid = true;
+	int32 OrientedFacesChecked = 0;
 	for (int32 Index = 0; Index + 2 < Mesh.Triangles.Num(); Index += 3)
 	{
 		const int32 A = Mesh.Triangles[Index];
@@ -808,11 +810,41 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		if (Cross.SizeSquared() <= SMALL_NUMBER)
 		{
 			bNoZeroAreaTriangles = false;
+			continue;
+		}
+
+		// UE4's procedural mesh front-face winding is opposite the outward
+		// surface normal, so the final index cross should point into solid.
+		// Sample every ninth triangle on both sides of its face to catch
+		// orientation inversions around mining cavities and underside surfaces.
+		if ((Index / 3) % 9 == 0)
+		{
+			const FVector FaceDirection = Cross.GetSafeNormal();
+			const FVector Center = (
+				Mesh.Vertices[A] + Mesh.Vertices[B] + Mesh.Vertices[C]) / 3.0f;
+			const float Probe = 1.0f;
+			const float AlongFace = FSVoxelGenerator::SampleDensity(
+				Center.X + FaceDirection.X * Probe,
+				Center.Y + FaceDirection.Y * Probe,
+				Center.Z + FaceDirection.Z * Probe,
+				Settings);
+			const float AgainstFace = FSVoxelGenerator::SampleDensity(
+				Center.X - FaceDirection.X * Probe,
+				Center.Y - FaceDirection.Y * Probe,
+				Center.Z - FaceDirection.Z * Probe,
+				Settings);
+			if (FMath::Abs(AlongFace - AgainstFace) > 0.1f)
+			{
+				++OrientedFacesChecked;
+				bSampledFacesPointIntoSolid &= AlongFace > AgainstFace;
+			}
 		}
 	}
 	TestTrue(TEXT("Every edited-mesh triangle index must be in range"), bAllTriangleIndicesValid);
 	TestTrue(TEXT("Edited mesh must not contain collapsed triangle indices"), bNoCollapsedTriangleIndices);
 	TestTrue(TEXT("Edited mesh must not contain zero-area triangles"), bNoZeroAreaTriangles);
+	TestTrue(TEXT("Edited fixture must contain faces with a measurable solid/air side"), OrientedFacesChecked > 0);
+	TestTrue(TEXT("Edited triangles must not invert on the air side of the surface"), bSampledFacesPointIntoSolid);
 
 	bool bAllNormalsFinite = true;
 	bool bAllNormalsNormalized = true;
