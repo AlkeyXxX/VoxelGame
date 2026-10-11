@@ -130,26 +130,6 @@ namespace
         return OutsideDistance + InsideDistance - RoundRadius;
     }
 
-    FORCEINLINE double OctahedronSdf(
-        double X,
-        double Y,
-        double Z,
-        double CenterX,
-        double CenterY,
-        double CenterZ,
-        double Radius)
-    {
-        // 7DTD-style terrain cells are represented by shared point densities,
-        // not isolated hard cubes. An octahedral influence gives a diamond
-        // footprint and touches the neighbouring cells instead of cutting a
-        // perfectly square hole in one full cell.
-        const double ManhattanDistance =
-            std::abs(X - CenterX) +
-            std::abs(Y - CenterY) +
-            std::abs(Z - CenterZ);
-        return (ManhattanDistance - Radius) * 0.5773502691896258;
-    }
-
     FORCEINLINE float ApplyBlockEdits(
         double X,
         double Y,
