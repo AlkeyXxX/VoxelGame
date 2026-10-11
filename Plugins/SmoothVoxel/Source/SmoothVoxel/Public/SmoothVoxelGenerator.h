@@ -114,6 +114,14 @@ public:
 		double WorldY,
 		const FSVoxelGenerationSettings& Settings);
 
+	/** Returns the channel mask and the signed field used to recover the local river direction. */
+	static void SampleRiverMaskAndField(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings,
+		float& OutInfluence,
+		float& OutSignedField);
+
 	/** Sample the macro terrain noise at a global XY coordinate. */
 	static float SampleTerrainNoise(
 		double WorldX,
