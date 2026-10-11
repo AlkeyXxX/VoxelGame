@@ -387,7 +387,8 @@ namespace
 			return;
 		}
 
-		constexpr double UVWorldScale = 0.0005; // One texture repeat per 2000 cm.
+		constexpr double UVWorldScale = 0.0005; // Floor repeat: one texture tile per 2000 cm.
+		constexpr double WallUVWorldScale = 0.0025; // Wall repeat: one tile per 400 cm.
 
 		// Rebase UVs once per chunk, not once per cell. Cell-local rebasing kept
 		// values small but introduced UV discontinuities on every marching-cubes
@@ -453,18 +454,20 @@ namespace
 			const float AbsZ = FMath::Abs(Normal.Z);
 			double U = WorldX;
 			double V = WorldY;
-			double UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * UVWorldScale)));
-			double UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * UVWorldScale)));
-		FVector WorldU(1.0f, 0.0f, 0.0f);
-		FVector WorldV(0.0f, 1.0f, 0.0f);
+			double ProjectionScale = UVWorldScale;
+			double UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * ProjectionScale)));
+			double UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * ProjectionScale)));
+			FVector WorldU(1.0f, 0.0f, 0.0f);
+			FVector WorldV(0.0f, 1.0f, 0.0f);
 
 			if (AbsX >= AbsY && AbsX >= AbsZ)
 			{
 				// X-facing wall: project onto YZ.
 				U = WorldY;
 				V = WorldZ;
-				UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * UVWorldScale)));
-				UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * UVWorldScale)));
+				ProjectionScale = WallUVWorldScale;
+				UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldY * ProjectionScale)));
+				UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * ProjectionScale)));
 				WorldU = FVector(0.0f, 1.0f, 0.0f);
 				WorldV = FVector(0.0f, 0.0f, 1.0f);
 			}
@@ -473,8 +476,9 @@ namespace
 				// Y-facing wall: project onto XZ.
 				U = WorldX;
 				V = WorldZ;
-				UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * UVWorldScale)));
-				UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * UVWorldScale)));
+				ProjectionScale = WallUVWorldScale;
+				UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldX * ProjectionScale)));
+				UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(ChunkOriginWorldZ * ProjectionScale)));
 				WorldU = FVector(1.0f, 0.0f, 0.0f);
 				WorldV = FVector(0.0f, 0.0f, 1.0f);
 			}
@@ -486,8 +490,8 @@ namespace
 			}
 
 			OutMesh.UV0.Add(FVector2D(
-				static_cast<float>(U * UVWorldScale - UvOffsetU),
-				static_cast<float>(V * UVWorldScale - UvOffsetV)));
+				static_cast<float>(U * ProjectionScale - UvOffsetU),
+				static_cast<float>(V * ProjectionScale - UvOffsetV)));
 
 			// Build the tangent basis from the same planar projection as UV0.
 			FVector Tangent = WorldU - Normal * FVector::DotProduct(Normal, WorldU);
