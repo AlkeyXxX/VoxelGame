@@ -659,6 +659,7 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	TArray<double> SmoothedHeights;
 	TArray<double> CarvedBedHeights;
 	TArray<float> RiverWeights;
+	TArray<float> RiverFields;
 
 	RiverVertices.Reserve(VertexCount);
 	RiverNormals.Reserve(VertexCount);
@@ -670,6 +671,7 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	SmoothedHeights.SetNumUninitialized(VertexCount);
 	CarvedBedHeights.SetNumUninitialized(VertexCount);
 	RiverWeights.SetNumUninitialized(VertexCount);
+	RiverFields.SetNumUninitialized(VertexCount);
 	RiverTriangles.Reserve(Resolution * Resolution * 2);
 
 	for (int32 Y = 0; Y <= Resolution; ++Y)
@@ -682,10 +684,15 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 			const double WorldX = static_cast<double>(ConfiguredWorldCenter.X) + LocalX;
 			const double WorldY = static_cast<double>(ConfiguredWorldCenter.Y) + LocalY;
 
-			const float RiverInfluence = FMath::Clamp(
-				FSVoxelGenerator::SampleRiverInfluence(WorldX, WorldY, GenerationSettings),
-				0.0f,
-				1.0f);
+			float RiverInfluence = 0.0f;
+			float RiverSignedField = 0.0f;
+			FSVoxelGenerator::SampleRiverMaskAndField(
+				WorldX,
+				WorldY,
+				GenerationSettings,
+				RiverInfluence,
+				RiverSignedField);
+			RiverInfluence = FMath::Clamp(RiverInfluence, 0.0f, 1.0f);
 			const double CarvedHeight = FSVoxelGenerator::SampleSurfaceHeight(
 				WorldX, WorldY, GenerationSettings);
 			// SampleSurfaceHeight already cuts the riverbed. Add that cut back to
@@ -694,6 +701,7 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 			NaturalHeights[Index] = NaturalHeight;
 			CarvedBedHeights[Index] = CarvedHeight;
 			RiverWeights[Index] = RiverInfluence;
+			RiverFields[Index] = RiverSignedField;
 		}
 	}
 
@@ -749,10 +757,57 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 			const double NaturalHeight = NaturalHeights[Index];
 			const double BedHeight = CarvedBedHeights[Index];
 
-			// The smoothed target removes small terrain undulations. Clamp it
-			// between the carved bed and a safety margin below the uncarved bank:
-			// this prevents floating water and makes the centre of a channel fill.
-			const double SmoothedWaterHeight = SmoothedHeights[Index] - RiverDepth * 0.35;
+			// Estimate the normal of the signed river field. Project points across
+			// a channel onto its zero-contour, then take the water elevation from
+			// that centreline. This preserves the downhill profile along the river
+			// while avoiding the old sideways tilt that copied each bank's terrain.
+			const int32 Left = Y * Side + FMath::Max(0, X - 1);
+			const int32 Right = Y * Side + FMath::Min(Resolution, X + 1);
+			const int32 Down = FMath::Max(0, Y - 1) * Side + X;
+			const int32 Up = FMath::Min(Resolution, Y + 1) * Side + X;
+			const double FieldDX = static_cast<double>(RiverFields[Right] - RiverFields[Left]) /
+				((X == 0 || X == Resolution) ? Step : Step * 2.0);
+			const double FieldDY = static_cast<double>(RiverFields[Up] - RiverFields[Down]) /
+				((Y == 0 || Y == Resolution) ? Step : Step * 2.0);
+			const double FieldGradient = FMath::Sqrt(FieldDX * FieldDX + FieldDY * FieldDY);
+
+			double RiverAxisHeight = SmoothedHeights[Index];
+			if (FieldGradient > 1.0e-10)
+			{
+				const double DistanceToAxis = static_cast<double>(RiverFields[Index]) / FieldGradient;
+				const double MaxProjectionDistance =
+					FMath::Max(1.0, std::abs(static_cast<double>(GenerationSettings.RiverHalfWidth)) * 1.25);
+				if (std::abs(DistanceToAxis) <= MaxProjectionDistance)
+				{
+					const double GridX = FMath::Clamp(
+						static_cast<double>(X) - DistanceToAxis * FieldDX / FieldGradient / Step,
+						0.0,
+						static_cast<double>(Resolution));
+					const double GridY = FMath::Clamp(
+						static_cast<double>(Y) - DistanceToAxis * FieldDY / FieldGradient / Step,
+						0.0,
+						static_cast<double>(Resolution));
+					const int32 X0 = FMath::FloorToInt(GridX);
+					const int32 Y0 = FMath::FloorToInt(GridY);
+					const int32 X1 = FMath::Min(Resolution, X0 + 1);
+					const int32 Y1 = FMath::Min(Resolution, Y0 + 1);
+					const double TX = GridX - static_cast<double>(X0);
+					const double TY = GridY - static_cast<double>(Y0);
+					const double Lower = FMath::Lerp(
+						SmoothedHeights[Y0 * Side + X0],
+						SmoothedHeights[Y0 * Side + X1],
+						TX);
+					const double Upper = FMath::Lerp(
+						SmoothedHeights[Y1 * Side + X0],
+						SmoothedHeights[Y1 * Side + X1],
+						TX);
+					RiverAxisHeight = FMath::Lerp(Lower, Upper, TY);
+				}
+			}
+
+			// Water is level across the channel width, but may descend gradually
+			// along the river. Clamp it into the carved bed and below the local bank.
+			const double SmoothedWaterHeight = RiverAxisHeight - RiverDepth * 0.35;
 			const double BelowBankHeight = NaturalHeight - FMath::Max(75.0, RiverDepth * 0.12);
 			const double AboveBedHeight = BedHeight + RiverDepth * 0.10 * RiverInfluence;
 			const double RiverSurfaceHeight = FMath::Min(
