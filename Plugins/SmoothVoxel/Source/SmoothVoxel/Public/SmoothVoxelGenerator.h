@@ -31,6 +31,16 @@ struct FSVoxelGenerationSettings
 
 	int32 Seed = 1337;
 
+	// World-space climate settings: changing map size never rescales biome regions.
+	bool bEnableBiomes = true;
+	float BiomeScale = 0.00000065f;
+
+	// Deterministic clearings reserved for future POIs.
+	bool bEnablePOIPlateaus = true;
+	float POISiteSpacing = 65000.0f;
+	float POIPlateauRadius = 6500.0f;
+	float POIPlateauBlendDistance = 5000.0f;
+
 	// Terrain
 	float BaseHeight = 900.0f;
 	float HeightAmplitude = 850.0f;
@@ -91,6 +101,24 @@ public:
 		double WorldY,
 		const FSVoxelGenerationSettings& Settings);
 
+	/** Classify biome at a deterministic global XY coordinate. */
+	static ESVoxelBiome SampleBiome(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
+	/** 0..1: high values indicate a generated flat clearing suitable for a POI. */
+	static float SamplePOISuitability(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
+	/** Per-vertex tint for materials that consume the ProceduralMesh vertex-color channel. */
+	static FLinearColor GetBiomeTint(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
 	/** Height-only surface sample, shared by every Z sample in one vertical column. */
 	static double SampleSurfaceHeightAtChunkLocal(
 		const FVector& LocalPosition,
@@ -114,6 +142,26 @@ public:
 		FSVoxelMeshData& OutMesh);
 
 private:
+
+	static double SampleUnflattenedSurfaceHeight(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings);
+
+	static float GetPOIPlateauInfluence(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings,
+		double& OutSiteX,
+		double& OutSiteY);
+
+	static void SampleBiomeClimate(
+		double WorldX,
+		double WorldY,
+		const FSVoxelGenerationSettings& Settings,
+		float& OutTemperature,
+		float& OutMoisture,
+		float& OutMountainSignal);
 
 	static float Density(
 		double X,
