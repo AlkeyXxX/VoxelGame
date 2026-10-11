@@ -286,14 +286,13 @@ namespace
 		uint8 TransitionFaceMask,
 		float ChunkSize,
 		FSVoxelMeshData& OutMesh,
-		TMap<FIntVector, FVector>& NormalCache)
+		TMap<FIntVector, uint32>& VertexCache)
 	{
 		if (VertexCount <= 0 || TriangleCount <= 0)
 		{
 			return;
 		}
 
-		const int32 BaseVertex = OutMesh.Vertices.Num();
 		constexpr double UVWorldScale = 0.0005; // One texture repeat per 2000 cm.
 
 		// Rebase UVs once per chunk, not once per cell. Cell-local rebasing kept
@@ -314,26 +313,32 @@ namespace
 
 		TArray<FVector> CellNormals;
 		CellNormals.SetNumUninitialized(VertexCount);
+		TArray<uint32> CellGlobalIndices;
+		CellGlobalIndices.SetNumUninitialized(VertexCount);
+
 		for (int32 I = 0; I < VertexCount; ++I)
 		{
 			const FVector LocalPosition = CellLocalVertices[I];
-			// Marching-cubes emits separate vertices for neighbouring cells.
-			// Cache normals by a 0.1 cm local-position key so duplicate vertices
-			// reuse the same expensive density-gradient calculation.
-			const FIntVector NormalKey(
+			// Quantize local positions to 0.1 cm. Adjacent marching-cubes cells
+			// then share one render vertex/index instead of uploading duplicate
+			// positions, normals, UVs and tangents. The same key also guarantees
+			// matching cached normals at cell boundaries.
+			const FIntVector VertexKey(
 				FMath::RoundToInt(LocalPosition.X * 10.0f),
 				FMath::RoundToInt(LocalPosition.Y * 10.0f),
 				FMath::RoundToInt(LocalPosition.Z * 10.0f));
-			if (const FVector* CachedNormal = NormalCache.Find(NormalKey))
+
+			if (const uint32* ExistingIndex = VertexCache.Find(VertexKey))
 			{
-				CellNormals[I] = *CachedNormal;
+				CellGlobalIndices[I] = *ExistingIndex;
+				CellNormals[I] = OutMesh.Normals[static_cast<int32>(*ExistingIndex)];
+				continue;
 			}
-			else
-			{
-				CellNormals[I] = SampleOutwardNormal(
-					LocalPosition, Settings, ComputeNormalSampleStep(Settings));
-				NormalCache.Add(NormalKey, CellNormals[I]);
-			}
+
+			CellNormals[I] = SampleOutwardNormal(
+				LocalPosition, Settings, ComputeNormalSampleStep(Settings));
+			CellGlobalIndices[I] = static_cast<uint32>(OutMesh.Vertices.Num());
+			VertexCache.Add(VertexKey, CellGlobalIndices[I]);
 			OutMesh.Vertices.Add(LocalPosition);
 			OutMesh.Normals.Add(CellNormals[I]);
 
@@ -347,11 +352,7 @@ namespace
 				static_cast<float>(WorldY * UVWorldScale - UvOffsetV)));
 
 			// UV0 follows a fixed-scale world-XY projection within this chunk.
-			// Subtracting a constant integer tile offset does not change its
-			// derivatives, so for a height field use dP/dX=(1,0,dZ/dX) and
-			// dP/dY=(0,1,dZ/dY). Recover their slopes from the outward normal.
-			// This gives the same tangent frame at the same world point in every
-			// cell and LOD, unlike per-cell triangle-derived tangent accumulation.
+			// Subtracting a constant integer tile offset preserves its derivatives.
 			const FVector Normal = CellNormals[I].GetSafeNormal();
 			FVector Tangent;
 			FVector Bitangent;
@@ -416,9 +417,9 @@ namespace
 				Swap(B, C);
 			}
 
-			OutMesh.Triangles.Add(BaseVertex + static_cast<int32>(A));
-			OutMesh.Triangles.Add(BaseVertex + static_cast<int32>(B));
-			OutMesh.Triangles.Add(BaseVertex + static_cast<int32>(C));
+			OutMesh.Triangles.Add(static_cast<int32>(CellGlobalIndices[A]));
+			OutMesh.Triangles.Add(static_cast<int32>(CellGlobalIndices[B]));
+			OutMesh.Triangles.Add(static_cast<int32>(CellGlobalIndices[C]));
 		}
 
 	}
@@ -559,8 +560,8 @@ void FSVoxelTransvoxelMesher::Generate(
 	OutMesh.Normals.Reserve(CellsPerAxis * CellsPerAxis * 6);
 	OutMesh.UV0.Reserve(CellsPerAxis * CellsPerAxis * 6);
 	OutMesh.Triangles.Reserve(CellsPerAxis * CellsPerAxis * 12);
-	TMap<FIntVector, FVector> NormalCache;
-	NormalCache.Reserve(CellsPerAxis * CellsPerAxis * 4);
+	TMap<FIntVector, uint32> VertexCache;
+	VertexCache.Reserve(CellsPerAxis * CellsPerAxis * 4);
 	const float ChunkSize = static_cast<float>(CellsPerAxis) * VoxelSize;
 
 	// Generate regular cells at the selected LOD. Transition cells are emitted
@@ -630,7 +631,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					false, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, NormalCache);
+					false, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, VertexCache);
 			}
 		}
 	}
@@ -720,7 +721,7 @@ void FSVoxelTransvoxelMesher::Generate(
 
 				AppendCellToMesh(
 					CellVertices, VertexCount, Cell.vertexIndex, TriangleCount,
-					bTableFlip, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, NormalCache);
+					bTableFlip, MeshSettings, TransitionFaceMask, ChunkSize, OutMesh, VertexCache);
 			}
 		}
 	}
