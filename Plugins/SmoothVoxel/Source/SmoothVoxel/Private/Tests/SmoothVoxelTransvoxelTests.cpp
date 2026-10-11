@@ -785,7 +785,9 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	bool bNoCollapsedTriangleIndices = true;
 	bool bNoZeroAreaTriangles = true;
 	bool bSampledFacesPointIntoSolid = true;
+	bool bTriangleWindingMatchesNormals = true;
 	int32 OrientedFacesChecked = 0;
+	int32 NormalWindingChecks = 0;
 	for (int32 Index = 0; Index + 2 < Mesh.Triangles.Num(); Index += 3)
 	{
 		const int32 A = Mesh.Triangles[Index];
@@ -825,9 +827,9 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 				Mesh.Normals[A] + Mesh.Normals[B] + Mesh.Normals[C]).GetSafeNormal();
 			if (ExpectedOutward.SizeSquared() > SMALL_NUMBER)
 			{
-				bSampledFacesPointIntoSolid &=
+				bTriangleWindingMatchesNormals &=
 					FVector::DotProduct(Cross, ExpectedOutward) <= 0.001f;
-				++OrientedFacesChecked;
+				++NormalWindingChecks;
 			}
 		}
 
@@ -859,8 +861,9 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 	TestTrue(TEXT("Every edited-mesh triangle index must be in range"), bAllTriangleIndicesValid);
 	TestTrue(TEXT("Edited mesh must not contain collapsed triangle indices"), bNoCollapsedTriangleIndices);
 	TestTrue(TEXT("Edited mesh must not contain zero-area triangles"), bNoZeroAreaTriangles);
-	TestTrue(TEXT("Edited fixture must contain faces with a measurable solid/air side"), OrientedFacesChecked > 0);
-	TestTrue(TEXT("Edited triangles must not invert on the air side of the surface"), bSampledFacesPointIntoSolid);
+	TestTrue(TEXT("Every edited triangle must agree with its shading normals"), NormalWindingChecks > 0 && bTriangleWindingMatchesNormals);
+	TestTrue(TEXT("Edited fixture must contain faces with probes on opposite density sides"), OrientedFacesChecked > 0);
+	TestTrue(TEXT("Edited triangles must point into solid when density probes straddle the surface"), bSampledFacesPointIntoSolid);
 
 	bool bAllNormalsFinite = true;
 	bool bAllNormalsNormalized = true;
