@@ -805,9 +805,9 @@ bool FSmoothVoxelHardCubePlacementTerrainUnchangedTest::RunTest(const FString& P
 			Mesh.Vertices[C] - Mesh.Vertices[A]);
 		bNoZeroAreaTriangles &= Cross.SizeSquared() > SMALL_NUMBER;
 	}
-	TestTrue(TEXT("Hard cube cavity must not emit invalid triangle indices"), bAllIndicesValid);
-	TestTrue(TEXT("Hard cube cavity must not collapse triangles by welding nearby intersections"), bNoDuplicateIndices);
-	TestTrue(TEXT("Hard cube cavity must not emit zero-area triangles"), bNoZeroAreaTriangles);
+	TestTrue(TEXT("Hard-cube placement must not emit invalid triangle indices"), bAllIndicesValid);
+	TestTrue(TEXT("Hard-cube placement must not collapse triangles"), bNoDuplicateIndices);
+	TestTrue(TEXT("Hard-cube placement must not emit zero-area triangles"), bNoZeroAreaTriangles);
 	return true;
 }
 
