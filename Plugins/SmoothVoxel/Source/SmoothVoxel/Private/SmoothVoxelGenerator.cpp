@@ -188,8 +188,12 @@ namespace
         // octahedral tunnel.
         if (bHasMinedNodes)
         {
-            const double CutHalfExtent = Step * 0.5 + Step * 0.001;
-            const double CutRoundRadius = Step * 0.025;
+            // Make the cell corners just inside the cutter. If the box
+            // ended exactly on the lattice corners, their density could remain
+            // zero/solid and the marching-cubes surface would leave a paper-thin
+            // cap instead of a complete excavated cell.
+            const double CutHalfExtent = Step * 0.5 + FMath::Max(0.05, Step * 0.005);
+            const double CutRoundRadius = 0.0;
             for (int32 DZ = -1; DZ <= 1; ++DZ)
             {
                 for (int32 DY = -1; DY <= 1; ++DY)
