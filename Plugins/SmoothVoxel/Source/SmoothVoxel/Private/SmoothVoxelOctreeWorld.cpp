@@ -306,6 +306,10 @@ void ASmoothVoxelOctreeWorld::Tick(float DeltaSeconds)
 	// generated. This prevents moving-camera churn and lets old meshes stay up.
 	if (bApplyingSelection)
 	{
+		// Spawn/reconfigure only a small number of chunk actors per frame.
+		// SpawnActor and component registration are game-thread operations and
+		// doing this for hundreds of leaves in one selection caused hard hitches.
+		PrepareDesiredChunks(CameraLocation);
 		LaunchQueuedBuilds(CameraLocation);
 		if (AreDesiredChunksReady())
 		{
@@ -440,6 +444,8 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 		DesiredChunkOrigins.Reset();
 		DesiredVoxelSizes.Reset();
 		DesiredCollisionFlags.Reset();
+		PreparedDesiredNodes.Reset();
+		bForceBuildDesiredSelection = false;
 		bApplyingSelection = false;
 		bSelectionFailed = false;
 		bForceUpdate = false;
@@ -496,51 +502,6 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 			Node.Lod <= FMath::Clamp(CollisionMaxLod, 0, 8) &&
 			ChunkBounds.ComputeSquaredDistanceToPoint(CameraLocation) <= CollisionRadiusSq;
 
-		ASmoothVoxelTransvoxelChunk* Chunk = ActiveChunks.FindRef(Node);
-		if (!IsValid(Chunk))
-		{
-			FActorSpawnParameters SpawnParams;
-			SpawnParams.Owner = this;
-			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			Chunk = GetWorld()->SpawnActor<ASmoothVoxelTransvoxelChunk>(
-				ChunkOrigin,
-				FRotator::ZeroRotator,
-				SpawnParams);
-			if (!IsValid(Chunk))
-			{
-				UE_LOG(LogTemp, Warning, TEXT("SmoothVoxelOctreeWorld: failed to spawn a chunk actor."));
-				return;
-			}
-			// On initial spawn there is no old terrain to overlap, so allow chunks
-			// to appear as they finish. For later LOD replacements, keep new chunks
-			// hidden until the complete desired selection is ready.
-			Chunk->SetActorHiddenInGame(bHasCompletedSelection);
-			Chunk->SetTerrainMaterial(TerrainMaterial);
-			ActiveChunks.Add(Node, Chunk);
-		}
-		else
-		{
-			Chunk->SetTerrainMaterial(TerrainMaterial);
-		}
-
-		if (bForceBuild || !Chunk->IsConfiguredFor(
-			Node, SelectionSettings.CellsPerAxis, ChunkOrigin, FaceMask, VoxelSize, bCollision))
-		{
-			const FSVoxelGenerationSettings GeneratorSettings =
-				MakeGenerationSettings(
-					ChunkOrigin,
-					Node.OriginCells,
-					SelectionSettings.BaseVoxelSize,
-					VoxelSize);
-			Chunk->QueueBuild(
-				Node,
-				SelectionSettings.CellsPerAxis,
-				VoxelSize,
-				FaceMask,
-				GeneratorSettings,
-				bCollision);
-		}
-
 		NewDesiredNodes.Add(Node);
 		NewDesiredMasks.Add(Node, FaceMask);
 		NewDesiredOrigins.Add(Node, ChunkOrigin);
@@ -554,10 +515,113 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	DesiredVoxelSizes = MoveTemp(NewDesiredVoxelSizes);
 	DesiredCollisionFlags = MoveTemp(NewDesiredCollision);
 	DesiredCellsPerAxis = SelectionSettings.CellsPerAxis;
+	DesiredBaseVoxelSize = SelectionSettings.BaseVoxelSize;
+	PreparedDesiredNodes.Reset();
+	bForceBuildDesiredSelection = bForceBuild;
 	SelectionCameraLocation = CameraLocation;
 	bApplyingSelection = true;
 	bSelectionFailed = false;
 	bForceUpdate = false;
+}
+
+void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation)
+{
+	check(IsInGameThread());
+
+	TArray<FSVoxelOctreeNode> PendingNodes;
+	PendingNodes.Reserve(DesiredNodes.Num());
+	for (const FSVoxelOctreeNode& Node : DesiredNodes)
+	{
+		if (!PreparedDesiredNodes.Contains(Node))
+		{
+			PendingNodes.Add(Node);
+		}
+	}
+
+	PendingNodes.Sort([this, &CameraLocation](const FSVoxelOctreeNode& A, const FSVoxelOctreeNode& B)
+	{
+		const FVector* OriginA = DesiredChunkOrigins.Find(A);
+		const FVector* OriginB = DesiredChunkOrigins.Find(B);
+		const float DistanceA = OriginA
+			? FVector::DistSquared(*OriginA, CameraLocation)
+			: TNumericLimits<float>::Max();
+		const float DistanceB = OriginB
+			? FVector::DistSquared(*OriginB, CameraLocation)
+			: TNumericLimits<float>::Max();
+		return DistanceA < DistanceB;
+	});
+
+	const int32 Budget = FMath::Clamp(MaxChunkRequestsPerFrame, 1, 16);
+	int32 Attempts = 0;
+	for (const FSVoxelOctreeNode& Node : PendingNodes)
+	{
+		if (Attempts >= Budget)
+		{
+			break;
+		}
+		++Attempts;
+
+		const FVector* ChunkOrigin = DesiredChunkOrigins.Find(Node);
+		const float* VoxelSize = DesiredVoxelSizes.Find(Node);
+		const uint8* FaceMask = DesiredFaceMasks.Find(Node);
+		const bool* bCollision = DesiredCollisionFlags.Find(Node);
+		if (!ChunkOrigin || !VoxelSize || !FaceMask || !bCollision)
+		{
+			continue;
+		}
+
+		ASmoothVoxelTransvoxelChunk* Chunk = ActiveChunks.FindRef(Node);
+		if (!IsValid(Chunk))
+		{
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.Owner = this;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Chunk = GetWorld()->SpawnActor<ASmoothVoxelTransvoxelChunk>(
+				*ChunkOrigin,
+				FRotator::ZeroRotator,
+				SpawnParams);
+			if (!IsValid(Chunk))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("SmoothVoxelOctreeWorld: failed to spawn a chunk actor."));
+				continue;
+			}
+
+			// New leaves stay hidden during LOD replacement until the whole new
+			// selection is ready. Initial world creation has no old mesh to overlap.
+			Chunk->SetActorHiddenInGame(bHasCompletedSelection);
+			Chunk->SetTerrainMaterial(TerrainMaterial);
+			ActiveChunks.Add(Node, Chunk);
+		}
+		else
+		{
+			Chunk->SetTerrainMaterial(TerrainMaterial);
+		}
+
+		if (bForceBuildDesiredSelection || !Chunk->IsConfiguredFor(
+			Node, DesiredCellsPerAxis, *ChunkOrigin, *FaceMask, *VoxelSize, *bCollision))
+		{
+			const FSVoxelGenerationSettings GeneratorSettings =
+				MakeGenerationSettings(
+					*ChunkOrigin,
+					Node.OriginCells,
+					DesiredBaseVoxelSize,
+					*VoxelSize);
+			Chunk->QueueBuild(
+				Node,
+				DesiredCellsPerAxis,
+				*VoxelSize,
+				*FaceMask,
+				GeneratorSettings,
+				*bCollision);
+		}
+
+		PreparedDesiredNodes.Add(Node);
+	}
+
+	if (PreparedDesiredNodes.Num() >= DesiredNodes.Num())
+	{
+		bForceBuildDesiredSelection = false;
+	}
 }
 
 void ASmoothVoxelOctreeWorld::ApplyOneCompletedBuild(const FVector& CameraLocation)
@@ -638,7 +702,7 @@ void ASmoothVoxelOctreeWorld::LaunchQueuedBuilds(const FVector& CameraLocation)
 
 bool ASmoothVoxelOctreeWorld::AreDesiredChunksReady() const
 {
-	if (DesiredNodes.Num() == 0)
+	if (DesiredNodes.Num() == 0 || PreparedDesiredNodes.Num() < DesiredNodes.Num())
 	{
 		return false;
 	}
