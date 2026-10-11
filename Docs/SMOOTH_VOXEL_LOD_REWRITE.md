@@ -22,10 +22,11 @@ The rewrite lives beside the current world and does not replace the legacy
 5. An opt-in actor pair now drives the new path: an octree world manager plus
    async chunk actors, bounded parallel builds, height-envelope culling, and
    deferred retirement of old chunks until the requested set is ready.
-6. The octree window slides horizontally in half-root-size increments around
-   the followed actor, with 50% overlap. Its vertical range remains anchored so
-   upward flight does not move terrain out of the active window; absolute chunk
-   keys allow overlapping meshes to be reused.
+6. The world uses a fixed finite root centred on `RootWorldCenter`; it does
+   not follow the player indefinitely. With default settings it is exactly
+   4 km × 4 km horizontally (400,000 cm per axis). A slightly smaller effective
+   base step keeps the power-of-two octree lattice within that hard size limit;
+   absolute chunk keys keep all neighbouring samples aligned.
 7. Regular mesh vertices use projected secondary positions in transition
    boundary cells instead of moving density sample corners before interpolation.
    Adjacent transition faces remain on their shared edge lattice. Normals use a
@@ -49,13 +50,15 @@ full desired set is ready, then old leaves are retired and new leaves revealed
 together to avoid overlap and z-fighting between coarse parents and fine children.
 Completed CPU meshes are committed one per frame, and worker concurrency is
 capped at two to reduce game-thread upload bursts and CPU contention.
-The root is a rolling finite window, not an unbounded world at once. By default,
-its separate `RootWindowLod=6` makes it 2.048 km wide at 1 m base cells, and it
-shifts horizontally by half that width (1.024 km) with 50% overlap. Its vertical
-interval remains anchored to `RootWorldCenter.Z`. Rendered leaves are still
-capped at `MaxLod=4` (up to 16 m between samples), restoring draw distance
-without reintroducing coarser mesh sampling. The cap also applies to serialized
-actor instances so old Details-panel values cannot restore highly aliased coarse LODs.
+The world root is a fixed finite volume centred on `RootWorldCenter`, not a
+rolling window that follows the player. With default `CellsPerAxis=32` and
+`RootWindowLod=7`, its XY footprint is exactly 4 km × 4 km (400,000 cm per
+axis). The effective base step is reduced slightly from 1 m as needed to make
+the octree's power-of-two lattice fit inside that strict cap; changing
+`CellsPerAxis` or lowering `RootWindowLod` can make the footprint smaller.
+Rendered leaves remain capped at `MaxLod=4`, keeping the maximum cell spacing
+around 16 m and avoiding the previous highly aliased coarse LODs. The vertical
+root interval is also fixed around `RootWorldCenter.Z`.
 It has not been compiled or run in UE4.27 in this environment, so automation
 tests are added but **not verified in Unreal Editor yet**. No claim is made that
 all seams, collision contacts, edge/corner junctions, material boundaries or
@@ -144,10 +147,10 @@ The player Blueprint still has legacy block-interaction logic that expects an `A
 - `CellsPerAxis` is the number of regular cells across a chunk.
 - `VoxelSize` is the world-space step at that chunk's LOD.
 - `OriginCells` in octree nodes is an absolute LOD-0 cell-lattice coordinate.
-- `RootOriginCells` marks the active rolling window's lower corner; balancing
-  and face-neighbour lookup are relative to that root but chunk keys stay absolute.
-- The rolling window recentres in XY only; its Z interval stays fixed around
-  `RootWorldCenter.Z` so vertical flight does not discard the ground surface.
+- `RootOriginCells` marks the fixed finite world's lower corner; balancing and
+  face-neighbour lookup are relative to that root, while chunk keys stay absolute.
+- The world bounds remain fixed around `RootWorldCenter`; flying beyond the
+  configured 4 km × 4 km footprint does not create additional terrain.
 - Each coarse transition face uses 3x3 high-resolution samples per transition
   cell; the four far-face samples share the corner values but are offset into
   the coarse chunk by half a coarse cell.
@@ -160,7 +163,7 @@ The player Blueprint still has legacy block-interaction logic that expects an `A
    orientations and combined edge/corner transitions, normals, winding,
    degenerate triangles, collision and LOD changes in Unreal Editor.
 6. Integrate roads/water/biome/material/edit persistence into the shared field.
-7. Benchmark the rolling-window overlap, long-distance LOD normal quality,
+7. Verify the fixed 4 km world boundary, long-distance LOD normal quality,
    edge/corner seams, texture projections, memory use and frame-time in UE4.27.
 
 
