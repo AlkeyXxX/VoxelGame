@@ -28,7 +28,10 @@ ASmoothVoxelTransvoxelChunk::ASmoothVoxelTransvoxelChunk()
 
 	Mesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("TransvoxelMesh"));
 	RootComponent = Mesh;
-	Mesh->bUseAsyncCooking = true;
+	// Terrain chunks are rebuilt frequently after mining. Keep their
+	// triangle collision synchronous with the committed render mesh; overlapping
+	// async cooks can briefly leave invisible/stale collision triangles behind.
+	Mesh->bUseAsyncCooking = false;
 	Mesh->bUseComplexAsSimpleCollision = true;
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetCollisionObjectType(ECC_WorldStatic);
@@ -233,11 +236,11 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		return;
 	}
 
-	if (Data.IsEmpty())
-	{
-		Mesh->ClearAllMeshSections();
-	}
-	else
+	// Drop the previous render section and its collision body before applying
+	// the new snapshot. Combined with synchronous cooking on terrain chunks,
+	// this prevents a stale triangle from surviving a mined-cell rebuild.
+	Mesh->ClearAllMeshSections();
+	if (!Data.IsEmpty())
 	{
 		Mesh->CreateMeshSection_LinearColor(
 			0,
