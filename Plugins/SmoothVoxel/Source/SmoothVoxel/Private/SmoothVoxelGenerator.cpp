@@ -843,15 +843,14 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // instead of cutting the river mesh off at a categorical biome edge.
     OutInfluence *= (1.0f - DesertWeight);
 
-    // Rivers are gated to clearly low-relief areas, not the shoulders of hills.
+    // Prefer flatter ground, but keep channels continuous across rolling terrain.
+    // The previous hard cutoff at 0.72 could erase nearly the entire network when
+    // users raised hill coverage or changed the scale of flatland regions.
     const float Flatness = SampleFlatlandInfluence(X, Y, S);
-    if (Flatness <= 0.72f)
-    {
-        OutInfluence = 0.0f;
-        return;
-    }
-    const float FlatGroundGate = FMath::Clamp((Flatness - 0.72f) / 0.20f, 0.0f, 1.0f);
-    OutInfluence *= FlatGroundGate * FlatGroundGate * (3.0f - 2.0f * FlatGroundGate);
+    const float FlatGroundGateT = FMath::Clamp((Flatness - 0.38f) / 0.37f, 0.0f, 1.0f);
+    const float FlatGroundGate = FlatGroundGateT * FlatGroundGateT *
+        (3.0f - 2.0f * FlatGroundGateT);
+    OutInfluence *= FlatGroundGate;
 }
 
 float FSVoxelGenerator::SampleRiverInfluence(
@@ -914,9 +913,16 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
     }
 
     const float Flatness = SampleFlatlandInfluence(SiteX, SiteY, S);
-    const float CandidateChance = Flatness >= 0.5f
-        ? FMath::Clamp(S.LakeChance, 0.0f, 1.0f)
-        : FMath::Clamp(S.HillLakeChance, 0.0f, 1.0f);
+    // Blend lake frequency across gently rolling terrain instead of switching
+    // abruptly to the very rare hill-lake chance at one threshold. This keeps
+    // lakes present when the terrain settings increase hill coverage.
+    const float LakeFlatnessBlendT = FMath::Clamp((Flatness - 0.30f) / 0.35f, 0.0f, 1.0f);
+    const float LakeFlatnessBlend = LakeFlatnessBlendT * LakeFlatnessBlendT *
+        (3.0f - 2.0f * LakeFlatnessBlendT);
+    const float CandidateChance = FMath::Lerp(
+        FMath::Clamp(S.HillLakeChance, 0.0f, 1.0f),
+        FMath::Clamp(S.LakeChance, 0.0f, 1.0f),
+        LakeFlatnessBlend);
     if (SiteChance > static_cast<double>(CandidateChance))
     {
         return;
