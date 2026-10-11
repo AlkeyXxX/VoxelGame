@@ -724,7 +724,7 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 	{
 		ASmoothVoxelTransvoxelChunk* Candidate = Pair.Value;
 		if (!DesiredNodes.Contains(Pair.Key) || !IsValid(Candidate) ||
-			Candidate->IsActorHiddenInGame() || !Candidate->Mesh)
+			!Candidate->Mesh || !Candidate->Mesh->IsVisible())
 		{
 			continue;
 		}
@@ -786,12 +786,17 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		EditedBlockTypes.Remove(Cell);
 		EditedBlockCells.Remove(Cell);
 		EditedBlockCenters.Remove(Cell);
-		BlockEditSnapshot = EditedBlockCells.Num() > 0
-			? MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells)
-			: nullptr;
-		BlockEditCenterSnapshot = EditedBlockCenters.Num() > 0
-			? MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters)
-			: nullptr;
+		BlockEditSnapshot.Reset();
+		if (EditedBlockCells.Num() > 0)
+		{
+			BlockEditSnapshot = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells);
+		}
+		BlockEditCenterSnapshot.Reset();
+		if (EditedBlockCenters.Num() > 0)
+		{
+			BlockEditCenterSnapshot =
+				MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters);
+		}
 		RebuildChunksNearEditedCell(Cell);
 		return;
 	}
@@ -860,9 +865,12 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 
 	EditedBlockCells.Add(Cell, EditState);
 	BlockEditSnapshot = MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>(EditedBlockCells);
-	BlockEditCenterSnapshot = EditedBlockCenters.Num() > 0
-		? MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters)
-		: nullptr;
+	BlockEditCenterSnapshot.Reset();
+	if (EditedBlockCenters.Num() > 0)
+	{
+		BlockEditCenterSnapshot =
+			MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters);
+	}
 	RebuildChunksNearEditedCell(Cell);
 }
 
