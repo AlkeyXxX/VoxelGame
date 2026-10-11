@@ -44,10 +44,17 @@ bool FSmoothVoxelTransvoxelMesherPlaneTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Output normal must be finite"), !Normal.ContainsNaN());
 		TestTrue(TEXT("Flat top normals point out of solid"), Normal.Z > 0.5f);
 	}
-	for (const FProcMeshTangent& Tangent : RegularMesh.Tangents)
+	for (int32 Index = 0; Index < RegularMesh.Tangents.Num(); ++Index)
 	{
+		const FProcMeshTangent& Tangent = RegularMesh.Tangents[Index];
 		TestTrue(TEXT("Output tangent must be finite"), !Tangent.TangentX.ContainsNaN());
 		TestTrue(TEXT("Output tangent must be nonzero"), Tangent.TangentX.SizeSquared() > 0.5f);
+		TestTrue(
+			TEXT("Tangent must be orthogonal to the smooth normal"),
+			FMath::Abs(FVector::DotProduct(Tangent.TangentX, RegularMesh.Normals[Index])) < 0.01f);
+		TestTrue(
+			TEXT("Flat XY-projected terrain should use a consistent world-X tangent"),
+			Tangent.TangentX.X > 0.99f);
 	}
 
 	// The stored shading normals point outward/upward. Unreal's procedural
