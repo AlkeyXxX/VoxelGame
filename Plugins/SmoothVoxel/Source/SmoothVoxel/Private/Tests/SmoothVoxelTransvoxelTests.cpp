@@ -698,13 +698,14 @@ bool FSmoothVoxelMinedNodeDensityTest::RunTest(const FString& Parameters)
 	Settings.bEnableCaves = false;
 	Settings.IsoLevel = 0.0f;
 
+	const float BeforeCut =
+		FSVoxelGenerator::SampleDensity(100.0, 100.0, 200.0, Settings);
 	TSharedPtr<FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodes =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>();
 	const FIntVector Node(2, 2, 4);
 	MinedNodes->Add(Node);
 	Settings.MinedNodes = MinedNodes;
 
-	const float BeforeCut = 250.0f - 200.0f;
 	const float AtMinedNode = FSVoxelGenerator::SampleDensity(100.0, 100.0, 200.0, Settings);
 	const float OutsideMinedNode = FSVoxelGenerator::SampleDensity(200.0, 100.0, 200.0, Settings);
 	TestTrue(TEXT("A mined grid node must become air at its exact lattice sample"), AtMinedNode < 0.0f);
@@ -721,10 +722,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FSmoothVoxelHardCubeCavityTrianglesTest::RunTest(const FString& Parameters)
 {
 	FSVoxelGenerationSettings Settings;
-	Settings.BaseHeight = 247.3f; // Avoid aligning the isosurface with a sample plane.
-	Settings.HeightAmplitude = 0.0f;
+	Settings.BaseHeight = 250.0f;
+	Settings.HeightAmplitude = 0.01f; // Avoid exact zero density on the entire sample plane.
 	Settings.DetailAmplitude = 0.0f;
-	Settings.NoiseScale = 0.0f;
+	Settings.NoiseScale = 0.00005f;
 	Settings.DetailScale = 0.0f;
 	Settings.BaseVoxelSize = 50.0f;
 	Settings.NormalSampleStep = 5.0f;
