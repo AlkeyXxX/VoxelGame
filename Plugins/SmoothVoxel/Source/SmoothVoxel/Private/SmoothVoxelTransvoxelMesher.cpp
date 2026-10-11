@@ -667,28 +667,39 @@ namespace
 				}
 				else
 				{
-					// Density can resolve only the genuinely ambiguous cases. Do
-					// not infer winding from density magnitudes when both probes are
-					// on the same side of the isosurface: that produced random flips
-					// as the edited SDF changed.
-					const float ProbeDistance = FMath::Max(
-						5.0f, Settings.BaseVoxelSize * 0.1f);
-					const float DensityAlongFace = FSVoxelGenerator::SampleDensityAtChunkLocal(
-						TriangleCenter + FaceDirection * ProbeDistance, Settings);
-					const float DensityAgainstFace = FSVoxelGenerator::SampleDensityAtChunkLocal(
-						TriangleCenter - FaceDirection * ProbeDistance, Settings);
-					const bool bProbesStraddleSurface =
-						(DensityAlongFace > Settings.IsoLevel) !=
-						(DensityAgainstFace > Settings.IsoLevel);
-					if (bProbesStraddleSurface)
+					// At sharp Boolean-SDF corners the triangle centre may be
+					// slightly off the isosurface after transition displacement. A
+					// single short probe can leave both points in air or both in solid,
+					// causing the lookup-table winding to survive and expose a
+					// back-face-culling hole. Expand symmetrically until the samples
+					// straddle the *current edited density field*.
+					const float ProbeScales[] = { 0.025f, 0.05f, 0.1f, 0.2f, 0.4f, 0.8f };
+					for (const float ProbeScale : ProbeScales)
 					{
-						// The raw cross must point into solid for this project's
-						// procedural-mesh front-face convention.
-						bReverseWinding = DensityAlongFace < DensityAgainstFace;
-						bOrientationResolved = true;
+						const float ProbeDistance = FMath::Max(
+							1.0f, Settings.BaseVoxelSize * ProbeScale);
+						const float DensityAlongFace = FSVoxelGenerator::SampleDensityAtChunkLocal(
+							TriangleCenter + FaceDirection * ProbeDistance, Settings);
+						const float DensityAgainstFace = FSVoxelGenerator::SampleDensityAtChunkLocal(
+							TriangleCenter - FaceDirection * ProbeDistance, Settings);
+						const bool bProbesStraddleSurface =
+							(DensityAlongFace > Settings.IsoLevel) !=
+							(DensityAgainstFace > Settings.IsoLevel);
+						if (bProbesStraddleSurface)
+						{
+							// Unreal's procedural-mesh front face requires the raw
+							// triangle cross product to point into solid density.
+							bReverseWinding = DensityAlongFace < DensityAgainstFace;
+							bOrientationResolved = true;
+							break;
+						}
 					}
-					else if (ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
-						FMath::Abs(Facing) > SMALL_NUMBER)
+
+					// If sampling still cannot distinguish the two sides, trust a
+					// non-degenerate interpolated normal before the original table.
+					if (!bOrientationResolved &&
+						ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
+						FMath::Abs(Facing) > 0.01f)
 					{
 						bReverseWinding = Facing > 0.0f;
 						bOrientationResolved = true;
