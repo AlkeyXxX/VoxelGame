@@ -294,7 +294,11 @@ private:
 	FSVoxelGenerationSettings MakeBlockQuerySettings() const;
 	float SampleCurrentDensityAt(const FVector& WorldPosition) const;
 	EVoxelBlock GetBlockTypeForCell(const FIntVector& Cell) const;
-	void ApplyBlockCellEdit(const FIntVector& Cell, EVoxelBlock Block, int8 EditStateOverride = 0);
+	void ApplyBlockCellEdit(
+		const FIntVector& Cell,
+		EVoxelBlock Block,
+		int8 EditStateOverride = 0,
+		const FVector* EditCenterOverride = nullptr);
 	void RebuildChunksNearEditedCell(const FIntVector& Cell);
 
 	FSVoxelGenerationSettings MakeGenerationSettings(
@@ -318,8 +322,10 @@ private:
 	// and +2 reserves a carved cell filled by a separate hard cube actor.
 	// Workers only read immutable snapshots, never the game-thread maps.
 	FSVoxelBlockEditMap EditedBlockCells;
+	FSVoxelBlockEditCenterMap EditedBlockCenters;
 	TMap<FIntVector, EVoxelBlock> EditedBlockTypes;
 	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEditSnapshot;
+	TSharedPtr<const FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> BlockEditCenterSnapshot;
 
 	UPROPERTY()
 	TMap<FIntVector, ASmoothVoxelPlacedCubeBlock*> PlacedCubeBlocks;
