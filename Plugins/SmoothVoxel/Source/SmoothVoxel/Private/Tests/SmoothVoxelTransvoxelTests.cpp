@@ -978,6 +978,28 @@ bool FSmoothVoxelTransvoxelEditedMeshTrianglesTest::RunTest(const FString& Param
 		TEXT("Repeated mining edits must not accumulate back-face-culled or collapsed triangles"),
 		HasConsistentGeometry(StageFiveMesh));
 
+	// Regression for a tunnel that breaks through the terrain roof. Edited SDF
+	// corners near LOD transitions must still emit non-degenerate triangles with
+	// consistent winding; otherwise a single face can disappear or become a
+	// one-sided/invisible collision surface.
+	const uint8 EditedTransitionMasks[] =
+	{
+		SVoxelTransitionFace_NegativeX,
+		SVoxelTransitionFace_PositiveY,
+		static_cast<uint8>(SVoxelTransitionFace_NegativeX | SVoxelTransitionFace_PositiveY),
+		static_cast<uint8>(SVoxelTransitionFace_NegativeX |
+			SVoxelTransitionFace_PositiveY | SVoxelTransitionFace_PositiveZ)
+	};
+	for (const uint8 FaceMask : EditedTransitionMasks)
+	{
+		FSVoxelMeshData EditedTransitionMesh;
+		FSVoxelTransvoxelMesher::Generate(
+			StageFiveSettings, 16, 50.0f, FaceMask, EditedTransitionMesh);
+		TestTrue(
+			TEXT("A roof-open mining cut must keep valid triangle winding at LOD transitions"),
+			HasConsistentGeometry(EditedTransitionMesh));
+	}
+
 	return true;
 }
 
