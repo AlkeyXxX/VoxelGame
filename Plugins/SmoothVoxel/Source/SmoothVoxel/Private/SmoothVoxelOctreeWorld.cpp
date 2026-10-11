@@ -648,12 +648,106 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 		Params.AddIgnoredActor(PlayerPawn);
 	}
 
-	return GetWorld()->LineTraceSingleByChannel(
+	const float MaxDistance = FMath::Max(100.0f, InteractionDistance);
+	if (GetWorld()->LineTraceSingleByChannel(
 		OutHit,
 		RayStart,
-		RayStart + RayDirection * FMath::Max(100.0f, InteractionDistance),
+		RayStart + RayDirection * MaxDistance,
 		ECC_Visibility,
-		Params);
+		Params))
+	{
+		return true;
+	}
+
+	// Complex triangle collision can reject back-face rays on a terrain underside.
+	// If the ordinary physics trace misses, march the same signed-density field
+	// used by the mesher. This is a rare fallback only; normal interaction stays
+	// on the cheap collision-query path.
+	const FVector Direction = RayDirection.GetSafeNormal();
+	const float MarchStep = FMath::Clamp(GetEffectiveBlockSize() * 0.25f, 5.0f, 20.0f);
+	float PreviousDistance = 0.0f;
+	float PreviousDensity = SampleCurrentDensityAt(RayStart);
+	float HitDistance = -1.0f;
+
+	for (float Distance = MarchStep; Distance <= MaxDistance; Distance += MarchStep)
+	{
+		const float CurrentDensity = SampleCurrentDensityAt(RayStart + Direction * Distance);
+		const bool bPreviousSolid = PreviousDensity > 0.0f;
+		const bool bCurrentSolid = CurrentDensity > 0.0f;
+		if (bPreviousSolid != bCurrentSolid)
+		{
+			float Low = PreviousDistance;
+			float High = Distance;
+			const bool bLowSolid = bPreviousSolid;
+			for (int32 Iteration = 0; Iteration < 8; ++Iteration)
+			{
+				const float Middle = (Low + High) * 0.5f;
+				const float MiddleDensity = SampleCurrentDensityAt(RayStart + Direction * Middle);
+				if ((MiddleDensity > 0.0f) == bLowSolid)
+				{
+					Low = Middle;
+				}
+				else
+				{
+					High = Middle;
+				}
+			}
+			HitDistance = (Low + High) * 0.5f;
+			break;
+		}
+
+		PreviousDistance = Distance;
+		PreviousDensity = CurrentDensity;
+	}
+
+	if (HitDistance < 0.0f)
+	{
+		return false;
+	}
+
+	const FVector HitPoint = RayStart + Direction * HitDistance;
+	ASmoothVoxelTransvoxelChunk* HitChunk = nullptr;
+	float BestChunkDistanceSquared = TNumericLimits<float>::Max();
+	for (const TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
+	{
+		ASmoothVoxelTransvoxelChunk* Candidate = Pair.Value;
+		if (!DesiredNodes.Contains(Pair.Key) || !IsValid(Candidate) ||
+			Candidate->IsActorHiddenInGame() || !Candidate->Mesh)
+		{
+			continue;
+		}
+
+		const FBox MeshBounds = Candidate->Mesh->Bounds.GetBox().ExpandBy(FVector(MarchStep * 2.0f));
+		if (!MeshBounds.IsInsideOrOn(HitPoint))
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared(Candidate->GetActorLocation(), HitPoint);
+		if (DistanceSquared < BestChunkDistanceSquared)
+		{
+			BestChunkDistanceSquared = DistanceSquared;
+			HitChunk = Candidate;
+		}
+	}
+
+	if (!IsValid(HitChunk))
+	{
+		return false;
+	}
+
+	// Fallback hit results are oriented toward the air from which the ray came.
+	// BreakBlockByRay then validates the inside/outside side against density.
+	OutHit = FHitResult(ForceInit);
+	OutHit.bBlockingHit = true;
+	OutHit.Distance = HitDistance;
+	OutHit.Location = HitPoint;
+	OutHit.ImpactPoint = HitPoint;
+	OutHit.Normal = -Direction;
+	OutHit.ImpactNormal = -Direction;
+	OutHit.Actor = HitChunk;
+	OutHit.Component = HitChunk->Mesh;
+	return true;
 }
 
 void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
