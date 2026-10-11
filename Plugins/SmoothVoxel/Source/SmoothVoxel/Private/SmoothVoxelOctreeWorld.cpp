@@ -288,7 +288,8 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 	const FIntVector& InCell,
 	float InBlockSize,
 	UMaterialInterface* InMaterial,
-	int32 InDamageStage)
+	int32 InDamageStage,
+	const FVector* InWorldOriginOverride)
 {
 	BlockType = InBlockType;
 	BlockCell = InCell;
@@ -300,10 +301,11 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 	const float Inset = FMath::Min(Size * 0.045f, Size * 0.015f * DamageStage);
 	const float Lo = Inset;
 	const float Hi = Size - Inset;
-	SetActorLocation(FVector(
+	const FVector GridAlignedOrigin(
 		static_cast<float>(InCell.X) * Size,
 		static_cast<float>(InCell.Y) * Size,
-		static_cast<float>(InCell.Z) * Size));
+		static_cast<float>(InCell.Z) * Size);
+	SetActorLocation(InWorldOriginOverride ? *InWorldOriginOverride : GridAlignedOrigin);
 
 	if (!Mesh)
 	{
@@ -815,7 +817,8 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 	const FIntVector& Cell,
 	EVoxelBlock Block,
 	int8 EditStateOverride,
-	const FVector* EditCenterOverride)
+	const FVector* EditCenterOverride,
+	const FVector* CubeWorldOriginOverride)
 {
 	ASmoothVoxelPlacedCubeBlock* ExistingCube = PlacedCubeBlocks.FindRef(Cell);
 	const bool bRemoveBlock = Block == EVoxelBlock::Air;
@@ -914,8 +917,17 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 			}
 		}
 
+		const FVector ExistingCubeOrigin = IsValid(Cube)
+			? Cube->GetActorLocation()
+			: FVector::ZeroVector;
+		const FVector* EffectiveCubeOrigin = CubeWorldOriginOverride;
+		if (!EffectiveCubeOrigin && IsValid(Cube))
+		{
+			EffectiveCubeOrigin = &ExistingCubeOrigin;
+		}
 		Cube->ConfigureBlock(
-			Block, Cell, GetEffectiveBlockSize(), TerrainMaterial, Cube->GetDamageStage());
+			Block, Cell, GetEffectiveBlockSize(), TerrainMaterial,
+			Cube->GetDamageStage(), EffectiveCubeOrigin);
 		EditedBlockCenters.Remove(Cell);
 		EditedBlockTypes.Add(Cell, Block);
 		EditState = EditStateOverride != 0 ? EditStateOverride : int8(2);
@@ -1109,8 +1121,10 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		if (HitCube->GetDamageStage() + 1 < HitsRequired)
 		{
 			const int32 NewDamageStage = HitCube->RegisterDamageHit();
+			const FVector CubeOrigin = HitCube->GetActorLocation();
 			HitCube->ConfigureBlock(
-				HitBlock, Cell, GetEffectiveBlockSize(), TerrainMaterial, NewDamageStage);
+				HitBlock, Cell, GetEffectiveBlockSize(), TerrainMaterial,
+				NewDamageStage, &CubeOrigin);
 			return true;
 		}
 
@@ -1205,12 +1219,31 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	{
 		return false;
 	}
+
 	const float Step = GetEffectiveBlockSize();
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
-	FIntVector Cell = FIntVector::ZeroValue;
+	const FVector AbsNormal(
+		FMath::Abs(Normal.X), FMath::Abs(Normal.Y), FMath::Abs(Normal.Z));
+	FIntVector FaceStep = FIntVector::ZeroValue;
+	if (AbsNormal.X >= AbsNormal.Y && AbsNormal.X >= AbsNormal.Z)
+	{
+		FaceStep.X = Normal.X >= 0.0f ? 1 : -1;
+	}
+	else if (AbsNormal.Y >= AbsNormal.Z)
+	{
+		FaceStep.Y = Normal.Y >= 0.0f ? 1 : -1;
+	}
+	else
+	{
+		FaceStep.Z = Normal.Z >= 0.0f ? 1 : -1;
+	}
+	const FVector FaceDirection(
+		static_cast<float>(FaceStep.X),
+		static_cast<float>(FaceStep.Y),
+		static_cast<float>(FaceStep.Z));
 
-	// Placed cubes are valid placement surfaces too. Use their exact logical
-	// cell plus the dominant hit-face axis instead of requiring a terrain chunk.
+	FIntVector Cell = FIntVector::ZeroValue;
+	FVector CubeWorldOrigin = FVector::ZeroVector;
 	bool bTargetedPlacedCube = false;
 	if (ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor()))
 	{
@@ -1219,21 +1252,10 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 			return false;
 		}
 
-		FIntVector FaceStep = FIntVector::ZeroValue;
-		const FVector AbsNormal(FMath::Abs(Normal.X), FMath::Abs(Normal.Y), FMath::Abs(Normal.Z));
-		if (AbsNormal.X >= AbsNormal.Y && AbsNormal.X >= AbsNormal.Z)
-		{
-			FaceStep.X = Normal.X >= 0.0f ? 1 : -1;
-		}
-		else if (AbsNormal.Y >= AbsNormal.Z)
-		{
-			FaceStep.Y = Normal.Y >= 0.0f ? 1 : -1;
-		}
-		else
-		{
-			FaceStep.Z = Normal.Z >= 0.0f ? 1 : -1;
-		}
-		Cell = HitCube->BlockCell + FaceStep;
+		// Use the actual origin rather than a snapped cell coordinate. Blocks
+		// attached to a terrain surface may be offset from the global voxel grid.
+		CubeWorldOrigin = HitCube->GetActorLocation() + FaceDirection * Step;
+		Cell = WorldPositionToBlockCell(CubeWorldOrigin);
 		bTargetedPlacedCube = true;
 	}
 	else
@@ -1243,7 +1265,13 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		{
 			return false;
 		}
-		Cell = WorldPositionToBlockCell(Hit.ImpactPoint + Normal * (Step * 0.51f));
+
+		// Put the adjacent cube face directly on the terrain hit point. Snapping
+		// its origin to the global lattice can leave a half-cell gap on slopes.
+		// The terrain density is not altered to make room for this cube.
+		CubeWorldOrigin = Hit.ImpactPoint +
+			FaceDirection * (Step * 0.5f) - FVector(Step * 0.5f);
+		Cell = WorldPositionToBlockCell(CubeWorldOrigin);
 	}
 
 	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
@@ -1251,20 +1279,19 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	{
 		return false;
 	}
-	// A face hit on a placed cube is authoritative: allow stacking/sideways
-	// placement even when the underlying terrain occupies the target cell.
-	// On terrain, keep the centre test to avoid placing deep inside solid
-	// ground, but do not reject a legitimate surface placement just because
-	// some cell corners intersect a slope. Hard cubes no longer carve that
-	// intersecting terrain, so placement cannot act as a mining tool.
-	if (!bTargetedPlacedCube &&
-		(!ExistingEdit || *ExistingEdit == 0) &&
-		SampleCurrentDensityAt(BlockCellCenter(Cell)) > 0.0f)
+	if (ASmoothVoxelPlacedCubeBlock* ExistingCube = PlacedCubeBlocks.FindRef(Cell))
 	{
-		return false;
+		if (IsValid(ExistingCube))
+		{
+			return false;
+		}
 	}
 
-	ApplyBlockCellEdit(Cell, BlockToPlace);
+	// Placement is validated by logical occupancy, not by excavating the
+	// landscape to fit a cube. Terrain may overlap the cube around a curved
+	// slope, but the scalar field stays unchanged, so placing/breaking blocks
+	// cannot secretly mine or refill the ground.
+	ApplyBlockCellEdit(Cell, BlockToPlace, 0, nullptr, &CubeWorldOrigin);
 	if (Inventory)
 	{
 		Inventory->RemoveFromSelectedSlot(1);
