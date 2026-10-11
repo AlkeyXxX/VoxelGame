@@ -1104,6 +1104,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	// remains stable until the current node has actually been removed.
 	const float Step = GetEffectiveBlockSize();
 	const FIntVector BaseNode = WorldPositionToBlockCell(InsidePoint);
+	const FSVoxelGenerationSettings MiningQuerySettings = MakeBlockQuerySettings();
 	FIntVector BestNode = FIntVector::ZeroValue;
 	float BestDistanceSquared = TNumericLimits<float>::Max();
 	for (int32 DZ = -1; DZ <= 1; ++DZ)
@@ -1122,7 +1123,12 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 					static_cast<float>(Candidate.X) * Step,
 					static_cast<float>(Candidate.Y) * Step,
 					static_cast<float>(Candidate.Z) * Step);
-				if (SampleCurrentDensityAt(NodePosition) <= 0.0f)
+				const float NodeDensity = FSVoxelGenerator::SampleDensity(
+					static_cast<double>(NodePosition.X),
+					static_cast<double>(NodePosition.Y),
+					static_cast<double>(NodePosition.Z),
+					MiningQuerySettings);
+				if (NodeDensity <= 0.0f)
 				{
 					continue;
 				}
