@@ -1077,6 +1077,13 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	const FSVoxelGenerationSettings MiningQuerySettings = MakeBlockQuerySettings();
 	FIntVector BestNode = FIntVector::ZeroValue;
 	float BestDistanceSquared = TNumericLimits<float>::Max();
+	FVector ViewLocation = FVector::ZeroVector;
+	FRotator ViewRotation = FRotator::ZeroRotator;
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+	{
+		PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
+	const FVector RayDirection = ViewRotation.Vector().GetSafeNormal();
 	for (int32 DZ = -1; DZ <= 1; ++DZ)
 	{
 		for (int32 DY = -1; DY <= 1; ++DY)
@@ -1105,8 +1112,15 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 					continue;
 				}
 
-				const float DistanceSquared = FVector::DistSquared(
-					NodePosition, Hit.ImpactPoint);
+				// Prefer the solid lattice node closest to the actual view ray,
+				// not merely the nearest node to a sloped collision point. This
+				// prevents successive hits while looking down from steering a shaft
+				// sideways as the exposed surface changes.
+				const FVector ToNode = NodePosition - Hit.ImpactPoint;
+				const float AlongRay = FVector::DotProduct(ToNode, RayDirection);
+				const FVector LateralOffset = ToNode - RayDirection * AlongRay;
+				const float DistanceSquared = LateralOffset.SizeSquared() +
+					FMath::Square(FMath::Max(0.0f, FMath::Abs(AlongRay) - Step * 0.5f));
 				if (DistanceSquared < BestDistanceSquared)
 				{
 					BestDistanceSquared = DistanceSquared;
@@ -1237,10 +1251,33 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	// placement even when the underlying smooth landscape occupies the cell
 	// centre. Terrain-only placement still refuses to bury a new block in solid.
 	if (!bTargetedPlacedCube &&
-		(!ExistingEdit || *ExistingEdit == 0) &&
-		SampleCurrentDensityAt(BlockCellCenter(Cell)) > 0.0f)
+		(!ExistingEdit || *ExistingEdit == 0))
 	{
-		return false;
+		// A single air sample at the cell centre is not enough: a sliver of
+		// terrain can still intersect the target cube, and placing there would
+		// erase that terrain through the block-edit SDF. Require the whole
+		// target cell (centre plus corners) to be clear before placing.
+		const FVector Center = BlockCellCenter(Cell);
+		const float HalfStep = Step * 0.49f;
+		if (SampleCurrentDensityAt(Center) > 0.0f)
+		{
+			return false;
+		}
+		for (int32 ZSign = -1; ZSign <= 1; ZSign += 2)
+		{
+			for (int32 YSign = -1; YSign <= 1; YSign += 2)
+			{
+				for (int32 XSign = -1; XSign <= 1; XSign += 2)
+				{
+					const FVector Corner = Center + FVector(
+						HalfStep * XSign, HalfStep * YSign, HalfStep * ZSign);
+					if (SampleCurrentDensityAt(Corner) > 0.0f)
+					{
+						return false;
+					}
+				}
+			}
+		}
 	}
 
 	ApplyBlockCellEdit(Cell, BlockToPlace);
