@@ -493,9 +493,10 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 				UE_LOG(LogTemp, Warning, TEXT("SmoothVoxelOctreeWorld: failed to spawn a chunk actor."));
 				return;
 			}
-			// The actor becomes visible only when every chunk in this new
-			// selection is ready and the old, overlapping LOD leaves are retired.
-			Chunk->SetActorHiddenInGame(true);
+			// On initial spawn there is no old terrain to overlap, so allow chunks
+			// to appear as they finish. For later LOD replacements, keep new chunks
+			// hidden until the complete desired selection is ready.
+			Chunk->SetActorHiddenInGame(bHasCompletedSelection);
 			Chunk->SetTerrainMaterial(TerrainMaterial);
 			ActiveChunks.Add(Node, Chunk);
 		}
