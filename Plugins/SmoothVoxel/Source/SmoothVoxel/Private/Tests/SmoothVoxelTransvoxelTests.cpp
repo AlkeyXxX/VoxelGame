@@ -146,6 +146,66 @@ bool FSmoothVoxelTransvoxelLargeCoordinateUVTest::RunTest(const FString& Paramet
 	TestTrue(
 		TEXT("Large absolute world coordinates must not produce large GPU UV values"),
 		MaxAbsoluteUv < 2.0f);
+
+	// Adjacent same-LOD chunks must retain the same repeating-texture phase at
+	// their shared border even though each cell independently removes an
+	// integer UV tile offset.
+	FSVoxelGenerationSettings AdjacentSettings = Settings;
+	AdjacentSettings.ChunkOriginCells.X += 64; // 4 cells * (1600 / 100) lattice steps.
+	FSVoxelMeshData AdjacentMesh;
+	FSVoxelTransvoxelMesher::Generate(AdjacentSettings, 4, 1600.0f, 0, AdjacentMesh);
+
+	TMap<FIntPoint, FVector2D> AdjacentBorderUvs;
+	for (int32 Index = 0; Index < AdjacentMesh.Vertices.Num(); ++Index)
+	{
+		const FVector& Vertex = AdjacentMesh.Vertices[Index];
+		if (FMath::IsNearlyZero(Vertex.X, 0.01f))
+		{
+			const FIntPoint Key(
+				FMath::RoundToInt(Vertex.Y * 10.0f),
+				FMath::RoundToInt(Vertex.Z * 10.0f));
+			AdjacentBorderUvs.Add(Key, AdjacentMesh.UV0[Index]);
+		}
+	}
+
+	int32 ComparedBorderUvs = 0;
+	for (int32 Index = 0; Index < Mesh.Vertices.Num(); ++Index)
+	{
+		const FVector& Vertex = Mesh.Vertices[Index];
+		if (!FMath::IsNearlyEqual(Vertex.X, 6400.0f, 0.01f))
+		{
+			continue;
+		}
+
+		const FIntPoint Key(
+			FMath::RoundToInt(Vertex.Y * 10.0f),
+			FMath::RoundToInt(Vertex.Z * 10.0f));
+		const FVector2D* AdjacentUV = AdjacentBorderUvs.Find(Key);
+		if (!AdjacentUV)
+		{
+			continue;
+		}
+
+		++ComparedBorderUvs;
+		const FVector2D& CurrentUV = Mesh.UV0[Index];
+		const auto WrappedDifference = [](float A, float B)
+		{
+			const float FA = A - static_cast<float>(FMath::FloorToInt(A));
+			const float FB = B - static_cast<float>(FMath::FloorToInt(B));
+			const float Delta = FMath::Abs(FA - FB);
+			return FMath::Min(Delta, 1.0f - Delta);
+		};
+		TestTrue(
+			TEXT("Repeating U phase must match across the chunk border"),
+			WrappedDifference(CurrentUV.X, AdjacentUV->X) < 0.001f);
+		TestTrue(
+			TEXT("Repeating V phase must match across the chunk border"),
+			WrappedDifference(CurrentUV.Y, AdjacentUV->Y) < 0.001f);
+	}
+
+	TestTrue(
+		TEXT("Flat adjacent chunks must expose comparable border vertices"),
+		ComparedBorderUvs > 0);
 	return true;
 }
 
