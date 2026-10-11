@@ -316,7 +316,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="100.0", Units="cm"))
 	float WaterTileSize = 5000.0f;
 
-	/** Retained for Blueprint compatibility; flat water uses a single quad regardless of resolution. */
+	/** Resolution of the continuous river ribbons; the sea/lake surface remains a single quad. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="16", ClampMax="512"))
 	int32 WaterGridResolution = 512;
 
