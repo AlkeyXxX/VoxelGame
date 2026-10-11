@@ -284,24 +284,22 @@ namespace
 
 		const int32 BaseVertex = OutMesh.Vertices.Num();
 		constexpr double UVWorldScale = 0.0005; // One texture repeat per 2000 cm.
-		double MeanU = 0.0;
-		double MeanV = 0.0;
-		for (int32 I = 0; I < VertexCount; ++I)
-		{
-			double WorldX = 0.0;
-			double WorldY = 0.0;
-			GetWorldXYForUV(CellLocalVertices[I], Settings, WorldX, WorldY);
-			MeanU += WorldX * UVWorldScale;
-			MeanV += WorldY * UVWorldScale;
-		}
-		MeanU /= static_cast<double>(VertexCount);
-		MeanV /= static_cast<double>(VertexCount);
 
-		// All vertices belonging to this cell use the same integer offset.
-		// Since the material tiles on integer UV boundaries, this leaves the
-		// world-aligned texture phase unchanged at cell and chunk boundaries.
-		const double UvOffsetU = static_cast<double>(FMath::FloorToInt(static_cast<float>(MeanU)));
-		const double UvOffsetV = static_cast<double>(FMath::FloorToInt(static_cast<float>(MeanV)));
+		// Rebase UVs once per chunk, not once per cell. Cell-local rebasing kept
+		// values small but introduced UV discontinuities on every marching-cubes
+		// cell boundary for materials that scale or otherwise process UV0.
+		// A single chunk-wide integer offset keeps UVs continuous within each
+		// mesh. Neighbouring chunks differ only by whole texture repeats.
+		const double ChunkOriginWorldX = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.X) * static_cast<double>(Settings.BaseVoxelSize)
+			: static_cast<double>(Settings.ChunkWorldOrigin.X);
+		const double ChunkOriginWorldY = Settings.bUseChunkLatticeCoordinates
+			? static_cast<double>(Settings.ChunkOriginCells.Y) * static_cast<double>(Settings.BaseVoxelSize)
+			: static_cast<double>(Settings.ChunkWorldOrigin.Y);
+		const double UvOffsetU = static_cast<double>(FMath::FloorToInt(
+			static_cast<float>(ChunkOriginWorldX * UVWorldScale)));
+		const double UvOffsetV = static_cast<double>(FMath::FloorToInt(
+			static_cast<float>(ChunkOriginWorldY * UVWorldScale)));
 
 		TArray<FVector> CellNormals;
 		CellNormals.SetNumUninitialized(VertexCount);
