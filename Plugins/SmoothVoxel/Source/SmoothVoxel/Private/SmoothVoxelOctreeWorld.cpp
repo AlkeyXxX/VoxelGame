@@ -253,6 +253,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	FSVoxelGenerationSettings Settings;
 	Settings.CellsPerAxis = CellsPerAxis;
 	Settings.VoxelSize = VoxelSize;
+	Settings.NormalSampleStep = FMath::Max(5.0f, BaseVoxelSize);
 	Settings.IsoLevel = 0.0f;
 	Settings.Seed = Seed;
 	Settings.BaseHeight = BaseHeight;
@@ -356,11 +357,13 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	// MakeGenerationSettings. Serialized actor instances cannot re-enable the
 	// previous very coarse LODs that aliased the terrain into stripes.
 	SelectionSettings.MaxLod = FMath::Clamp(MaxLod, 0, 4);
+	SelectionSettings.RootLod = FMath::Clamp(
+		RootWindowLod, SelectionSettings.MaxLod, 8);
 	SelectionSettings.SplitDistanceMultiplier = FMath::Clamp(SplitDistanceMultiplier, 0.05f, 4.0f);
 	SelectionSettings.MaxLeafCount = FMath::Max(32, MaxLeafCount);
 
 	const float RootSize = static_cast<float>(SelectionSettings.CellsPerAxis) *
-		static_cast<float>(1 << SelectionSettings.MaxLod) *
+		static_cast<float>(1 << SelectionSettings.RootLod) *
 		SelectionSettings.BaseVoxelSize;
 
 	// Slide the finite octree window horizontally in half-root-size increments.
@@ -444,7 +447,7 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 	TArray<uint8> FaceMasks;
 	if (!FSVoxelOctreeSelector::BuildTransitionFaceMasks(
 		Leaves, SelectionSettings.CellsPerAxis, SelectionSettings.MaxLod,
-		FaceMasks, SelectionSettings.RootOriginCells))
+		FaceMasks, SelectionSettings.RootOriginCells, SelectionSettings.RootLod))
 	{
 		bSelectionFailed = true;
 		UE_LOG(LogTemp, Warning, TEXT("SmoothVoxelOctreeWorld: transition mask generation failed; keeping current terrain."));
