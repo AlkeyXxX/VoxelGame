@@ -12,6 +12,7 @@ class UProceduralMeshComponent;
 class UMaterialInterface;
 class UDataTable;
 class APlayerController;
+class ASmoothVoxelRoadNetwork;
 
 // World dimensions are selected per new world in the editor. Keep these values
 // in centimetres in code (Unreal's default world units) for exact grid bounds.
@@ -430,6 +431,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(ClampMin="0.0", Units="cm"))
 	float POIPlateauBlendDistance = 3000.0f;
 
+	/** Generates a deterministic road grid that links the seed-stable POI candidate sites. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
+	bool bEnableRoads = true;
+
+	/** Full width of the first-pass dirt/gravel roads, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="200.0", ClampMax="2000.0", Units="cm"))
+	float RoadWidth = 600.0f;
+
+	/** Longitudinal mesh sampling distance. Lower values smooth roads but create more triangles. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="250.0", ClampMax="5000.0", Units="cm"))
+	float RoadSampleSpacing = 1000.0f;
+
+	/** Lifts the road surface slightly above terrain to prevent z-fighting, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="2.0", ClampMax="100.0", Units="cm"))
+	float RoadSurfaceOffset = 15.0f;
+
+	/** Enable collision so the player can walk/drive over generated roads. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
+	bool bRoadCollision = true;
+
+	/** Assign a road material; Starter Content M_Ground_Gravel is used when available. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
+	UMaterialInterface* RoadMaterial = nullptr;
+
 	/** Optional overrides. Unassigned entries fall back to TerrainMaterial. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
 	UMaterialInterface* PlainsBiomeMaterial = nullptr;
@@ -545,6 +570,7 @@ public:
 
 private:
 	void UpdateWaterSurface();
+	void UpdateRoadNetwork();
 	void TryBindPlayerInteractionInput();
 	void HandleBreakBlockInput();
 	void HandlePlaceBlockInput();
@@ -624,6 +650,9 @@ private:
 
 	UPROPERTY(Transient)
 	ASmoothVoxelWaterSurface* WaterSurfaceActor = nullptr;
+
+	UPROPERTY(Transient)
+	ASmoothVoxelRoadNetwork* RoadNetworkActor = nullptr;
 
 	int32 DesiredCellsPerAxis = 32;
 	float DesiredBaseVoxelSize = 97.65625f;
