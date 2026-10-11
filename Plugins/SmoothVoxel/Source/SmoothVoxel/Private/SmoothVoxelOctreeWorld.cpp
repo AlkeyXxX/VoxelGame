@@ -560,6 +560,8 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 		FMath::IsNearlyEqual(Old.POIPlateauBlendDistance, InGenerationSettings.POIPlateauBlendDistance) &&
 		FMath::IsNearlyEqual(Old.FlatlandRegionScale, InGenerationSettings.FlatlandRegionScale) &&
 		FMath::IsNearlyEqual(Old.FlatlandCoverage, InGenerationSettings.FlatlandCoverage) &&
+		FMath::IsNearlyEqual(Old.FlatlandCoverageMultiplier, InGenerationSettings.FlatlandCoverageMultiplier) &&
+		FMath::IsNearlyEqual(Old.GentleReliefHeight, InGenerationSettings.GentleReliefHeight) &&
 		FMath::IsNearlyEqual(Old.FlatlandNoiseAmplitude, InGenerationSettings.FlatlandNoiseAmplitude) &&
 		FMath::IsNearlyEqual(Old.HillScale, InGenerationSettings.HillScale) &&
 		FMath::IsNearlyEqual(Old.HillHeight, InGenerationSettings.HillHeight) &&
@@ -1548,6 +1550,8 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.POIPlateauBlendDistance = POIPlateauBlendDistance;
 	Settings.FlatlandRegionScale = FlatlandRegionScale;
 	Settings.FlatlandCoverage = FlatlandCoverage;
+	Settings.FlatlandCoverageMultiplier = FlatlandCoverageMultiplier;
+	Settings.GentleReliefHeight = GentleReliefHeight;
 	Settings.FlatlandNoiseAmplitude = FlatlandNoiseAmplitude;
 	Settings.HillScale = HillScale;
 	Settings.HillHeight = HillHeight;
