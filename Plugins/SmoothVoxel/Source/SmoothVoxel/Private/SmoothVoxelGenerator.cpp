@@ -763,6 +763,27 @@ float FSVoxelGenerator::GetPOIPlateauInfluence(
     return 1.0f - T * T * (3.0f - 2.0f * T);
 }
 
+FVector2D FSVoxelGenerator::SamplePOISitePosition(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    // Match GetPOIPlateauInfluence exactly so road endpoints land at the same
+    // deterministic grid sites used by future POI placement.
+    const double Spacing = FMath::Max(
+        20000.0, std::abs(static_cast<double>(S.POISiteSpacing)));
+    const int64 GridX = static_cast<int64>(std::round(X / Spacing));
+    const int64 GridY = static_cast<int64>(std::round(Y / Spacing));
+    const uint32 SiteHash = HashLattice2D(GridX, GridY, S.Seed + 5167);
+    const double JitterX =
+        (static_cast<double>(SiteHash & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    const double JitterY =
+        (static_cast<double>((SiteHash >> 12) & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    return FVector2D(
+        static_cast<double>(GridX) * Spacing + JitterX * Spacing,
+        static_cast<double>(GridY) * Spacing + JitterY * Spacing);
+}
+
 float FSVoxelGenerator::SamplePOISuitability(
     double X,
     double Y,
