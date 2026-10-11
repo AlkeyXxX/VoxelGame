@@ -269,10 +269,10 @@ namespace
                 const int8 State = CandidateStates[Index];
                 if (State < 0)
                 {
-                    Density = static_cast<float>(SmoothMinimum(
-                        static_cast<double>(Density),
-                        CandidateSdfs[Index],
-                        SmoothBlend));
+                    // Cell removal is a Boolean box cut, just like a completed
+                    // mining hit. A smooth minimum rounds the walls and can
+                    // leak into adjacent cells, defeating voxel-aligned mining.
+                    Density = FMath::Min(Density, static_cast<float>(CandidateSdfs[Index]));
                 }
             }
         }
