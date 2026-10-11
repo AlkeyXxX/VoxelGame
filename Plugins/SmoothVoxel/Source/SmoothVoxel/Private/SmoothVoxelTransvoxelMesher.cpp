@@ -641,43 +641,61 @@ namespace
 				OutMesh.Normals[static_cast<int32>(GlobalB)] +
 				OutMesh.Normals[static_cast<int32>(GlobalC)]).GetSafeNormal();
 			const FVector FaceDirection = MeshFaceNormal.GetSafeNormal();
-			float Facing = FVector::DotProduct(FaceDirection, ExpectedNormal);
 			bool bReverseWinding = false;
 			bool bOrientationResolved = false;
+			const FVector TriangleCenter = (MeshA + MeshB + MeshC) / 3.0f;
+			const bool bNearEditedGeometry = HasBlockEditNearPosition(TriangleCenter, Settings);
 
-			// Prefer a well-conditioned averaged normal. At sharp mining corners,
-			// the three vertex normals can cancel or become nearly tangent, so
-			// recompute the gradient locally before falling back to the table.
-			if (ExpectedNormal.SizeSquared() > SMALL_NUMBER && FMath::Abs(Facing) >= 0.05f)
+			// On untouched terrain, the interpolated gradient is stable and keeps
+			// the regular path inexpensive. Near mined/removed cells, however,
+			// normals can straddle the old hill and the new tunnel wall. Always
+			// resolve those triangles against the edited density field itself;
+			// otherwise several neighbouring faces can keep the wrong winding
+			// and disappear from one side due to back-face culling.
+			if (!bNearEditedGeometry &&
+				ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
+				FMath::Abs(FVector::DotProduct(FaceDirection, ExpectedNormal)) >= 0.05f)
 			{
-				bReverseWinding = Facing > 0.0f;
+				bReverseWinding =
+					FVector::DotProduct(FaceDirection, ExpectedNormal) > 0.0f;
 				bOrientationResolved = true;
 			}
 			else
 			{
-				const FVector TriangleCenter = (MeshA + MeshB + MeshC) / 3.0f;
-				const FVector LocalOutwardNormal = SampleOutwardNormal(
-					TriangleCenter, Settings, ComputeNormalSampleStep(Settings));
-				const float LocalFacing = FVector::DotProduct(FaceDirection, LocalOutwardNormal);
-				if (LocalOutwardNormal.SizeSquared() > SMALL_NUMBER &&
-					FMath::Abs(LocalFacing) >= 0.05f)
+				if (!bNearEditedGeometry)
 				{
-					bReverseWinding = LocalFacing > 0.0f;
-					bOrientationResolved = true;
-				}
-				else
-				{
-					// At sharp Boolean-SDF corners the triangle centre may be
-					// slightly off the isosurface after transition displacement. A
-					// single short probe can leave both points in air or both in solid,
-					// causing the lookup-table winding to survive and expose a
-					// back-face-culling hole. Expand symmetrically until the samples
-					// straddle the *current edited density field*.
-					const float ProbeScales[] = { 0.025f, 0.05f, 0.1f, 0.2f, 0.4f, 0.8f };
-					for (const float ProbeScale : ProbeScales)
+					const FVector LocalOutwardNormal = SampleOutwardNormal(
+						TriangleCenter, Settings, ComputeNormalSampleStep(Settings));
+					const float LocalFacing =
+						FVector::DotProduct(FaceDirection, LocalOutwardNormal);
+					if (LocalOutwardNormal.SizeSquared() > SMALL_NUMBER &&
+						FMath::Abs(LocalFacing) >= 0.05f)
 					{
-						const float ProbeDistance = FMath::Max(
-							1.0f, Settings.BaseVoxelSize * ProbeScale);
+						bReverseWinding = LocalFacing > 0.0f;
+						bOrientationResolved = true;
+					}
+				}
+
+				if (!bOrientationResolved)
+				{
+					// Probe both sides of the actual triangle using successively wider
+					// distances. Include LOD-scaled distances because transition
+					// vertices may be displaced away from the sampled isosurface.
+					const float BaseStep = FMath::Max(1.0f, Settings.BaseVoxelSize);
+					const float LodStep = FMath::Max(BaseStep, Settings.VoxelSize);
+					const float ProbeDistances[] =
+					{
+						FMath::Max(1.0f, BaseStep * 0.025f),
+						FMath::Max(1.0f, BaseStep * 0.05f),
+						FMath::Max(1.0f, BaseStep * 0.1f),
+						FMath::Max(1.0f, BaseStep * 0.2f),
+						FMath::Max(1.0f, BaseStep * 0.4f),
+						FMath::Max(1.0f, BaseStep * 0.8f),
+						FMath::Max(1.0f, LodStep * 0.25f),
+						FMath::Max(1.0f, LodStep * 0.5f)
+					};
+					for (const float ProbeDistance : ProbeDistances)
+					{
 						const float DensityAlongFace = FSVoxelGenerator::SampleDensityAtChunkLocal(
 							TriangleCenter + FaceDirection * ProbeDistance, Settings);
 						const float DensityAgainstFace = FSVoxelGenerator::SampleDensityAtChunkLocal(
@@ -687,23 +705,23 @@ namespace
 							(DensityAgainstFace > Settings.IsoLevel);
 						if (bProbesStraddleSurface)
 						{
-							// Unreal's procedural-mesh front face requires the raw
-							// triangle cross product to point into solid density.
+							// Raw triangle winding in this component must point into solid.
 							bReverseWinding = DensityAlongFace < DensityAgainstFace;
 							bOrientationResolved = true;
 							break;
 						}
 					}
+				}
 
-					// If sampling still cannot distinguish the two sides, trust a
-					// non-degenerate interpolated normal before the original table.
-					if (!bOrientationResolved &&
-						ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
-						FMath::Abs(Facing) > 0.01f)
-					{
-						bReverseWinding = Facing > 0.0f;
-						bOrientationResolved = true;
-					}
+				// Last resort for a fully degenerate sample neighbourhood. Do not
+				// override a winding decision made from the density field.
+				if (!bOrientationResolved &&
+					ExpectedNormal.SizeSquared() > SMALL_NUMBER &&
+					FMath::Abs(FVector::DotProduct(FaceDirection, ExpectedNormal)) > 0.01f)
+				{
+					bReverseWinding =
+						FVector::DotProduct(FaceDirection, ExpectedNormal) > 0.0f;
+					bOrientationResolved = true;
 				}
 			}
 
@@ -713,7 +731,6 @@ namespace
 			{
 				Swap(GlobalB, GlobalC);
 			}
-
 			OutMesh.Triangles.Add(static_cast<int32>(GlobalA));
 			OutMesh.Triangles.Add(static_cast<int32>(GlobalB));
 			OutMesh.Triangles.Add(static_cast<int32>(GlobalC));
