@@ -813,7 +813,7 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 	return true;
 }
 
-void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
+bool ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 	const FIntVector& Cell,
 	EVoxelBlock Block,
 	int8 EditStateOverride,
@@ -876,7 +876,7 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		{
 			if (!GetWorld())
 			{
-				return;
+				return false;
 			}
 
 			FActorSpawnParameters SpawnParams;
@@ -978,6 +978,7 @@ void ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 			MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters);
 	}
 	RebuildChunksNearEditedCell(Cell);
+	return true;
 }
 
 void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(
@@ -1134,9 +1135,11 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 			return false;
 		}
 
-		// Removing a placed cube clears its terrain reservation and reveals the
-		// procedural density field that was there before placement.
-		ApplyBlockCellEdit(Cell, EVoxelBlock::Air);
+		// Only award the drop after the edit has actually been applied.
+		if (!ApplyBlockCellEdit(Cell, EVoxelBlock::Air))
+		{
+			return false;
+		}
 		if (Inventory && DropBlock != EVoxelBlock::Air)
 		{
 			Inventory->AddBlock(DropBlock, 1);
@@ -1289,7 +1292,10 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	// landscape to fit a cube. Terrain may overlap the cube around a curved
 	// slope, but the scalar field stays unchanged, so placing/breaking blocks
 	// cannot secretly mine or refill the ground.
-	ApplyBlockCellEdit(Cell, BlockToPlace, 0, nullptr, &CubeWorldOrigin);
+	if (!ApplyBlockCellEdit(Cell, BlockToPlace, 0, nullptr, &CubeWorldOrigin))
+	{
+		return false;
+	}
 	if (Inventory)
 	{
 		Inventory->RemoveFromSelectedSlot(1);
