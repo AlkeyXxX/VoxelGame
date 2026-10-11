@@ -665,14 +665,23 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 	// on the cheap collision-query path.
 	const FVector Direction = RayDirection.GetSafeNormal();
 	const float MarchStep = FMath::Clamp(GetEffectiveBlockSize() * 0.25f, 5.0f, 20.0f);
+	const FSVoxelGenerationSettings DensitySettings = MakeBlockQuerySettings();
+	const auto SampleRayDensity = [&DensitySettings](const FVector& Position)
+	{
+		return FSVoxelGenerator::SampleDensity(
+			static_cast<double>(Position.X),
+			static_cast<double>(Position.Y),
+			static_cast<double>(Position.Z),
+			DensitySettings);
+	};
 	float PreviousDistance = 0.0f;
-	float PreviousDensity = SampleCurrentDensityAt(RayStart);
+	float PreviousDensity = SampleRayDensity(RayStart);
 	float HitDistance = -1.0f;
 	FVector HitNormal = -Direction;
 
 	for (float Distance = MarchStep; Distance <= MaxDistance; Distance += MarchStep)
 	{
-		const float CurrentDensity = SampleCurrentDensityAt(RayStart + Direction * Distance);
+		const float CurrentDensity = SampleRayDensity(RayStart + Direction * Distance);
 		const bool bPreviousSolid = PreviousDensity > 0.0f;
 		const bool bCurrentSolid = CurrentDensity > 0.0f;
 		if (bPreviousSolid != bCurrentSolid)
@@ -683,7 +692,7 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 			for (int32 Iteration = 0; Iteration < 8; ++Iteration)
 			{
 				const float Middle = (Low + High) * 0.5f;
-				const float MiddleDensity = SampleCurrentDensityAt(RayStart + Direction * Middle);
+				const float MiddleDensity = SampleRayDensity(RayStart + Direction * Middle);
 				if ((MiddleDensity > 0.0f) == bLowSolid)
 				{
 					Low = Middle;
