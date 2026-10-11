@@ -61,6 +61,24 @@ namespace
 		const int32 CellX = static_cast<int32>(std::floor(WorldX / BaseStep));
 		const int32 CellY = static_cast<int32>(std::floor(WorldY / BaseStep));
 		const int32 CellZ = static_cast<int32>(std::floor(WorldZ / BaseStep));
+
+		// Most edit snapshots contain only one or a handful of touched cells.
+		// Scanning those few entries is cheaper than issuing 125 hash lookups
+		// for every ordinary vertex in the neighbouring chunk.
+		if (Settings.BlockEdits->Num() <= 32)
+		{
+			for (const TPair<FIntVector, int8>& Edit : *Settings.BlockEdits)
+			{
+				if (FMath::Abs(Edit.Key.X - CellX) <= 2 &&
+					FMath::Abs(Edit.Key.Y - CellY) <= 2 &&
+					FMath::Abs(Edit.Key.Z - CellZ) <= 2)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
 		for (int32 DZ = -2; DZ <= 2; ++DZ)
 		{
 			for (int32 DY = -2; DY <= 2; ++DY)
