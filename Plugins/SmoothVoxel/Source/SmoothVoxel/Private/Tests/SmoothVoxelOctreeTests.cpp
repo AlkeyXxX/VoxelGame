@@ -260,7 +260,7 @@ bool FSmoothVoxelNoiseBandwidthTest::RunTest(const FString& Parameters)
 	Settings.NoiseScale = 0.0008f;  // Simulate an older Blueprint instance value.
 	Settings.DetailScale = 0.0006f;
 
-	const float CoarsestVoxelStep = 800.0f; // 8 m with a 1 m base voxel (MaxLod 3).
+	const float CoarsestVoxelStep = 1600.0f; // 16 m with a 1 m base voxel (MaxLod 4).
 	FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(Settings, CoarsestVoxelStep);
 
 	TestTrue(
