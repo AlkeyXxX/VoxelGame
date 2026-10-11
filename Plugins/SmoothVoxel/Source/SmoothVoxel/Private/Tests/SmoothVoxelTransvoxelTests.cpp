@@ -700,18 +700,21 @@ bool FSmoothVoxelTransvoxelBlockEditDensityTest::RunTest(const FString& Paramete
 
 	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
 		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
-	Edits->Add(FIntVector(0, 0, 0), int8(1));   // Place one solid cell above the surface.
+	Edits->Add(FIntVector(1, 0, 0), int8(1));   // Place a solid cell above the surface.
 	Edits->Add(FIntVector(1, 1, 1), int8(1));   // Must be found just across the +X cell boundary.
+	Edits->Add(FIntVector(0, 0, 0), int8(-1)); // Carve wins where it overlaps the adjacent placed block.
 	Edits->Add(FIntVector(0, 0, -1), int8(-1)); // Carve one cell below the surface.
 	Settings.BlockEdits = Edits;
 
-	const float PlacedCellDensity = FSVoxelGenerator::SampleDensity(50.0, 50.0, 50.0, Settings);
+	const float PlacedCellDensity = FSVoxelGenerator::SampleDensity(150.0, 50.0, 50.0, Settings);
 	const float AdjacentCellBoundaryDensity = FSVoxelGenerator::SampleDensity(96.0, 150.0, 150.0, Settings);
+	const float OverlapCarveWinsDensity = FSVoxelGenerator::SampleDensity(100.0, 50.0, 50.0, Settings);
 	const float RemovedCellDensity = FSVoxelGenerator::SampleDensity(50.0, 50.0, -50.0, Settings);
 	const float UnmodifiedDensity = FSVoxelGenerator::SampleDensity(250.0, 250.0, 50.0, Settings);
 
 	TestTrue(TEXT("A solid block edit must add positive density inside its cell"), PlacedCellDensity > 0.0f);
 	TestTrue(TEXT("An adjacent edited volume must affect samples near its overlapping cell boundary"), AdjacentCellBoundaryDensity > 0.0f);
+	TestTrue(TEXT("A carved cell must remain air even where it overlaps a neighbouring placed block"), OverlapCarveWinsDensity < 0.0f);
 	TestTrue(TEXT("An air block edit must carve negative density out of solid terrain"), RemovedCellDensity < 0.0f);
 	TestTrue(TEXT("Samples outside edited cells must preserve the procedural density field"), UnmodifiedDensity < 0.0f);
 	return true;
