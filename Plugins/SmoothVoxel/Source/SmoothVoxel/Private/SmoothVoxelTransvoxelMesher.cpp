@@ -61,11 +61,11 @@ namespace
 		const int32 CellX = static_cast<int32>(std::floor(WorldX / BaseStep));
 		const int32 CellY = static_cast<int32>(std::floor(WorldY / BaseStep));
 		const int32 CellZ = static_cast<int32>(std::floor(WorldZ / BaseStep));
-		for (int32 DZ = -1; DZ <= 1; ++DZ)
+		for (int32 DZ = -2; DZ <= 2; ++DZ)
 		{
-			for (int32 DY = -1; DY <= 1; ++DY)
+			for (int32 DY = -2; DY <= 2; ++DY)
 			{
-				for (int32 DX = -1; DX <= 1; ++DX)
+				for (int32 DX = -2; DX <= 2; ++DX)
 				{
 					if (Settings.BlockEdits->Contains(FIntVector(CellX + DX, CellY + DY, CellZ + DZ)))
 					{
