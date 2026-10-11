@@ -160,23 +160,19 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Water")
 	UProceduralMeshComponent* Mesh = nullptr;
 
-	/** Rebuilds only when the map bounds, sea level, tiling, or material changes. */
+	/** Builds one perfectly level water sheet clipped visually by the terrain. */
 	void ConfigureSurface(
 		const FVector& WorldCenter,
 		float WorldSize,
 		float InSeaLevel,
 		float InTileSize,
-		int32 InResolution,
 		UMaterialInterface* InMaterial,
-		const FSVoxelGenerationSettings& InGenerationSettings,
 		bool bEnableCollision);
 
 private:
 	void BuildSurfaceMesh(
 		float WorldSize,
 		float InTileSize,
-		int32 InResolution,
-		const FSVoxelGenerationSettings& GenerationSettings,
 		bool bEnableCollision);
 
 	UPROPERTY()
@@ -190,7 +186,6 @@ private:
 	float ConfiguredSeaLevel = 0.0f;
 	float ConfiguredTileSize = 5000.0f;
 	int32 ConfiguredResolution = 0;
-	FSVoxelGenerationSettings ConfiguredGenerationSettings;
 	bool bConfiguredCollision = false;
 	bool bHasConfiguration = false;
 };
@@ -316,7 +311,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="100.0", Units="cm"))
 	float WaterTileSize = 5000.0f;
 
-	/** Higher density keeps the river mask coherent on large maps; the ocean itself uses only two triangles. */
+	/** Retained for Blueprint compatibility; flat water uses a single quad regardless of resolution. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="16", ClampMax="512"))
 	int32 WaterGridResolution = 512;
 
@@ -328,7 +323,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
 	UMaterialInterface* WaterMaterial = nullptr;
 
-	/** Enable seed-stable river valleys and matching water ribbons. */
+	/** Enable seed-stable carved river valleys; the level sea plane fills them. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
 	bool bEnableRivers = true;
 
