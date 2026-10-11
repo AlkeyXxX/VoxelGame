@@ -714,6 +714,70 @@ bool FSmoothVoxelMinedNodeDensityTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSmoothVoxelHardCubeCavityTrianglesTest,
+	"SmoothVoxel.Transvoxel.HardCubeCavityDoesNotCollapseTriangles",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSmoothVoxelHardCubeCavityTrianglesTest::RunTest(const FString& Parameters)
+{
+	FSVoxelGenerationSettings Settings;
+	Settings.BaseHeight = 247.3f; // Avoid aligning the isosurface with a sample plane.
+	Settings.HeightAmplitude = 0.0f;
+	Settings.DetailAmplitude = 0.0f;
+	Settings.NoiseScale = 0.0f;
+	Settings.DetailScale = 0.0f;
+	Settings.BaseVoxelSize = 50.0f;
+	Settings.NormalSampleStep = 5.0f;
+	Settings.BottomDepth = 1000.0f;
+	Settings.bEnableCaves = false;
+
+	TSharedPtr<FSVoxelBlockEditMap, ESPMode::ThreadSafe> Edits =
+		MakeShared<FSVoxelBlockEditMap, ESPMode::ThreadSafe>();
+	// One hard cube cuts a box whose faces are 0.05 cm beyond the cell bounds.
+	// At a 50 cm grid step, edge intersections are close enough to expose
+	// accidental vertex welding at the old 0.1 cm key resolution.
+	Edits->Add(FIntVector(2, 2, 4), int8(2));
+	Settings.BlockEdits = Edits;
+
+	FSVoxelMeshData Mesh;
+	FSVoxelTransvoxelMesher::Generate(Settings, 16, 50.0f, 0, Mesh);
+	TestTrue(TEXT("Hard cube cavity should leave terrain triangles around the opening"),
+		Mesh.Triangles.Num() > 0);
+	TestEqual(TEXT("Cavity mesh triangle count must be divisible by three"),
+		Mesh.Triangles.Num() % 3, 0);
+
+	bool bAllIndicesValid = true;
+	bool bNoDuplicateIndices = true;
+	bool bNoZeroAreaTriangles = true;
+	for (int32 I = 0; I + 2 < Mesh.Triangles.Num(); I += 3)
+	{
+		const int32 A = Mesh.Triangles[I];
+		const int32 B = Mesh.Triangles[I + 1];
+		const int32 C = Mesh.Triangles[I + 2];
+		if (!Mesh.Vertices.IsValidIndex(A) ||
+			!Mesh.Vertices.IsValidIndex(B) ||
+			!Mesh.Vertices.IsValidIndex(C))
+		{
+			bAllIndicesValid = false;
+			continue;
+		}
+		if (A == B || B == C || C == A)
+		{
+			bNoDuplicateIndices = false;
+			continue;
+		}
+		const FVector Cross = FVector::CrossProduct(
+			Mesh.Vertices[B] - Mesh.Vertices[A],
+			Mesh.Vertices[C] - Mesh.Vertices[A]);
+		bNoZeroAreaTriangles &= Cross.SizeSquared() > SMALL_NUMBER;
+	}
+	TestTrue(TEXT("Hard cube cavity must not emit invalid triangle indices"), bAllIndicesValid);
+	TestTrue(TEXT("Hard cube cavity must not collapse triangles by welding nearby intersections"), bNoDuplicateIndices);
+	TestTrue(TEXT("Hard cube cavity must not emit zero-area triangles"), bNoZeroAreaTriangles);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FSmoothVoxelTransvoxelBlockEditDensityTest,
 	"SmoothVoxel.Transvoxel.BlockEditsCreateAndRemoveSolidVolumes",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
