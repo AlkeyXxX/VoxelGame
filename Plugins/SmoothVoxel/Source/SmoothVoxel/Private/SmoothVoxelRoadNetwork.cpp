@@ -88,9 +88,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const double RoadBlockSize = FMath::Max(
         1.0, std::abs(static_cast<double>(GenerationSettings.BaseVoxelSize)));
     const double DirtRoadWidth = RoadBlockSize * 3.0;
-    const double OrdinaryRoadWidth = FMath::Max(
-        RoadBlockSize * 10.0, std::abs(static_cast<double>(RoadWidth)));
+    const double OrdinaryRoadWidth = RoadBlockSize * 10.0;
     const double HighwayRoadWidth = RoadBlockSize * 20.0;
+    (void)RoadWidth; // Retained for compatibility; road classes now scale with block size.
     const double HalfRoadWidth = HighwayRoadWidth * 0.5;
     const double SafeSampleSpacing = FMath::Clamp(
         std::abs(static_cast<double>(SampleSpacing)), 250.0, 5000.0);
@@ -418,7 +418,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     };
 
     auto FindSafeRoute = [&](const FVector2D& Start, const FVector2D& End,
-        TArray<FVector2D>& OutRoute, bool bPreferStraight) -> bool
+        TArray<FVector2D>& OutRoute, bool bPreferStraight,
+        bool bAllowRiverBankFollowing) -> bool
     {
         OutRoute.Reset();
         const double ChordLength = static_cast<double>((End - Start).Size());
@@ -598,27 +599,32 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                             ParallelAmount = FMath::Abs(
                                 FVector2D::DotProduct(TravelDirection, RiverTangent));
 
-                            // Reject clearly longitudinal movement through a channel.
-                            // A 0.55 cutoff rejected diagonal crossing steps, causing
-                            // routes to stop just before the near bank.
-                            if ((RiverInfluence > 0.10f && ParallelAmount > 0.82) ||
-                                (RiverBank > 0.38f && ParallelAmount > 0.94))
+                            // Keep ordinary roads and highways from following a
+                            // river channel. Dirt lanes may run beside the water on
+                            // the bank, but still cannot drive longitudinally through
+                            // the wet channel itself.
+                            const bool bParallelToRiver = ParallelAmount > 0.82;
+                            if ((!bAllowRiverBankFollowing &&
+                                    ((RiverInfluence > 0.10f && bParallelToRiver) ||
+                                     (RiverBank > 0.38f && ParallelAmount > 0.94)) ) ||
+                                (bAllowRiverBankFollowing &&
+                                    ((RiverInfluence > 0.35f && bParallelToRiver) ||
+                                     (RiverBank > 0.72f && ParallelAmount > 0.94)))
                             {
                                 continue;
                             }
 
-                            // Keep a cross-river transition competitive with the
-                            // long detour down to the river floor and back uphill.
-                            // A crossing-angle edge should be cheaper than driving
-                            // down the bank and searching for a shallow ford. Clear
-                            // longitudinal motion is separately rejected above.
                             const bool bCrossingAngle = ParallelAmount < 0.82;
+                            const double ParallelBankPenalty =
+                                bAllowRiverBankFollowing ? 1.3 : 8.0;
+                            const double ParallelChannelPenalty =
+                                bAllowRiverBankFollowing ? 10.0 : 6.0;
                             RiverPenalty = TravelDistance * static_cast<double>(RiverBank) *
-                                (bCrossingAngle ? 0.15 : 8.0);
+                                (bCrossingAngle ? 0.15 : ParallelBankPenalty);
                             if (RiverInfluence > 0.10f)
                             {
                                 RiverPenalty += TravelDistance * RiverInfluence *
-                                    (bCrossingAngle ? 0.25 : 6.0);
+                                    (bCrossingAngle ? 0.25 : ParallelChannelPenalty);
                             }
                         }
                         else
@@ -753,7 +759,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
 
         TArray<FVector2D> RoutePoints;
-        if (!FindSafeRoute(RouteStart, RouteEnd, RoutePoints, bPreferStraight))
+        const bool bAllowRiverBankFollowing = FullRoadWidth <= DirtRoadWidth + 1.0;
+        if (!FindSafeRoute(
+            RouteStart, RouteEnd, RoutePoints, bPreferStraight, bAllowRiverBankFollowing))
         {
             ++SkippedRouteCount;
             UE_LOG(LogTemp, Verbose,
