@@ -267,7 +267,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm", DeprecatedProperty, DeprecationMessage="Use Hill Height and Mountain Height"))
 	float HeightAmplitude = 3500.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
+	/** Legacy/debug-only noise frequency; it does not affect the generated terrain surface. Use HillScale, DetailScale, and FlatlandRegionScale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(DeprecatedProperty, DeprecationMessage="Does not affect generated terrain; use Hill Scale, Detail Scale, or Flatland Region Scale."))
 	float NoiseScale = 0.00005f;
 
 	/** World-space scale of surface detail. Higher values produce smaller, more visible undulations (still LOD-clamped). */
@@ -285,7 +286,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.1", ClampMax="1.0", DisplayName="Flatland Coverage Multiplier"))
 	float FlatlandCoverageMultiplier = 0.6f;
 
-	/** Broad, gentle elevation variation over flatland regions, in centimetres. */
+	/** Broad, gentle elevation variation over flatland regions, in centimetres. When fixed-level rivers are enabled, the effective value is capped to keep lowland terrain from falling far below the river plane. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="3000.0", Units="cm", DisplayName="Gentle Plains Relief Height"))
 	float GentleReliefHeight = 800.0f;
 
@@ -392,12 +393,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
 	bool bEnableLakes = true;
 
+	/** Minimum separation between candidate lake sites, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="20000.0", Units="cm"))
 	float LakeSiteSpacing = 50000.0f;
 
+	/** Nominal lake basin radius in centimetres. The radius is no longer inflated to match distant LOD sampling. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
 	float LakeRadius = 4000.0f;
 
+	/** Width of the gradual shoreline/basin falloff outside LakeRadius, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.0", Units="cm"))
 	float LakeShoreBlendDistance = 1800.0f;
 
