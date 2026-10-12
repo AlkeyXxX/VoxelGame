@@ -1120,7 +1120,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
                 const double Radius = FMath::Min(
                     FMath::Max(FullRoadWidth * 3.0, RouteGridStep * 1.75),
-                    FMath::Min(InLength, OutLength) * 0.62);
+                    FMath::Min(InLength, OutLength) * 0.48);
                 if (Radius < 50.0)
                 {
                     RoundedRoute.Add(Corner);
