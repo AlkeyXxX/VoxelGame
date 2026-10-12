@@ -161,14 +161,51 @@ namespace
         const double RoundRadius = Step * 0.28;
         const double SmoothBlend = Step * 0.10;
 
-        // Treat generated asphalt/dirt road cells as part of the same implicit
-        // solid field as terrain. Their box SDF is unioned first; persistent
-        // MinedNodes are applied afterwards so breaking a road cell removes it
-        // from the terrain mesh and its collision on the next nearby chunk build.
+        // Road blocks still occupy discrete XY cells for mining/material lookup,
+        // but their deck is a continuous height field. Interpolating stamped
+        // elevations before evaluating the SDF removes voxel-height stair steps
+        // without adding per-block actors or independent collision objects.
         if (bMayHaveRoadBlock)
         {
             const double RoadHalfExtent = Step * 0.5 +
                 FMath::Max(0.05, Step * 0.005);
+            const auto FindRoadHeightAtColumn = [&](int32 CellX, int32 CellY,
+                double ReferenceHeight, double& OutHeight) -> bool
+            {
+                if (!Settings.RoadSurfaceHeights.IsValid())
+                {
+                    return false;
+                }
+                const int32 ReferenceCellZ = FMath::FloorToInt(ReferenceHeight / Step);
+                double BestDifference = TNumericLimits<double>::Max();
+                bool bFound = false;
+                // The integer road-cell Z is ceil(deck/Step)-1; search adjacent
+                // levels to support exact grid-plane heights and bridge crossings.
+                for (int32 DZ = -2; DZ <= 1; ++DZ)
+                {
+                    const FIntVector Candidate(CellX, CellY, ReferenceCellZ + DZ);
+                    if (!Settings.RoadBlocks->Contains(Candidate) ||
+                        (Settings.MinedRoadBlocks.IsValid() &&
+                            Settings.MinedRoadBlocks->Contains(Candidate)))
+                    {
+                        continue;
+                    }
+                    const double* Height = Settings.RoadSurfaceHeights->Find(Candidate);
+                    if (!Height)
+                    {
+                        continue;
+                    }
+                    const double Difference = FMath::Abs(*Height - ReferenceHeight);
+                    if (Difference < BestDifference)
+                    {
+                        BestDifference = Difference;
+                        OutHeight = *Height;
+                        bFound = true;
+                    }
+                }
+                return bFound;
+            };
+
             for (int32 DZ = -1; DZ <= 1; ++DZ)
             {
                 for (int32 DY = -1; DY <= 1; ++DY)
@@ -180,17 +217,44 @@ namespace
                             (Settings.MinedRoadBlocks.IsValid() &&
                                 Settings.MinedRoadBlocks->Contains(Cell)))
                         {
-                            // Breaking a road block removes the generated road
-                            // solid only; any underlying terrain stays untouched.
+                            // Breaking a road block removes only its generated road
+                            // solid; natural terrain underneath remains unchanged.
                             continue;
                         }
 
+                        const double* CellDeckHeight = Settings.RoadSurfaceHeights.IsValid()
+                            ? Settings.RoadSurfaceHeights->Find(Cell) : nullptr;
+                        const double DeckHeight = CellDeckHeight
+                            ? *CellDeckHeight
+                            : (static_cast<double>(Cell.Z) + 1.0) * Step;
+
+                        // Bilinear interpolation is anchored at cell centres. Missing
+                        // samples at road edges fall back to this cell's deck height,
+                        // while adjacent sloped cells provide the smoothly varying top.
+                        const double GridX = X / Step - 0.5;
+                        const double GridY = Y / Step - 0.5;
+                        const int32 X0 = FMath::FloorToInt(GridX);
+                        const int32 Y0 = FMath::FloorToInt(GridY);
+                        const double TX = GridX - static_cast<double>(X0);
+                        const double TY = GridY - static_cast<double>(Y0);
+                        double H00 = DeckHeight, H10 = DeckHeight;
+                        double H01 = DeckHeight, H11 = DeckHeight;
+                        FindRoadHeightAtColumn(X0,     Y0,     DeckHeight, H00);
+                        FindRoadHeightAtColumn(X0 + 1, Y0,     DeckHeight, H10);
+                        FindRoadHeightAtColumn(X0,     Y0 + 1, DeckHeight, H01);
+                        FindRoadHeightAtColumn(X0 + 1, Y0 + 1, DeckHeight, H11);
+                        const double HeightLow = FMath::Lerp(H00, H10, TX);
+                        const double HeightHigh = FMath::Lerp(H01, H11, TX);
+                        const double SmoothDeckZ = FMath::Lerp(HeightLow, HeightHigh, TY);
+
                         const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
                         const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
-                        const double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
-                        const double RoadSdf = BoxSdf(
-                            X, Y, Z, CenterX, CenterY, CenterZ,
-                            RoadHalfExtent, 0.0);
+                        const double QX = std::abs(X - CenterX) - RoadHalfExtent;
+                        const double QY = std::abs(Y - CenterY) - RoadHalfExtent;
+                        const double QTop = Z - SmoothDeckZ;
+                        const double QBottom = SmoothDeckZ - Step - Z;
+                        const double RoadSdf = FMath::Max(
+                            FMath::Max(QX, QY), FMath::Max(QTop, QBottom));
                         Density = static_cast<float>(FMath::Max(
                             static_cast<double>(Density), -RoadSdf));
                     }
