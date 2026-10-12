@@ -819,8 +819,12 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 						Previous.BodyWetness, Current.BodyWetness, T);
 					Crossing.TerrainWetness = FMath::Lerp(
 						Previous.TerrainWetness, Current.TerrainWetness, T);
-					Crossing.WaterLevel = FMath::Lerp(
-						Previous.WaterLevel, Current.WaterLevel, T);
+					// The clipping edge belongs to the water-body side of the
+					// boundary. Preserve that body's fixed level instead of blending
+					// toward the default river level outside an irregular lake mask.
+					Crossing.WaterLevel = bPreviousInside
+						? Previous.WaterLevel
+						: Current.WaterLevel;
 					if (bClipBodyMask)
 					{
 						Crossing.BodyWetness = 0.0f;
