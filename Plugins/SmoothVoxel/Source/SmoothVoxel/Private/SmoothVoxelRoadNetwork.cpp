@@ -175,6 +175,13 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     int32 DirtRoadSegmentCount = 0;
     int32 OrdinaryRoadSegmentCount = 0;
     int32 HighwayRoadSegmentCount = 0;
+    // Avoid spawning a second isolated bridge alongside a crossing that already
+    // has a complete road approach. Centres are committed only after the whole
+    // road segment has passed validation and is actually added to the mesh.
+    TArray<FVector2D> BuiltBridgeCenters;
+    const double MinimumBridgeCenterSeparation = FMath::Max(
+        Spacing * 0.25, RoadBlockSize * 16.0);
+    const double MinimumBridgeApproachLength = RoadBlockSize * 5.0;
     // Limit urban river crossings to a couple of deliberate bridge locations per city.
     TMap<FIntPoint, int32> CityBridgeCrossingCounts;
     const int32 SamplesPerRoad = FMath::Max(
@@ -1105,6 +1112,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         TArray<float> RiverInfluences;
         TArray<float> RiverBankInfluences;
         TArray<uint8> bBridgeCrossing;
+        TArray<FVector2D> BridgeCentersInThisSegment;
         int32 BridgesInThisSegment = 0;
         RiverInfluences.SetNumZeroed(Path.Num());
         RiverBankInfluences.SetNumZeroed(Path.Num());
@@ -1218,8 +1226,40 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 SpanLength <= 30000.0 &&
                 BankHeightDifference <= 9000.0 &&
                 BridgeApproachGrade <= 0.45;
+            const FVector2D BridgeCenter =
+                (Path[DeckStart] + Path[DeckEnd]) * 0.5f;
+            const double StartApproachLength =
+                (Path[DeckStart] - Path[0]).Size();
+            const double EndApproachLength =
+                (Path.Last() - Path[DeckEnd]).Size();
+            const bool bHasRoadOnBothBanks =
+                StartApproachLength >= MinimumBridgeApproachLength &&
+                EndApproachLength >= MinimumBridgeApproachLength;
 
-            if (bSpanIsBuildable)
+            bool bDuplicateBridgeCenter = false;
+            if (bSpanIsBuildable && bHasRoadOnBothBanks)
+            {
+                for (const FVector2D& ExistingCenter : BuiltBridgeCenters)
+                {
+                    if (FVector2D::DistSquared(BridgeCenter, ExistingCenter) <
+                        FMath::Square(MinimumBridgeCenterSeparation))
+                    {
+                        bDuplicateBridgeCenter = true;
+                        break;
+                    }
+                }
+                for (const FVector2D& ExistingCenter : BridgeCentersInThisSegment)
+                {
+                    if (FVector2D::DistSquared(BridgeCenter, ExistingCenter) <
+                        FMath::Square(MinimumBridgeCenterSeparation))
+                    {
+                        bDuplicateBridgeCenter = true;
+                        break;
+                    }
+                }
+            }
+
+            if (bSpanIsBuildable && bHasRoadOnBothBanks && !bDuplicateBridgeCenter)
             {
                 const double MinimumDeckHeight =
                     static_cast<double>(GenerationSettings.RiverWaterLevel) + 150.0;
@@ -1239,12 +1279,16 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         RoadLifts[DeckIndex],
                         FMath::Max(0.0, DeckHeight - GroundHeights[DeckIndex]));
                 }
+                BridgeCentersInThisSegment.Add(BridgeCenter);
                 ++BridgesInThisSegment;
             }
             else
             {
                 UE_LOG(LogTemp, Verbose,
-                    TEXT("SmoothVoxel roads: omitted an unsafe river crossing (span %.0f cm, bank delta %.0f cm)."),
+                    TEXT("SmoothVoxel roads: omitted river crossing (buildable=%d, both-bank approach=%d, duplicate=%d, span %.0f cm, bank delta %.0f cm)."),
+                    bSpanIsBuildable ? 1 : 0,
+                    bHasRoadOnBothBanks ? 1 : 0,
+                    bDuplicateBridgeCenter ? 1 : 0,
                     SpanLength, BankHeightDifference);
                 ++SkippedUnsafeBridgeCount;
                 RoadLifts[RunStart] = -1.0;
@@ -1427,6 +1471,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
 
         BuiltBridgeCount += BridgesInThisSegment;
+        BuiltBridgeCenters.Append(BridgeCentersInThisSegment);
 
         if (bRecordAsNetworkRoad)
         {
