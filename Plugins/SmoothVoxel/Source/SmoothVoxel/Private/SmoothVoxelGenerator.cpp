@@ -206,6 +206,55 @@ namespace
                 return bFound;
             };
 
+            const double GridX = X / Step - 0.5;
+            const double GridY = Y / Step - 0.5;
+            const int32 X0 = FMath::FloorToInt(GridX);
+            const int32 Y0 = FMath::FloorToInt(GridY);
+            const double TX = GridX - static_cast<double>(X0);
+            const double TY = GridY - static_cast<double>(Y0);
+            struct FRoadHeightQuadCache
+            {
+                int32 Layer = 0;
+                double H00 = 0.0;
+                double H10 = 0.0;
+                double H01 = 0.0;
+                double H11 = 0.0;
+            };
+            FRoadHeightQuadCache HeightQuadCache[4];
+            int32 HeightQuadCacheCount = 0;
+            const auto GetSmoothRoadDeckHeight = [&](double DeckHeight) -> double
+            {
+                const int32 ReferenceLayer = FMath::FloorToInt(DeckHeight / Step);
+                for (int32 CacheIndex = 0; CacheIndex < HeightQuadCacheCount; ++CacheIndex)
+                {
+                    const FRoadHeightQuadCache& Cached = HeightQuadCache[CacheIndex];
+                    if (Cached.Layer == ReferenceLayer)
+                    {
+                        const double Low = FMath::Lerp(Cached.H00, Cached.H10, TX);
+                        const double High = FMath::Lerp(Cached.H01, Cached.H11, TX);
+                        return FMath::Lerp(Low, High, TY);
+                    }
+                }
+
+                FRoadHeightQuadCache Quad;
+                Quad.Layer = ReferenceLayer;
+                Quad.H00 = DeckHeight;
+                Quad.H10 = DeckHeight;
+                Quad.H01 = DeckHeight;
+                Quad.H11 = DeckHeight;
+                FindRoadHeightAtColumn(X0,     Y0,     DeckHeight, Quad.H00);
+                FindRoadHeightAtColumn(X0 + 1, Y0,     DeckHeight, Quad.H10);
+                FindRoadHeightAtColumn(X0,     Y0 + 1, DeckHeight, Quad.H01);
+                FindRoadHeightAtColumn(X0 + 1, Y0 + 1, DeckHeight, Quad.H11);
+                if (HeightQuadCacheCount < 4)
+                {
+                    HeightQuadCache[HeightQuadCacheCount++] = Quad;
+                }
+                const double Low = FMath::Lerp(Quad.H00, Quad.H10, TX);
+                const double High = FMath::Lerp(Quad.H01, Quad.H11, TX);
+                return FMath::Lerp(Low, High, TY);
+            };
+
             for (int32 DZ = -1; DZ <= 1; ++DZ)
             {
                 for (int32 DY = -1; DY <= 1; ++DY)
@@ -228,24 +277,9 @@ namespace
                             ? *CellDeckHeight
                             : (static_cast<double>(Cell.Z) + 1.0) * Step;
 
-                        // Bilinear interpolation is anchored at cell centres. Missing
-                        // samples at road edges fall back to this cell's deck height,
-                        // while adjacent sloped cells provide the smoothly varying top.
-                        const double GridX = X / Step - 0.5;
-                        const double GridY = Y / Step - 0.5;
-                        const int32 X0 = FMath::FloorToInt(GridX);
-                        const int32 Y0 = FMath::FloorToInt(GridY);
-                        const double TX = GridX - static_cast<double>(X0);
-                        const double TY = GridY - static_cast<double>(Y0);
-                        double H00 = DeckHeight, H10 = DeckHeight;
-                        double H01 = DeckHeight, H11 = DeckHeight;
-                        FindRoadHeightAtColumn(X0,     Y0,     DeckHeight, H00);
-                        FindRoadHeightAtColumn(X0 + 1, Y0,     DeckHeight, H10);
-                        FindRoadHeightAtColumn(X0,     Y0 + 1, DeckHeight, H01);
-                        FindRoadHeightAtColumn(X0 + 1, Y0 + 1, DeckHeight, H11);
-                        const double HeightLow = FMath::Lerp(H00, H10, TX);
-                        const double HeightHigh = FMath::Lerp(H01, H11, TX);
-                        const double SmoothDeckZ = FMath::Lerp(HeightLow, HeightHigh, TY);
+                        // Reuse the four interpolated column heights for other nearby
+                        // road cells in the same vertical layer.
+                        const double SmoothDeckZ = GetSmoothRoadDeckHeight(DeckHeight);
 
                         const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
                         const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
