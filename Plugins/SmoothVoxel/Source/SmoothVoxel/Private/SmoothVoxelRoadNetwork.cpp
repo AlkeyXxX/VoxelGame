@@ -559,7 +559,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         FMath::CeilToInt(HighwayOverlapClearance / RouteGridStep) + 1, 1, 4);
     const auto GetNearestHighwayDistanceSquared = [&](const FVector2D& Point) -> double
     {
-        if (HighwayRouteSamplesByCell.IsEmpty())
+        if (HighwayRouteSamplesByCell.Num() == 0)
         {
             return TNumericLimits<double>::Max();
         }
@@ -581,8 +581,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 }
                 for (const FVector2D& HighwayPoint : *Samples)
                 {
-                    BestDistanceSquared = FMath::Min(
-                        BestDistanceSquared, FVector2D::DistSquared(Point, HighwayPoint));
+                    BestDistanceSquared = FMath::Min<double>(
+                        BestDistanceSquared,
+                        static_cast<double>(FVector2D::DistSquared(Point, HighwayPoint)));
                 }
             }
         }
