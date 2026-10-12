@@ -2399,11 +2399,23 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
         if (RoadHubCells.Num() >= MinimumHubCount) break;
-        if (!RoadHubSet.Contains(Candidate) && !SmallSettlementCells.Contains(Candidate))
+        if (RoadHubSet.Contains(Candidate) || SmallSettlementCells.Contains(Candidate))
         {
-            RoadHubCells.Add(Candidate);
-            RoadHubSet.Add(Candidate);
+            continue;
         }
+        const FVector2D* CandidatePosition = Sites.Find(Candidate);
+        if (!CandidatePosition)
+        {
+            continue;
+        }
+        const ESVoxelBiome CandidateBiome = FSVoxelGenerator::SampleBiome(
+            CandidatePosition->X, CandidatePosition->Y, GenerationSettings);
+        if (CandidateBiome == ESVoxelBiome::Forest || CandidateBiome == ESVoxelBiome::Plains)
+        {
+            continue;
+        }
+        RoadHubCells.Add(Candidate);
+        RoadHubSet.Add(Candidate);
     }
 
     TMap<FIntPoint, int32> OrdinaryRoadDegreeByHub;
@@ -2873,6 +2885,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             if (RoadHubSet.Contains(POICell)) continue;
             const FVector2D* POI = Sites.Find(POICell);
             if (!POI) continue;
+            const ESVoxelBiome POIBiome = FSVoxelGenerator::SampleBiome(
+                POI->X, POI->Y, GenerationSettings);
+            if (POIBiome != ESVoxelBiome::Forest && POIBiome != ESVoxelBiome::Plains)
+            {
+                continue;
+            }
             const double Projection = FMath::Clamp(
                 FVector2D::DotProduct(*POI - LinkStart, Link) / LengthSquared, 0.0, 1.0);
             const FVector2D Closest = LinkStart + Link * static_cast<float>(Projection);
