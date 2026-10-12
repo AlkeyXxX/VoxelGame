@@ -4044,10 +4044,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads/POIs: %d temperate POIs (%d cabins, %d camps, %d ruins, %d lookouts), %d desert landmarks, %d mountain landmarks, %d snow landmarks; %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges, %d embankment side quads; skipped %d routes and %d unsafe bridges."),
+        TEXT("SmoothVoxel roads/POIs: %d temperate POIs (%d cabins, %d camps, %d ruins, %d lookouts), %d desert landmarks, %d mountain landmarks, %d snow landmarks; %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d asphalt blocks, %d dirt blocks; %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges, %d embankment side quads; skipped %d routes and %d unsafe bridges."),
         GreenPOICount, CabinPOICount, CampPOICount, RuinPOICount, LookoutPOICount,
         DesertPOICount, MountainPOICount, SnowPOICount,
         MajorCityCells.Num(), DesertMajorCityCount, SnowMajorCityCount,
+        AsphaltRoadBlockCells.Num(), DirtRoadBlockCells.Num(),
         RoadHubCells.Num(), CoreTemperateHubCells.Num(),
         RoadSegmentCount, HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
         Sites.Num(), TemperateSiteCount, DesertSiteCount, SnowSiteCount,
