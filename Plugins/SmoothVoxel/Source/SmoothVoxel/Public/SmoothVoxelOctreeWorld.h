@@ -435,7 +435,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
 	bool bEnableRoads = true;
 
-	/** Full width of the first-pass dirt/gravel roads, in centimetres. */
+	/** Legacy compatibility setting; road classes now scale to BaseVoxelSize (3, 10, and 20 blocks). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="200.0", ClampMax="2000.0", Units="cm"))
 	float RoadWidth = 600.0f;
 
