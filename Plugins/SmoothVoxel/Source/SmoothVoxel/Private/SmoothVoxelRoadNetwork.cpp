@@ -1998,11 +1998,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const int32 LateralSteps = FMath::Max(
                     1, static_cast<int32>(std::ceil(FullRoadWidth / (RoadBlockSize * 0.5))));
                 const double PreviousDeckZ = RoadDeckHeights[SampleIndex - 1];
-                const int32 PreviousCellZ = static_cast<int32>(std::ceil(
-                    PreviousDeckZ / RoadBlockSize)) - 1;
-                const int32 CurrentCellZ = static_cast<int32>(std::ceil(
-                    RoadDeckZ / RoadBlockSize)) - 1;
-                (void)PreviousCellZ;
                 for (int32 LongIndex = 0; LongIndex <= LongitudinalSteps; ++LongIndex)
                 {
                     const double T = static_cast<double>(LongIndex) /
