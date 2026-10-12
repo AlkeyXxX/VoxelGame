@@ -1828,10 +1828,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const double CenterGround = GroundHeights[SampleIndex];
             const double TerrainClearance = FMath::Max(
                 SafeSurfaceOffset,
-                static_cast<double>(GenerationSettings.BaseVoxelSize) * 0.50);
+                RoadBlockSize * 0.10);
 
             // Keep the carriageway level side-to-side so vehicles do not roll
-            // with the hillside. Shoulders/embankments will later fill the edge gaps.
+            // with the hillside. The new earthen bevels close the small clearance
+            // gap while wider fills grow naturally on the low side of a slope.
             const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
             const double LeftZ = RoadDeckZ;
             const double RightZ = RoadDeckZ;
@@ -1915,7 +1916,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         RightToeIndices.Reserve(SampleCount + 1);
         LeftToeRuns.Reserve(SampleCount + 1);
         RightToeRuns.Reserve(SampleCount + 1);
-        const double MinimumFillHeight = RoadBlockSize * 0.75;
+        const double MinimumFillHeight = RoadBlockSize * 0.10;
         const double MaximumEmbankmentRun = RoadBlockSize * 18.0;
         const auto AddEmbankmentToe = [&](
             const FVector2D& EdgeXY,
@@ -1943,7 +1944,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
             double Run = FMath::Clamp(
                 EdgeFillHeight * 1.5,
-                RoadBlockSize * 0.75,
+                RoadBlockSize * 0.25,
                 MaximumEmbankmentRun);
             FVector2D ToeXY = EdgeXY + Outward * static_cast<float>(Run);
             double ToeGroundZ = FSVoxelGenerator::SampleSurfaceHeight(
