@@ -453,10 +453,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 RiverBank > 0.12f &&
                 (RiverInfluence > 0.03f || RiverBank > 0.20f) &&
                 ParallelAmount < 0.82;
-            if (bCrossRiver &&
+            const bool bDiagonalThroughRiver = (RiverInfluence > 0.03f || RiverBank > 0.30f) &&
                 FMath::Max(
                     FMath::Abs(static_cast<double>(Direction.X)),
-                    FMath::Abs(static_cast<double>(Direction.Y))) < 0.985)
+                    FMath::Abs(static_cast<double>(Direction.Y))) < 0.985;
+            if (bDiagonalThroughRiver || (bCrossRiver &&
+                FMath::Max(
+                    FMath::Abs(static_cast<double>(Direction.X)),
+                    FMath::Abs(static_cast<double>(Direction.Y))) < 0.985))
             {
                 return false;
             }
@@ -711,9 +715,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         RiverBank > 0.12f &&
                         (RiverInfluence > 0.03f || RiverBank > 0.20f) &&
                         ParallelAmount < 0.82;
-                    // Cross rivers on a world-axis-aligned bridge. Diagonal A* steps
-                    // through the wet corridor can otherwise produce unrealistic slanted decks.
-                    if (bCrossRiver && bDiagonal)
+                    // Force cardinal movement through the river corridor even if
+                    // the noisy field gives an uncertain local tangent. This keeps
+                    // bridge approaches axis-aligned instead of producing diagonal decks.
+                    if (bDiagonal &&
+                        (bCrossRiver || RiverInfluence > 0.03f || RiverBank > 0.30f))
                     {
                         continue;
                     }
@@ -1143,9 +1149,17 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 continue;
             }
 
-            const FVector2D Before = Path[FMath::Max(0, SampleIndex - 1)];
-            const FVector2D After = Path[FMath::Min(SampleCount, SampleIndex + 1)];
-            const FVector2D RoadDirection = (After - Before).GetSafeNormal();
+            // Estimate the approach heading across several mesh samples. A
+            // one-sample tangent can look diagonal at the rounded road-to-bridge
+            // transition and accidentally suppress the entire bridge detection.
+            const int32 HeadingRadius = FMath::Clamp(
+                FMath::CeilToInt(static_cast<float>(RouteGridStep /
+                    FMath::Max(1.0, SafeSampleSpacing))), 2, 6);
+            const FVector2D HeadingStart =
+                Path[FMath::Max(0, SampleIndex - HeadingRadius)];
+            const FVector2D HeadingEnd =
+                Path[FMath::Min(SampleCount, SampleIndex + HeadingRadius)];
+            const FVector2D RoadDirection = (HeadingEnd - HeadingStart).GetSafeNormal();
             if (RoadDirection.SizeSquared() <= 0.5f)
             {
                 continue;
@@ -1257,7 +1271,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // a drivable-looking ribbon through deep water.
         for (int32 SampleIndex = 0; SampleIndex < Path.Num(); ++SampleIndex)
         {
-            if (RiverInfluences[SampleIndex] > 0.20f && RoadLifts[SampleIndex] < 1.0)
+            if ((RiverInfluences[SampleIndex] > 0.05f ||
+                 RiverBankInfluences[SampleIndex] > 0.50f) &&
+                RoadLifts[SampleIndex] < 1.0)
             {
                 ++SkippedUnsafeBridgeCount;
                 ++SkippedRouteCount;
@@ -1802,7 +1818,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             continue;
         }
-        if ((StableSiteHash(Candidate) % 1000u) < 240u)
+        const uint32 HubRoll = StableSiteHash(Candidate) % 1000u;
+        const FVector2D* SitePosition = Sites.Find(Candidate);
+        const bool bForestSite = SitePosition &&
+            FSVoxelGenerator::SampleBiome(
+                SitePosition->X, SitePosition->Y, GenerationSettings) == ESVoxelBiome::Forest;
+        // Keep the existing random hub density elsewhere, but select roughly
+        // 65% of forest sites so roads reach the middle of the green biome too.
+        if (HubRoll < 240u || (bForestSite && HubRoll < 650u))
         {
             RoadHubCells.Add(Candidate);
             RoadHubSet.Add(Candidate);
@@ -1992,7 +2015,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     // Rare country lanes connect ordinary roads crosswise, rather than forming
     // a ring around every POI or another rectangular network.
-    const int32 DesiredRuralConnectorCount = FMath::Max(1, Sites.Num() / 12);
+    // Aim for roughly 60-80 country links on an 8 km map instead of only ~20.
+    const int32 DesiredRuralConnectorCount = FMath::Max(1, Sites.Num() / 4);
     for (int32 ConnectorIndex = 0;
         ConnectorIndex < DesiredRuralConnectorCount && OrdinaryRoadPaths.Num() >= 2;
         ++ConnectorIndex)
@@ -2072,7 +2096,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                             ForestSamples += 1.0;
                         }
                     }
-                    const double ForestPenalty = (3.0 - ForestSamples) * 0.25;
+                    const double ForestPenalty = (3.0 - ForestSamples) * 0.75;
                     const double Score =
                         std::abs(LinkLength / Spacing - 0.75) +
                         AlignmentA * 0.35 + AlignmentB * 0.35 + ForestPenalty;
