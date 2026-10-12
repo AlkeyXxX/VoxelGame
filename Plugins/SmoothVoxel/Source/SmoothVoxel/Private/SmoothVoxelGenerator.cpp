@@ -950,11 +950,11 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // as isolated floating patches.
     if (S.bEnableBiomes && SampleBiome(X, Y, S) == ESVoxelBiome::Desert)
     {
+        // Stop the actual water channel at the discrete desert biome edge, but
+        // keep the broad bank profile. Its influence was already multiplied by
+        // the continuous non-desert biome weight above, so it can fade to zero
+        // without truncating the river valley into a vertical terrain wall.
         OutInfluence = 0.0f;
-        if (OutBankInfluence)
-        {
-            *OutBankInfluence = 0.0f;
-        }
         return;
     }
 
@@ -1146,6 +1146,18 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
             static_cast<float>((Distance - Radius) / Blend), 0.0f, 1.0f);
         OutInfluence = 1.0f - T * T * (3.0f - 2.0f * T);
     }
+
+    // A valid lake may sit near the temperate/desert border. Fade its basin
+    // with the local continuous biome weights so the terrain does not switch
+    // abruptly from the carved lake floor to untouched desert ground where
+    // the material biome changes.
+    float LocalDesertWeight = 0.0f;
+    float LocalWinterWeight = 0.0f;
+    float LocalTemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S,
+        LocalDesertWeight, LocalWinterWeight, LocalTemperateWeight);
+    OutInfluence *= FMath::Clamp(1.0f - LocalDesertWeight, 0.0f, 1.0f);
 }
 
 double FSVoxelGenerator::SampleSurfaceHeight(
