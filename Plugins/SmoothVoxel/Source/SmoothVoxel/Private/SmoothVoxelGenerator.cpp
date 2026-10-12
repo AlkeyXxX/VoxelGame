@@ -176,8 +176,12 @@ namespace
                     for (int32 DX = -1; DX <= 1; ++DX)
                     {
                         const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
-                        if (!Settings.RoadBlocks->Contains(Cell))
+                        if (!Settings.RoadBlocks->Contains(Cell) ||
+                            (Settings.MinedRoadBlocks.IsValid() &&
+                                Settings.MinedRoadBlocks->Contains(Cell)))
                         {
+                            // Breaking a road block removes the generated road
+                            // solid only; any underlying terrain stays untouched.
                             continue;
                         }
 
