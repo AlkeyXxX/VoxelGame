@@ -621,7 +621,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     const double CostGrade = bCrossRiver ? FMath::Min(Grade, 0.12) : Grade;
                     // Moderate slopes should not trigger long, unrealistic switchbacks.
                     double StepCost = TravelDistance *
-                        (1.0 + CostGrade * CostGrade * 32.0) + RiverPenalty;
+                        (1.0 + CostGrade * CostGrade * 8.0) + RiverPenalty;
 
                     // Highways favour a direct corridor, but terrain and river
                     // costs can still bend the path around an obstacle.
@@ -886,7 +886,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             return;
         }
-        const int32 SampleCount = Path.Num() - 1;
+        int32 SampleCount = Path.Num() - 1;
         GroundHeights.Reserve(Path.Num());
         RoadLifts.SetNumZeroed(Path.Num());
 
@@ -1038,18 +1038,55 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             BridgesInThisSegment == 0 && Path.Num() > 2)
         {
             const double RiverSetbackDistance = RoadBlockSize * 4.5;
+            const auto EstimateRiverDistance = [&](const FVector2D& Point, float EndpointInfluence)
+                -> double
+            {
+                if (EndpointInfluence > 0.02f)
+                {
+                    return 0.0;
+                }
+                const double Directions[8][2] =
+                {
+                    { 1.0, 0.0 }, { -1.0, 0.0 }, { 0.0, 1.0 }, { 0.0, -1.0 },
+                    { 0.7071, 0.7071 }, { 0.7071, -0.7071 },
+                    { -0.7071, 0.7071 }, { -0.7071, -0.7071 }
+                };
+                for (int32 BlockStep = 1; BlockStep <= 5; ++BlockStep)
+                {
+                    for (const auto& Direction : Directions)
+                    {
+                        const float Influence = FSVoxelGenerator::SampleRiverInfluence(
+                            Point.X + Direction[0] * RoadBlockSize * BlockStep,
+                            Point.Y + Direction[1] * RoadBlockSize * BlockStep,
+                            GenerationSettings);
+                        if (Influence > 0.02f)
+                        {
+                            return RoadBlockSize * BlockStep;
+                        }
+                    }
+                }
+                return TNumericLimits<double>::Max();
+            };
+
             auto TrimRiverEnd = [&](bool bTrimStart)
             {
                 int32 EndpointIndex = bTrimStart ? 0 : Path.Num() - 1;
-                if (RiverInfluences[EndpointIndex] <= 0.02f)
+                const double RiverDistance = EstimateRiverDistance(
+                    Path[EndpointIndex], RiverInfluences[EndpointIndex]);
+                if (RiverDistance > RiverSetbackDistance)
                 {
                     return;
                 }
+
+                // A dry endpoint close to the channel only needs the remaining
+                // distance; a wet endpoint is also pulled back until it is dry.
+                const double RequiredBacktrack = FMath::Max(
+                    0.0, RiverSetbackDistance - RiverDistance);
                 double RemovedDistance = 0.0;
                 while (Path.Num() > 2)
                 {
                     EndpointIndex = bTrimStart ? 0 : Path.Num() - 1;
-                    if (RemovedDistance >= RiverSetbackDistance &&
+                    if (RemovedDistance >= RequiredBacktrack &&
                         RiverInfluences[EndpointIndex] <= 0.02f)
                     {
                         break;
