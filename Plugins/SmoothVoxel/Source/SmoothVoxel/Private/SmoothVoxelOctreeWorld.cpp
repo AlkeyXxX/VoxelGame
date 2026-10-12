@@ -2508,6 +2508,71 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		}
 		Cell = WorldPositionToBlockCell(InsidePoint);
 		HitBlock = GetBlockTypeForCell(Cell);
+		if (HitBlock == EVoxelBlock::Air && IsValid(RoadNetworkActor))
+		{
+			// The implicit road box reaches a tiny fraction beyond its grid plane
+			// to keep marching-cubes corners solid. When the ray hits its top face,
+			// the first air-side cell can therefore be one row above the logical
+			// road block. Resolve the nearest road cell along/behind the hit normal.
+			const FVector AirNormal = Hit.ImpactNormal.GetSafeNormal();
+			const FVector AbsNormal(
+				FMath::Abs(AirNormal.X),
+				FMath::Abs(AirNormal.Y),
+				FMath::Abs(AirNormal.Z));
+			FIntVector FaceStep = FIntVector::ZeroValue;
+			if (AbsNormal.X >= AbsNormal.Y && AbsNormal.X >= AbsNormal.Z)
+			{
+				FaceStep.X = AirNormal.X >= 0.0f ? 1 : -1;
+			}
+			else if (AbsNormal.Y >= AbsNormal.Z)
+			{
+				FaceStep.Y = AirNormal.Y >= 0.0f ? 1 : -1;
+			}
+			else
+			{
+				FaceStep.Z = AirNormal.Z >= 0.0f ? 1 : -1;
+			}
+
+			const FIntVector SearchOrigin = Cell - FaceStep;
+			float BestRoadDistanceSquared = FMath::Square(Step);
+			FIntVector BestRoadCell = Cell;
+			EVoxelBlock BestRoadBlock = EVoxelBlock::Air;
+			for (int32 DZ = -1; DZ <= 1; ++DZ)
+			{
+				for (int32 DY = -1; DY <= 1; ++DY)
+				{
+					for (int32 DX = -1; DX <= 1; ++DX)
+					{
+						const FIntVector Candidate =
+							SearchOrigin + FIntVector(DX, DY, DZ);
+						if (MinedTerrainNodes.Contains(Candidate))
+						{
+							continue;
+						}
+						EVoxelBlock CandidateBlock = EVoxelBlock::Air;
+						if (!RoadNetworkActor->GetRoadBlockTypeAtCell(
+							Candidate, CandidateBlock))
+						{
+							continue;
+						}
+						const float DistanceSquared = FVector::DistSquared(
+							BlockCellCenter(Candidate), Hit.ImpactPoint);
+						if (DistanceSquared <= BestRoadDistanceSquared)
+						{
+							BestRoadDistanceSquared = DistanceSquared;
+							BestRoadCell = Candidate;
+							BestRoadBlock = CandidateBlock;
+						}
+					}
+				}
+			}
+			if (BestRoadBlock != EVoxelBlock::Air)
+			{
+				Cell = BestRoadCell;
+				HitBlock = BestRoadBlock;
+			}
+		}
+
 		if (HitBlock == EVoxelBlock::Air)
 		{
 			const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
@@ -2557,7 +2622,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 
 	// The point was validated on the solid side of the ray crossing above.
 	// Mine that cell immediately rather than accumulating hidden progress.
-	const FIntVector MinedCell = WorldPositionToBlockCell(InsidePoint);
+	const FIntVector MinedCell = Cell;
 	if (SampleCurrentDensityAt(InsidePoint) <= 0.0f)
 	{
 		return false;
