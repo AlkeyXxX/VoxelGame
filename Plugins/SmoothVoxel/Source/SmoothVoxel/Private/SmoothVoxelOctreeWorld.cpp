@@ -1624,8 +1624,14 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.FlatlandCoverage = FlatlandCoverage;
 	Settings.FlatlandCoverageMultiplier = FlatlandCoverageMultiplier;
 	const bool bUseFixedLevelRivers = bEnableRivers && bEnableWater;
+	// Leave at most about one world metre between the fixed river plane
+	// and the lowest plains before the channel is carved. Account for both the
+	// configured flatland noise and SampleSurfaceHeight's additional micro-relief,
+	// which otherwise let low plains sit many blocks below a global water plane.
 	const float MaximumGentleReliefForRiverLevel = FMath::Max(
-		0.0f, BaseHeight - RiverWaterLevel + 50.0f);
+		0.0f,
+		BaseHeight - RiverWaterLevel + 100.0f -
+			FMath::Abs(FlatlandNoiseAmplitude) - 75.0f);
 	Settings.GentleReliefHeight = bUseFixedLevelRivers
 		? FMath::Min(FMath::Abs(GentleReliefHeight), MaximumGentleReliefForRiverLevel)
 		: GentleReliefHeight;
