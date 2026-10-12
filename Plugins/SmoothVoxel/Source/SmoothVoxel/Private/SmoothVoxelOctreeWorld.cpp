@@ -2068,13 +2068,8 @@ float ASmoothVoxelOctreeWorld::SampleCurrentDensityAt(const FVector& WorldPositi
 
 EVoxelBlock ASmoothVoxelOctreeWorld::GetBlockTypeForCell(const FIntVector& Cell) const
 {
-	// Road and terrain mining share the same persistent voxel cut. The generated
-	// road-cell map stays immutable so streamed chunks can safely share it.
-	if (MinedTerrainNodes.Contains(Cell))
-	{
-		return EVoxelBlock::Air;
-	}
-
+	// Explicit player edits take priority over both terrain cuts and generated
+	// roads, so a placed block can occupy a cell that was mined earlier.
 	if (const int8* EditState = EditedBlockCells.Find(Cell))
 	{
 		if (*EditState < 0)
@@ -2087,9 +2082,15 @@ EVoxelBlock ASmoothVoxelOctreeWorld::GetBlockTypeForCell(const FIntVector& Cell)
 		}
 	}
 
-	// Generated carriageways participate in the same logical block queries as
-	// hand-placed cubes. The road network owns their HISM instances, but the
-	// world reports their true type to debug and interaction callers.
+	// A mined road cell stays empty even though the deterministic road layout
+	// remains immutable and is shared with streaming chunks.
+	if (MinedTerrainNodes.Contains(Cell))
+	{
+		return EVoxelBlock::Air;
+	}
+
+	// Carriageway cells are reported through the same logical voxel grid as
+	// terrain, but are rendered/collided by the streamed Transvoxel chunks.
 	EVoxelBlock RoadBlock = EVoxelBlock::Air;
 	if (IsValid(RoadNetworkActor) &&
 		RoadNetworkActor->GetRoadBlockTypeAtCell(Cell, RoadBlock))
