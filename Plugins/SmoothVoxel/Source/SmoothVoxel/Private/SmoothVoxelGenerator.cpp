@@ -564,13 +564,21 @@ float FSVoxelGenerator::SampleFlatlandInfluence(
     const float NonDesertHillCoverage = FMath::Clamp(
         1.0f - EffectiveFlatlandCoverage, 0.0f, 0.95f);
     const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f);
-    const float HillCoverage = FMath::Lerp(
-        NonDesertHillCoverage, DesertHillCoverage, DesertWeight);
-    const float BorderWidth = FMath::Lerp(0.075f, 0.025f, DesertWeight);
-    const float T = FMath::Clamp(
-        (Region01 - (1.0f - HillCoverage - BorderWidth)) /
-        FMath::Max(0.0001f, BorderWidth * 2.0f), 0.0f, 1.0f);
-    const float SmoothHillBlend = T * T * (3.0f - 2.0f * T);
+    // Blend two finished masks instead of sliding one threshold across the noise
+    // field. Sliding the threshold can make a whole hillside vanish in a narrow
+    // strip at the biome border, even when the biome weights are continuous.
+    const auto GetHillMask = [&Region01](float Coverage, float BorderWidth)
+    {
+        const float T = FMath::Clamp(
+            (Region01 - (1.0f - Coverage - BorderWidth)) /
+                FMath::Max(0.0001f, BorderWidth * 2.0f),
+            0.0f, 1.0f);
+        return T * T * (3.0f - 2.0f * T);
+    };
+    const float NonDesertHillBlend = GetHillMask(NonDesertHillCoverage, 0.075f);
+    const float DesertHillBlend = GetHillMask(DesertHillCoverage, 0.025f);
+    const float SmoothHillBlend = FMath::Lerp(
+        NonDesertHillBlend, DesertHillBlend, DesertWeight);
 
     // Use the same broad mountain mask as height generation, but only in the
     // snowy region. Mountain climate noise no longer punches random holes in
@@ -626,13 +634,19 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     const float NonDesertHillCoverage = FMath::Clamp(
         1.0f - EffectiveFlatlandCoverage, 0.0f, 0.95f);
     const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f);
-    const float HillCoverage = FMath::Lerp(
-        NonDesertHillCoverage, DesertHillCoverage, DesertBlend);
-    const float BorderWidth = FMath::Lerp(0.075f, 0.025f, DesertBlend);
-    const float HillBlend = SmoothStep(
-        1.0f - HillCoverage - BorderWidth,
-        1.0f - HillCoverage + BorderWidth,
+    // Evaluate the biome-specific hill masks independently, then fade between
+    // them with the broad biome weight. This prevents a moving threshold from
+    // abruptly switching a tall green-biome hill off at the desert boundary.
+    const float NonDesertHillBlend = SmoothStep(
+        1.0f - NonDesertHillCoverage - 0.075f,
+        1.0f - NonDesertHillCoverage + 0.075f,
         Region01);
+    const float DesertHillBlend = SmoothStep(
+        1.0f - DesertHillCoverage - 0.025f,
+        1.0f - DesertHillCoverage + 0.025f,
+        Region01);
+    const float HillBlend = FMath::Lerp(
+        NonDesertHillBlend, DesertHillBlend, DesertBlend);
 
     const float MountainThreshold = FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f);
     float MountainBlend = S.bEnableBiomes
@@ -657,7 +671,14 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         static_cast<double>(S.DetailAmplitude),
         static_cast<double>(HillBlend));
     const double MicroRelief = FineNoise * FineAmplitude;
-    const double HillRelief = HillShape * static_cast<double>(FMath::Abs(S.HillHeight)) *
+    // Desert hills use a much lower height ceiling than forest/plains hills.
+    // Interpolating the hill amplitude along with the mask lets existing hills
+    // taper down into the desert instead of ending as a cliff at the colour edge.
+    const double FullHillHeight = std::abs(static_cast<double>(S.HillHeight));
+    const double DesertHillHeight = FMath::Min(FullHillHeight * 0.20, 1000.0);
+    const double BlendedHillHeight = FMath::Lerp(
+        FullHillHeight, DesertHillHeight, static_cast<double>(DesertBlend));
+    const double HillRelief = HillShape * BlendedHillHeight *
         static_cast<double>(HillBlend);
 
     // Replace some perfect plains with broad, gentle rolls instead of turning
@@ -673,20 +694,21 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         (1.0 - static_cast<double>(HillBlend)) *
         (1.0 - static_cast<double>(MountainBlend));
 
-    // Even where the configured desert hill mask is sparse, keep broad,
-    // drivable rolling terrain rather than kilometre-wide perfectly flat plains.
-    // The relief fades out where real hills begin and is applied before POI
-    // plateaus, so future city clearings can remain flat.
+    // Add broad, signed desert rolls: low crests and equally smooth troughs rather
+    // than a constant non-negative lift. The long wavelength keeps slopes gentle
+    // enough for roads and prevents the desert from looking like a flat slab.
+    // Start the relief only after the biome weight has crossed the desert edge:
+    // river masks are disabled for desert samples, so negative desert troughs
+    // cannot lower the weak river fringe on the temperate side below its water plane.
     const double DesertRollingNoise = FBM2D(
-        X * RegionScale * 1.15,
-        Y * RegionScale * 1.15,
+        X * RegionScale * 0.45,
+        Y * RegionScale * 0.45,
         S.Seed + 6449);
-    // Use a non-negative gentle lift (0-3 m) instead of lowering terrain below
-    // its former baseline. Negative rolls here could put ordinary desert ground
-    // beneath RiverWaterLevel, causing the fixed-level river mesh to appear as
-    // disconnected floating patches where only a weak river-mask fringe exists.
-    const double DesertRollingRelief = (DesertRollingNoise + 1.0) * 150.0 *
-        static_cast<double>(DesertBlend) *
+    const float DesertReliefFade = SmoothStep(0.55f, 0.90f, DesertBlend);
+    const double DesertRollingAmplitude = FMath::Clamp(
+        std::abs(static_cast<double>(S.HillHeight)) * 0.15, 400.0, 800.0);
+    const double DesertRollingRelief = DesertRollingNoise * DesertRollingAmplitude *
+        static_cast<double>(DesertReliefFade) *
         (1.0 - static_cast<double>(HillBlend)) *
         (1.0 - static_cast<double>(MountainBlend));
 
@@ -1161,7 +1183,10 @@ double FSVoxelGenerator::SampleSurfaceHeight(
         50.0, 75.0);
     const float FlatnessForMicroRelief = SampleFlatlandInfluence(X, Y, S);
     const double MicroWeight = FMath::Lerp(
-        0.35, 1.0, static_cast<double>(FlatnessForMicroRelief));
+        0.35, 1.0, static_cast<double>(FlatnessForMicroRelief)) *
+        (1.0 - static_cast<double>(PlateauWeight));
+    // POI/city cores stay genuinely level; the micro-detail fades smoothly into
+    // the surrounding terrain instead of adding bumps on top of the flat pad.
     SurfaceHeight += MicroNoise * MicroAmplitude * MicroWeight;
 
     if (S.bEnableRivers)
