@@ -1817,6 +1817,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 			CellsPerAxis,
 			EffectiveBaseVoxelSize,
 			VoxelSize);
+		Settings.RoadSampleBins = RoadNetworkActor->GetRoadSampleBinsSnapshot();
 	}
 
 	const bool bHasBlockEdits =
@@ -1945,6 +1946,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() cons
 	if (IsValid(RoadNetworkActor))
 	{
 		Settings.RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshot();
+		Settings.RoadSampleBins = RoadNetworkActor->GetRoadSampleBinsSnapshot();
 	}
 	// Interaction probes need the complete immutable world snapshots.
 	Settings.BlockEdits = BlockEditSnapshot;
