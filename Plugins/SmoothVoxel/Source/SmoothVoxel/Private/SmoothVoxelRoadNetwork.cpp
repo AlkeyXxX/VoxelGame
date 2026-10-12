@@ -554,6 +554,41 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         return true;
     };
 
+    const double HighwayOverlapClearanceSquared = FMath::Square(HighwayOverlapClearance);
+    const int32 HighwayCacheSearchCellRadius = FMath::Clamp(
+        FMath::CeilToInt(HighwayOverlapClearance / RouteGridStep) + 1, 1, 4);
+    const auto GetNearestHighwayDistanceSquared = [&](const FVector2D& Point) -> double
+    {
+        if (HighwayRouteSamplesByCell.IsEmpty())
+        {
+            return TNumericLimits<double>::Max();
+        }
+        const FIntPoint CentreCell(
+            FMath::RoundToInt(Point.X / RouteGridStep),
+            FMath::RoundToInt(Point.Y / RouteGridStep));
+        double BestDistanceSquared = TNumericLimits<double>::Max();
+        for (int32 OffsetY = -HighwayCacheSearchCellRadius;
+            OffsetY <= HighwayCacheSearchCellRadius; ++OffsetY)
+        {
+            for (int32 OffsetX = -HighwayCacheSearchCellRadius;
+                OffsetX <= HighwayCacheSearchCellRadius; ++OffsetX)
+            {
+                const TArray<FVector2D>* Samples = HighwayRouteSamplesByCell.Find(
+                    CentreCell + FIntPoint(OffsetX, OffsetY));
+                if (!Samples)
+                {
+                    continue;
+                }
+                for (const FVector2D& HighwayPoint : *Samples)
+                {
+                    BestDistanceSquared = FMath::Min(
+                        BestDistanceSquared, FVector2D::DistSquared(Point, HighwayPoint));
+                }
+            }
+        }
+        return BestDistanceSquared;
+    };
+
     struct FRoadOpenNode
     {
         double Score = 0.0;
@@ -839,38 +874,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     double StepCost = TravelDistance *
                         (1.0 + CostGrade * CostGrade * 8.0) + RiverPenalty + TurnPenalty;
 
-                    if (bAvoidHighwayOverlap && !HighwayRouteSamplesByCell.IsEmpty())
+                    if (bAvoidHighwayOverlap)
                     {
-                        const int32 CellRadius = FMath::Clamp(
-                            FMath::CeilToInt(HighwayOverlapClearance / RouteGridStep) + 1,
-                            1, 4);
                         const FVector2D CandidatePoint(
                             static_cast<double>(NextCell.X) * RouteGridStep,
                             static_cast<double>(NextCell.Y) * RouteGridStep);
-                        double NearestHighwayDistanceSquared = TNumericLimits<double>::Max();
-                        for (int32 OffsetY = -CellRadius; OffsetY <= CellRadius; ++OffsetY)
-                        {
-                            for (int32 OffsetX = -CellRadius; OffsetX <= CellRadius; ++OffsetX)
-                            {
-                                const FIntPoint SampleCell(
-                                    NextCell.X + OffsetX, NextCell.Y + OffsetY);
-                                const TArray<FVector2D>* HighwaySamples =
-                                    HighwayRouteSamplesByCell.Find(SampleCell);
-                                if (!HighwaySamples)
-                                {
-                                    continue;
-                                }
-                                for (const FVector2D& HighwayPoint : *HighwaySamples)
-                                {
-                                    NearestHighwayDistanceSquared = FMath::Min(
-                                        NearestHighwayDistanceSquared,
-                                        FVector2D::DistSquared(CandidatePoint, HighwayPoint));
-                                }
-                            }
-                        }
-
-                        const double ClearanceSquared = FMath::Square(HighwayOverlapClearance);
-                        if (NearestHighwayDistanceSquared < ClearanceSquared)
+                        const double NearestHighwayDistanceSquared =
+                            GetNearestHighwayDistanceSquared(CandidatePoint);
+                        if (NearestHighwayDistanceSquared < HighwayOverlapClearanceSquared)
                         {
                             const double Proximity = 1.0 -
                                 FMath::Sqrt(NearestHighwayDistanceSquared) /
@@ -975,6 +986,36 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     RawRoute.Num() - 1, RouteIndex + MaxShortcutLookAhead);
                 for (int32 Candidate = Farthest; Candidate >= RouteIndex + 2; --Candidate)
                 {
+                    if (bAvoidHighwayOverlap)
+                    {
+                        const FVector2D ShortcutStart = RawRoute[RouteIndex];
+                        const FVector2D ShortcutEnd = RawRoute[Candidate];
+                        const FVector2D Shortcut = ShortcutEnd - ShortcutStart;
+                        const double ShortcutLength = Shortcut.Size();
+                        const int32 ProbeCount = FMath::Clamp(
+                            FMath::CeilToInt(static_cast<float>(
+                                ShortcutLength / FMath::Max(1.0, RouteGridStep * 0.5))),
+                            2, 64);
+                        int32 HighOverlapProbeCount = 0;
+                        for (int32 ProbeIndex = 1; ProbeIndex < ProbeCount; ++ProbeIndex)
+                        {
+                            const double Alpha = static_cast<double>(ProbeIndex) / ProbeCount;
+                            const FVector2D ProbePoint =
+                                ShortcutStart + Shortcut * static_cast<float>(Alpha);
+                            if (GetNearestHighwayDistanceSquared(ProbePoint) <
+                                HighwayOverlapClearanceSquared)
+                            {
+                                ++HighOverlapProbeCount;
+                            }
+                        }
+                        // Permit crossings and brief merges, but don't simplify an
+                        // ordinary road into a long stretch that duplicates the highway.
+                        if (HighOverlapProbeCount >
+                            FMath::Max(2, FMath::RoundToInt(ProbeCount * 0.25f)))
+                        {
+                            continue;
+                        }
+                    }
                     if (CanTravelStraight(
                         RawRoute[RouteIndex], RawRoute[Candidate],
                         ShortcutGradeLimit, bAllowRiverBankFollowing))
@@ -1622,20 +1663,37 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             BridgeBudgetCities.Add(OtherGridCell);
         }
+        const double CityBridgeBudgetRadius = CityPortDistance + HighwayRoadWidth;
+        TMap<FIntPoint, int32> LocalBridgeCountByCity;
         for (const FIntPoint& CityCell : BridgeBudgetCities)
         {
-            if (CityBridgeCrossingCounts.FindRef(CityCell) + BridgesInThisSegment > 2)
+            const FVector2D* CityPosition = Sites.Find(CityCell);
+            if (!CityPosition)
+            {
+                continue;
+            }
+            int32 LocalBridgeCount = 0;
+            for (const FVector2D& BridgeCenter : BridgeCentersInThisSegment)
+            {
+                if (FVector2D::DistSquared(*CityPosition, BridgeCenter) <=
+                    FMath::Square(CityBridgeBudgetRadius))
+                {
+                    ++LocalBridgeCount;
+                }
+            }
+            LocalBridgeCountByCity.Add(CityCell, LocalBridgeCount);
+            if (CityBridgeCrossingCounts.FindRef(CityCell) + LocalBridgeCount > 2)
             {
                 ++SkippedRouteCount;
                 UE_LOG(LogTemp, Verbose,
-                    TEXT("SmoothVoxel roads: rejected %d bridge(s) for city/town (%d,%d); limit is two."),
-                    BridgesInThisSegment, CityCell.X, CityCell.Y);
+                    TEXT("SmoothVoxel roads: rejected %d local bridge(s) for city/town (%d,%d); limit is two."),
+                    LocalBridgeCount, CityCell.X, CityCell.Y);
                 return;
             }
         }
-        for (const FIntPoint& CityCell : BridgeBudgetCities)
+        for (const TPair<FIntPoint, int32>& Entry : LocalBridgeCountByCity)
         {
-            CityBridgeCrossingCounts.FindOrAdd(CityCell) += BridgesInThisSegment;
+            CityBridgeCrossingCounts.FindOrAdd(Entry.Key) += Entry.Value;
         }
 
         BuiltBridgeCount += BridgesInThisSegment;
