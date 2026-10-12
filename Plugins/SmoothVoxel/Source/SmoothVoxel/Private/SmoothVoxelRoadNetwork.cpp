@@ -1887,6 +1887,18 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
+    // Guarantee a compact street grid close to the actual map centre instead of
+    // allowing hash ordering to place every small town near the temperate edge.
+    if (CoreTemperateHubCells.Num() > 0 &&
+        !SmallSettlementCells.Contains(CoreTemperateHubCells[0]))
+    {
+        if (SmallSettlementCells.Num() > 0)
+        {
+            SmallSettlementCells.Pop(false);
+        }
+        SmallSettlementCells.Insert(CoreTemperateHubCells[0], 0);
+    }
+
     // City centres lie on the global block lattice, not at seed-jittered site positions.
     TMap<FIntPoint, FVector2D> MajorCityCenters;
     TMap<FIntPoint, double> MajorCityUrbanScale;
