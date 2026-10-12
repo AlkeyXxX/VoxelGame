@@ -598,13 +598,15 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		}
 
 		FSVoxelMeshData Compact;
+		const int32 VertexReserve = FMath::Min(
+			Source.Vertices.Num(), SourceTriangles.Num());
 		TMap<int32, int32> VertexRemap;
-		VertexRemap.Reserve(SourceTriangles.Num());
-		Compact.Vertices.Reserve(SourceTriangles.Num());
-		Compact.Normals.Reserve(SourceTriangles.Num());
-		Compact.UV0.Reserve(SourceTriangles.Num());
-		Compact.VertexColors.Reserve(SourceTriangles.Num());
-		Compact.Tangents.Reserve(SourceTriangles.Num());
+		VertexRemap.Reserve(VertexReserve);
+		Compact.Vertices.Reserve(VertexReserve);
+		Compact.Normals.Reserve(VertexReserve);
+		Compact.UV0.Reserve(VertexReserve);
+		Compact.VertexColors.Reserve(VertexReserve);
+		Compact.Tangents.Reserve(VertexReserve);
 		Compact.Triangles.Reserve(SourceTriangles.Num());
 
 		for (int32 Index = 0; Index + 2 < SourceTriangles.Num(); Index += 3)
