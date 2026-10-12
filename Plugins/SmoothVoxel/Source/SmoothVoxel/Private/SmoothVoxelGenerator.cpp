@@ -882,11 +882,18 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // channels, while keeping RiverScale as the user-facing tuning control.
     const double Scale = FMath::Max(
         0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
-    const double HalfWidth = FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
-    if (HalfWidth <= 0.0)
+    const double ConfiguredHalfWidth =
+        FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
+    if (ConfiguredHalfWidth <= 0.0)
     {
         return;
     }
+    // The fixed water mesh is finer than distant terrain LODs. Widen the
+    // shared channel mask enough for the coarsest terrain samples to capture
+    // the bed, while keeping the broad bank shoulder at its authored width.
+    const double HalfWidth = FMath::Max(
+        ConfiguredHalfWidth,
+        std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 0.75);
 
     // Domain warp makes the zero-contours meander instead of looking like a
     // repeated grid. The signed field also provides a stable local channel
@@ -904,7 +911,7 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // the same signed field. The inner mask stays narrow enough for a riverbed;
     // the outer bank mask spans tens of metres and is faded at its outer edge.
     const double Threshold = FMath::Clamp(HalfWidth * Scale * 2.0, 0.0001, 0.20);
-    const double BankHalfWidth = FMath::Max(HalfWidth * 10.0, 5000.0);
+    const double BankHalfWidth = FMath::Max(ConfiguredHalfWidth * 10.0, 5000.0);
     const double BankThreshold = FMath::Max(
         Threshold,
         FMath::Min(BankHalfWidth * Scale * 2.0, 0.20));
@@ -1081,7 +1088,7 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
     const double ShoreRadius = (Radius + Blend) * 1.12;
     const double RingRadii[2] = { Radius * 0.65, ShoreRadius };
     const int32 RingSamples[2] = { 8, 16 };
-    constexpr double MaxLakeTerrainRelief = 300.0; // 3 m across the whole lake footprint.
+    constexpr double MaxLakeTerrainRelief = 450.0; // 4.5 m across the LOD-safe lake footprint.
 
     for (int32 RingIndex = 0; RingIndex < 2; ++RingIndex)
     {
@@ -1192,11 +1199,15 @@ double FSVoxelGenerator::SampleSurfaceHeight(
         {
             const double RiverScale = FMath::Max(
                 0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
-            const double RiverHalfWidth = FMath::Max(
+            const double ConfiguredRiverHalfWidth = FMath::Max(
                 0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
+            const double RiverHalfWidth = FMath::Max(
+                ConfiguredRiverHalfWidth,
+                std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 0.75);
             const double ChannelThreshold = FMath::Clamp(
                 RiverHalfWidth * RiverScale * 2.0, 0.0001, 0.20);
-            const double BankHalfWidth = FMath::Max(RiverHalfWidth * 10.0, 5000.0);
+            const double BankHalfWidth = FMath::Max(
+                ConfiguredRiverHalfWidth * 10.0, 5000.0);
             const double BankThreshold = FMath::Max(
                 ChannelThreshold,
                 FMath::Min(BankHalfWidth * RiverScale * 2.0, 0.20));
