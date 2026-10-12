@@ -2,6 +2,7 @@
 
 #include "ProceduralMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
@@ -94,6 +95,25 @@ ASmoothVoxelRoadNetwork::ASmoothVoxelRoadNetwork()
     CreatePOIInstances(POIStoneSpheres, TEXT("POIStoneSpheres"),
         SphereAsset.Succeeded() ? SphereAsset.Object : nullptr,
         StoneAsset.Succeeded() ? StoneAsset.Object : FallbackRoadMaterial);
+
+    const auto CreateRoadBlockInstances = [this](
+        UHierarchicalInstancedStaticMeshComponent*& Component,
+        const TCHAR* ComponentName,
+        UStaticMesh* StaticMesh)
+    {
+        Component = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(ComponentName);
+        Component->SetupAttachment(Mesh);
+        if (StaticMesh) Component->SetStaticMesh(StaticMesh);
+        Component->SetCollisionObjectType(ECC_WorldStatic);
+        Component->SetCollisionResponseToAllChannels(ECR_Block);
+        Component->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+        Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Component->SetGenerateOverlapEvents(false);
+        Component->SetCanEverAffectNavigation(true);
+    };
+    UStaticMesh* RoadCubeMesh = CubeAsset.Succeeded() ? CubeAsset.Object : nullptr;
+    CreateRoadBlockInstances(DirtRoadBlocks, TEXT("DirtRoadBlocks"), RoadCubeMesh);
+    CreateRoadBlockInstances(AsphaltRoadBlocks, TEXT("AsphaltRoadBlocks"), RoadCubeMesh);
 }
 
 void ASmoothVoxelRoadNetwork::ConfigureRoadNetwork(
@@ -126,6 +146,22 @@ void ASmoothVoxelRoadNetwork::ConfigureRoadNetwork(
     {
         Mesh->SetMaterial(0, ActiveDirtRoadMaterial);
         Mesh->SetMaterial(1, ActiveAsphaltRoadMaterial);
+        // The procedural mesh now contains only decorative embankment sides.
+        // Physical road surfaces are voxel-sized HISM cubes and must be the
+        // blocking hit targets for block mining.
+        Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+    if (DirtRoadBlocks)
+    {
+        DirtRoadBlocks->SetMaterial(0, ActiveDirtRoadMaterial);
+        DirtRoadBlocks->SetCollisionEnabled(
+            bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+    }
+    if (AsphaltRoadBlocks)
+    {
+        AsphaltRoadBlocks->SetMaterial(0, ActiveAsphaltRoadMaterial);
+        AsphaltRoadBlocks->SetCollisionEnabled(
+            bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
     }
 
     BuildRoadMesh(
@@ -137,6 +173,62 @@ void ASmoothVoxelRoadNetwork::ConfigureRoadNetwork(
         SurfaceOffset,
         GenerationSettings,
         bEnableCollision);
+}
+
+bool ASmoothVoxelRoadNetwork::GetRoadBlockForHit(
+    const UPrimitiveComponent* HitComponent,
+    int32 InstanceIndex,
+    FIntVector& OutCell,
+    EVoxelBlock& OutBlock) const
+{
+    if (HitComponent == DirtRoadBlocks && DirtRoadBlockCells.IsValidIndex(InstanceIndex))
+    {
+        OutCell = DirtRoadBlockCells[InstanceIndex];
+        OutBlock = EVoxelBlock::DirtRoad;
+        return true;
+    }
+    if (HitComponent == AsphaltRoadBlocks && AsphaltRoadBlockCells.IsValidIndex(InstanceIndex))
+    {
+        OutCell = AsphaltRoadBlockCells[InstanceIndex];
+        OutBlock = EVoxelBlock::Asphalt;
+        return true;
+    }
+    return false;
+}
+
+bool ASmoothVoxelRoadNetwork::RemoveRoadBlockForHit(
+    const UPrimitiveComponent* HitComponent,
+    int32 InstanceIndex)
+{
+    if (HitComponent == DirtRoadBlocks && DirtRoadBlockCells.IsValidIndex(InstanceIndex))
+    {
+        const FIntVector Cell = DirtRoadBlockCells[InstanceIndex];
+        if (!DirtRoadBlocks->RemoveInstance(InstanceIndex)) return false;
+        DirtRoadBlockCells.RemoveAt(InstanceIndex, 1, false);
+        RoadBlockTypes.Remove(Cell);
+        return true;
+    }
+    if (HitComponent == AsphaltRoadBlocks && AsphaltRoadBlockCells.IsValidIndex(InstanceIndex))
+    {
+        const FIntVector Cell = AsphaltRoadBlockCells[InstanceIndex];
+        if (!AsphaltRoadBlocks->RemoveInstance(InstanceIndex)) return false;
+        AsphaltRoadBlockCells.RemoveAt(InstanceIndex, 1, false);
+        RoadBlockTypes.Remove(Cell);
+        return true;
+    }
+    return false;
+}
+
+bool ASmoothVoxelRoadNetwork::GetRoadBlockTypeAtCell(
+    const FIntVector& Cell,
+    EVoxelBlock& OutBlock) const
+{
+    if (const EVoxelBlock* Block = RoadBlockTypes.Find(Cell))
+    {
+        OutBlock = *Block;
+        return true;
+    }
+    return false;
 }
 
 void ASmoothVoxelRoadNetwork::BuildRoadMesh(
@@ -155,6 +247,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     Mesh->ClearAllMeshSections();
+    RoadBlockTypes.Reset();
+    DirtRoadBlockCells.Reset();
+    AsphaltRoadBlockCells.Reset();
+    if (DirtRoadBlocks) DirtRoadBlocks->ClearInstances();
+    if (AsphaltRoadBlocks) AsphaltRoadBlocks->ClearInstances();
     if (POIWoodCubes) POIWoodCubes->ClearInstances();
     if (POIStoneCubes) POIStoneCubes->ClearInstances();
     if (POIDarkCubes) POIDarkCubes->ClearInstances();
@@ -241,9 +338,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
-    // Both road classes share a vertex buffer but use independent triangle
-    // sections/material slots. Earthen embankment triangles are assigned to the
-    // dirt-road section; carriageways use DirtRoad or Asphalt block semantics.
+    // Road carriageways are voxel-sized cubes stored in hierarchical instance
+    // components, so each physical hit resolves to one destructible block. The
+    // procedural mesh is retained only for sloped earthen embankment sides.
     TArray<FVector> Vertices;
     TArray<int32> DirtRoadTriangles;
     TArray<int32> AsphaltRoadTriangles;
@@ -1762,10 +1859,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
 
         const int32 FirstVertex = Vertices.Num();
-        TArray<int32>& SegmentTriangles =
-            FullRoadWidth <= DirtRoadWidth + 1.0
-                ? DirtRoadTriangles
-                : AsphaltRoadTriangles;
+        const EVoxelBlock RoadBlockType = FullRoadWidth <= DirtRoadWidth + 1.0
+            ? EVoxelBlock::DirtRoad
+            : EVoxelBlock::Asphalt;
         TArray<FVector2D> LeftEdgePositions;
         TArray<FVector2D> RightEdgePositions;
         TArray<FVector2D> PathTangents;
@@ -1836,7 +1932,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             // Keep the carriageway level side-to-side so vehicles do not roll
             // with the hillside. The new earthen bevels close the small clearance
             // gap while wider fills grow naturally on the low side of a slope.
-            const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
+            // Road blocks occupy whole base cells. Snap the top upward so it
+            // never ends up buried below the analytical terrain surface.
+            const double RoadDeckZ = std::ceil(
+                (CenterGround + Lift + TerrainClearance) / RoadBlockSize) * RoadBlockSize;
             const double LeftZ = RoadDeckZ;
             const double RightZ = RoadDeckZ;
 
@@ -1889,21 +1988,51 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
             if (SampleIndex > 0)
             {
-                const int32 PreviousLeft = FirstVertex + (SampleIndex - 1) * 2;
-                const int32 PreviousRight = PreviousLeft + 1;
-                const int32 CurrentLeft = FirstVertex + SampleIndex * 2;
-                const int32 CurrentRight = CurrentLeft + 1;
-
-                // Match the voxel mesher's winding convention: the raw triangle
-                // cross product points into the solid. With the upward vertex normals
-                // above, reverse the index order so the road is front-facing from above.
-                SegmentTriangles.Add(PreviousLeft);
-                SegmentTriangles.Add(CurrentLeft);
-                SegmentTriangles.Add(PreviousRight);
-
-                SegmentTriangles.Add(PreviousRight);
-                SegmentTriangles.Add(CurrentLeft);
-                SegmentTriangles.Add(CurrentRight);
+                // Rasterize the road ribbon at half-block intervals into the
+                // absolute voxel grid. This is intentionally denser than the
+                // visual road sampler so diagonal paths cannot leave gaps between
+                // adjacent destructible blocks.
+                const double SegmentLength = static_cast<double>((Point - Before).Size());
+                const int32 LongitudinalSteps = FMath::Max(
+                    1, static_cast<int32>(std::ceil(SegmentLength / (RoadBlockSize * 0.5))));
+                const int32 LateralSteps = FMath::Max(
+                    1, static_cast<int32>(std::ceil(FullRoadWidth / (RoadBlockSize * 0.5))));
+                const double PreviousDeckZ = RoadDeckHeights[SampleIndex - 1];
+                const int32 PreviousCellZ = static_cast<int32>(std::ceil(
+                    PreviousDeckZ / RoadBlockSize)) - 1;
+                const int32 CurrentCellZ = static_cast<int32>(std::ceil(
+                    RoadDeckZ / RoadBlockSize)) - 1;
+                (void)PreviousCellZ;
+                for (int32 LongIndex = 0; LongIndex <= LongitudinalSteps; ++LongIndex)
+                {
+                    const double T = static_cast<double>(LongIndex) /
+                        static_cast<double>(LongitudinalSteps);
+                    const FVector2D StampCenter = Before + (Point - Before) * static_cast<float>(T);
+                    const double StampDeckZ = PreviousDeckZ + (RoadDeckZ - PreviousDeckZ) * T;
+                    const int32 CellZ = static_cast<int32>(std::ceil(
+                        StampDeckZ / RoadBlockSize)) - 1;
+                    for (int32 LateralIndex = 0; LateralIndex <= LateralSteps; ++LateralIndex)
+                    {
+                        const double LateralT = static_cast<double>(LateralIndex) /
+                            static_cast<double>(LateralSteps);
+                        const double LateralOffset = -SegmentHalfRoadWidth +
+                            FullRoadWidth * LateralT;
+                        const FVector2D StampPoint = StampCenter +
+                            Perp * static_cast<float>(LateralOffset);
+                        const FIntVector Cell(
+                            FMath::FloorToInt(StampPoint.X / RoadBlockSize),
+                            FMath::FloorToInt(StampPoint.Y / RoadBlockSize),
+                            CellZ);
+                        EVoxelBlock* ExistingType = RoadBlockTypes.Find(Cell);
+                        // Asphalt wins where road classes intersect; a dirt spur
+                        // must not downgrade an already built paved junction.
+                        if (!ExistingType || RoadBlockType == EVoxelBlock::Asphalt ||
+                            *ExistingType != EVoxelBlock::Asphalt)
+                        {
+                            RoadBlockTypes.Add(Cell, RoadBlockType);
+                        }
+                    }
+                }
             }
         }
 
@@ -3739,10 +3868,68 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
+    if (RoadBlockTypes.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("SmoothVoxel roads: no road blocks were generated."));
+        return;
+    }
+
+    TArray<FIntVector> SortedRoadBlockCells;
+    RoadBlockTypes.GetKeys(SortedRoadBlockCells);
+    SortedRoadBlockCells.Sort([](const FIntVector& A, const FIntVector& B)
+    {
+        return A.X == B.X
+            ? (A.Y == B.Y ? A.Z < B.Z : A.Y < B.Y)
+            : A.X < B.X;
+    });
+    const float BlockInstanceScale = static_cast<float>(RoadBlockSize / 100.0);
+    for (const FIntVector& Cell : SortedRoadBlockCells)
+    {
+        const EVoxelBlock Block = RoadBlockTypes.FindRef(Cell);
+        const FVector LocalCenter(
+            (static_cast<float>(Cell.X) + 0.5f) * static_cast<float>(RoadBlockSize) -
+                static_cast<float>(WorldCenter.X),
+            (static_cast<float>(Cell.Y) + 0.5f) * static_cast<float>(RoadBlockSize) -
+                static_cast<float>(WorldCenter.Y),
+            (static_cast<float>(Cell.Z) + 0.5f) * static_cast<float>(RoadBlockSize));
+        const FTransform InstanceTransform(
+            FRotator::ZeroRotator,
+            LocalCenter,
+            FVector(BlockInstanceScale));
+        if (Block == EVoxelBlock::Asphalt && AsphaltRoadBlocks)
+        {
+            const int32 InstanceIndex = AsphaltRoadBlocks->AddInstance(InstanceTransform);
+            if (InstanceIndex != INDEX_NONE)
+            {
+                AsphaltRoadBlockCells.Add(Cell);
+            }
+        }
+        else if (DirtRoadBlocks)
+        {
+            const int32 InstanceIndex = DirtRoadBlocks->AddInstance(InstanceTransform);
+            if (InstanceIndex != INDEX_NONE)
+            {
+                DirtRoadBlockCells.Add(Cell);
+            }
+        }
+    }
+
     if (Vertices.Num() == 0 ||
         (DirtRoadTriangles.Num() == 0 && AsphaltRoadTriangles.Num() == 0))
     {
-        UE_LOG(LogTemp, Warning, TEXT("SmoothVoxel roads: no road segments were generated."));
+        // Flat routes need no embankment side mesh. The block instances above
+        // are the complete carriageway in that case.
+        Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        if (DirtRoadBlocks)
+        {
+            DirtRoadBlocks->SetCollisionEnabled(
+                bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+        }
+        if (AsphaltRoadBlocks)
+        {
+            AsphaltRoadBlocks->SetCollisionEnabled(
+                bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+        }
         return;
     }
 
@@ -3762,7 +3949,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             EmptyUV3,
             VertexColors,
             Tangents,
-            bEnableCollision);
+            false);
         Mesh->SetMaterial(0, ActiveDirtRoadMaterial);
     }
     if (AsphaltRoadTriangles.Num() > 0)
@@ -3778,12 +3965,28 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             EmptyUV3,
             VertexColors,
             Tangents,
-            bEnableCollision);
+            false);
         Mesh->SetMaterial(1, ActiveAsphaltRoadMaterial);
     }
-    Mesh->SetCollisionEnabled(
-        bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-    Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
+    // Only the per-cell HISM components participate in road collision/mining.
+    Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+    if (DirtRoadBlocks)
+    {
+        DirtRoadBlocks->SetCollisionObjectType(ECC_WorldStatic);
+        DirtRoadBlocks->SetCollisionResponseToAllChannels(ECR_Block);
+        DirtRoadBlocks->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+        DirtRoadBlocks->SetCollisionEnabled(
+            bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+    }
+    if (AsphaltRoadBlocks)
+    {
+        AsphaltRoadBlocks->SetCollisionObjectType(ECC_WorldStatic);
+        AsphaltRoadBlocks->SetCollisionResponseToAllChannels(ECR_Block);
+        AsphaltRoadBlocks->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+        AsphaltRoadBlocks->SetCollisionEnabled(
+            bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+    }
 
     int32 TemperateSiteCount = 0;
     int32 DesertSiteCount = 0;
