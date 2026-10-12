@@ -27,7 +27,6 @@ struct FSVoxelGenerationSettings
 	// Largest supported terrain surface sample interval across active LODs.
 	// Feature masks use this shared scale so terrain chunks and fixed water
 	// surfaces agree on the minimum size of basins and other narrow features.
-	float CoarsestSurfaceSampleStep = 100.0f;
 	FIntVector ChunkOriginCells = FIntVector::ZeroValue;
 	bool bUseChunkLatticeCoordinates = false;
 
