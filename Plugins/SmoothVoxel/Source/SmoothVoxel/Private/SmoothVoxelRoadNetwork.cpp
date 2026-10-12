@@ -1618,7 +1618,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     TArray<FIntPoint> SnowCityCandidates;
     TArray<FIntPoint> OtherCityCandidates;
     const double CityMargin = CityPortDistance + HighwayRoadWidth * 0.5;
-    const double MinimumCitySeparationSquared = FMath::Square(Spacing * 1.25);
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
         const FVector2D* Position = Sites.Find(Candidate);
@@ -1909,7 +1908,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
-        if (MajorCitySet.Contains(Candidate))
+        if (RoadHubSet.Contains(Candidate))
         {
             continue;
         }
@@ -2136,7 +2135,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     SettlementCell, SettlementCell, Start, End,
-                    OrdinaryRoadWidth, false, false, true);
+                    OrdinaryRoadWidth, false, true, true);
             }
         }
 
@@ -2153,7 +2152,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     SettlementCell, SettlementCell, Start, End,
-                    OrdinaryRoadWidth, false, false, true);
+                    OrdinaryRoadWidth, false, true, true);
             }
         }
     }
