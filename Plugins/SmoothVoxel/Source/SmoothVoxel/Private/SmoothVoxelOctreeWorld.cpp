@@ -2542,6 +2542,19 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		// towers and walls aligned even when the ray hits an edge.
 		Cell = HitCube->BlockCell + FaceStep;
 	}
+	else if (ASmoothVoxelRoadNetwork* HitRoadNetwork = Cast<ASmoothVoxelRoadNetwork>(Hit.GetActor()))
+	{
+		EVoxelBlock HitRoadBlock = EVoxelBlock::Air;
+		if (HitRoadNetwork->GetOwner() != this ||
+			!HitRoadNetwork->GetRoadBlockForHit(
+				Hit.GetComponent(), Hit.Item, Cell, HitRoadBlock))
+		{
+			return false;
+		}
+		// Road cubes share the world's absolute voxel grid, so place adjacent
+		// to their logical cell just like an ordinary placed cube.
+		Cell += FaceStep;
+	}
 	else
 	{
 		ASmoothVoxelTransvoxelChunk* HitChunk = Cast<ASmoothVoxelTransvoxelChunk>(Hit.GetActor());
