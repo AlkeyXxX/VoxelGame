@@ -2263,7 +2263,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // The same deterministic hub rate in desert, snow and temperate regions
         // keeps ordinary-road density proportional to eligible POI-site density.
         // A moderate rate also spaces hubs far enough apart for longer intercity roads.
-        if (HubRoll < 240u)
+        if (HubRoll < 400u)
         {
             RoadHubCells.Add(Candidate);
             RoadHubSet.Add(Candidate);
@@ -2507,7 +2507,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // a ring around every POI or another rectangular network.
     // Aim for a substantial rural network without letting new dirt lanes cross
     // existing roads or overlap them for long stretches.
-    const int32 DesiredRuralConnectorCount = FMath::Min(120, FMath::Max(1, Sites.Num() / 3));
+    const int32 DesiredRuralConnectorCount = FMath::Min(160, FMath::Max(1, Sites.Num() / 2));
     int32 RuralConnectorsBuilt = 0;
     const double RuralConnectorEndpointSpacing = Spacing * 0.65;
     const double RuralConnectorEndpointSpacingSquared =
@@ -2788,7 +2788,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             const double DrivewayDistance = std::sqrt(BestDistanceSquared);
             if (DrivewayDistance > OrdinaryRoadWidth * 0.75 &&
-                DrivewayDistance <= Spacing * 0.70)
+                DrivewayDistance <= Spacing * 1.25)
             {
                 BuildSegment(
                     POICell, POICell, *POI, BestRoadPoint,
