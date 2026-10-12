@@ -660,6 +660,11 @@ private:
 	FSVoxelMinedNodeSet MinedTerrainNodes;
 	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodeSnapshot;
 
+	// Broken generated road cells are tracked independently so mining asphalt
+	// or dirt road never excavates the natural terrain that happens to be below.
+	FSVoxelMinedNodeSet MinedRoadNodes;
+	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedRoadNodeSnapshot;
+
 	UPROPERTY()
 	TMap<FIntVector, ASmoothVoxelPlacedCubeBlock*> PlacedCubeBlocks;
 
