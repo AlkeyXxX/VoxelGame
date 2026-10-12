@@ -1812,7 +1812,11 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	// road cells for every streamed chunk.
 	if (bFilterBlockEdits && IsValid(RoadNetworkActor))
 	{
-		Settings.RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshot();
+		Settings.RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshotForChunk(
+			ChunkOriginCells,
+			CellsPerAxis,
+			EffectiveBaseVoxelSize,
+			VoxelSize);
 	}
 
 	const bool bHasBlockEdits =
