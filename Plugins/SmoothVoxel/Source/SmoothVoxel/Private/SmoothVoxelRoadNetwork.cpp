@@ -247,6 +247,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     Mesh->ClearAllMeshSections();
+    // Disable the instance collision while rebuilding the batch. Enabling it
+    // only after all instances have been added avoids recreating physics bodies
+    // once per block during generation.
+    if (DirtRoadBlocks) DirtRoadBlocks->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    if (AsphaltRoadBlocks) AsphaltRoadBlocks->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     RoadBlockTypes.Reset();
     DirtRoadBlockCells.Reset();
     AsphaltRoadBlockCells.Reset();
