@@ -279,8 +279,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         SamplesPerRoad * Sites.Num() * 8,
         0, 300000);
     Vertices.Reserve(ExpectedSamples * 4);
-    DirtRoadTriangles.Reserve(ExpectedSamples * 3);
-    AsphaltRoadTriangles.Reserve(ExpectedSamples * 3);
+    // Dirt triangles also hold the two shoulder/embankment strips; asphalt
+    // triangles are carriageways only. Reserve their expected index counts to
+    // avoid repeated reallocations during large-world generation.
+    DirtRoadTriangles.Reserve(ExpectedSamples * 12);
+    AsphaltRoadTriangles.Reserve(ExpectedSamples * 6);
     Normals.Reserve(ExpectedSamples * 4);
     UV0.Reserve(ExpectedSamples * 2);
     VertexColors.Reserve(ExpectedSamples * 2);
