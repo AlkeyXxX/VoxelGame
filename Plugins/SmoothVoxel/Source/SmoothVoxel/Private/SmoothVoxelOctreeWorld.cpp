@@ -471,6 +471,31 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	const bool bHasRoadMap = PendingSettings.RoadBlocks.IsValid() &&
 		PendingSettings.RoadBlocks->Num() > 0;
 	const float RoadCellStep = FMath::Max(1.0f, PendingSettings.BaseVoxelSize);
+	const auto ClassifyRoadSurface = [&](
+		const FVector& Center,
+		EVoxelBlock& OutRoadType) -> bool
+	{
+		OutRoadType = EVoxelBlock::Air;
+		if (!bHasRoadMap)
+		{
+			return false;
+		}
+		FIntVector SurfaceCell = LocalPositionToVoxelCell(Center, PendingSettings);
+		// Top faces sit on the upper grid plane. Bias down slightly so they map
+		// to the solid road cell instead of the air cell immediately above.
+		SurfaceCell.Z = FMath::FloorToInt(
+			(Center.Z + PendingSettings.ChunkOriginCells.Z * RoadCellStep -
+				RoadCellStep * 0.01f) / RoadCellStep);
+		const EVoxelBlock* RoadType = PendingSettings.RoadBlocks->Find(SurfaceCell);
+		if (!RoadType || (*RoadType != EVoxelBlock::Asphalt &&
+			*RoadType != EVoxelBlock::DirtRoad))
+		{
+			return false;
+		}
+		OutRoadType = *RoadType;
+		return true;
+	};
+
 	for (int32 TriangleIndex = 0;
 		TriangleIndex + 2 < Data.Triangles.Num();
 		TriangleIndex += 3)
@@ -487,36 +512,71 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 
 		const FVector Center = (
 			Data.Vertices[A] + Data.Vertices[B] + Data.Vertices[C]) / 3.0f;
-		FIntVector SurfaceCell = LocalPositionToVoxelCell(Center, PendingSettings);
-		// Top faces sit exactly on the upper grid plane. Bias down very slightly
-		// so they are assigned to the solid road cell rather than the air cell above.
-		SurfaceCell.Z = FMath::FloorToInt(
-			(Center.Z + PendingSettings.ChunkOriginCells.Z * RoadCellStep -
-				RoadCellStep * 0.01f) / RoadCellStep);
-		if (bHasRoadMap)
+		EVoxelBlock RoadType = EVoxelBlock::Air;
+		if (ClassifyRoadSurface(Center, RoadType) &&
+			RoadType == EVoxelBlock::Asphalt)
 		{
-			if (const EVoxelBlock* RoadType = PendingSettings.RoadBlocks->Find(SurfaceCell))
-			{
-				if (*RoadType == EVoxelBlock::Asphalt)
-				{
-					AsphaltRoadTriangles.Add(A);
-					AsphaltRoadTriangles.Add(B);
-					AsphaltRoadTriangles.Add(C);
-					continue;
-				}
-				if (*RoadType == EVoxelBlock::DirtRoad)
-				{
-					DirtRoadTriangles.Add(A);
-					DirtRoadTriangles.Add(B);
-					DirtRoadTriangles.Add(C);
-					continue;
-				}
-			}
+			AsphaltRoadTriangles.Add(A);
+			AsphaltRoadTriangles.Add(B);
+			AsphaltRoadTriangles.Add(C);
+			continue;
+		}
+		if (RoadType == EVoxelBlock::DirtRoad)
+		{
+			DirtRoadTriangles.Add(A);
+			DirtRoadTriangles.Add(B);
+			DirtRoadTriangles.Add(C);
+			continue;
 		}
 
 		TerrainTriangles.Add(A);
 		TerrainTriangles.Add(B);
 		TerrainTriangles.Add(C);
+	}
+
+	// Reverse-wound repair faces around a mined block must retain the same
+	// road material as their original front face, otherwise digging into asphalt
+	// could reveal overlapping terrain-colored copies.
+	TArray<int32> EditedBackfaceTerrainTriangles;
+	TArray<int32> EditedBackfaceAsphaltTriangles;
+	TArray<int32> EditedBackfaceDirtTriangles;
+	for (int32 TriangleIndex = 0;
+		TriangleIndex + 2 < EditedBackfaceData.Triangles.Num();
+		TriangleIndex += 3)
+	{
+		const int32 A = EditedBackfaceData.Triangles[TriangleIndex];
+		const int32 B = EditedBackfaceData.Triangles[TriangleIndex + 1];
+		const int32 C = EditedBackfaceData.Triangles[TriangleIndex + 2];
+		if (!EditedBackfaceData.Vertices.IsValidIndex(A) ||
+			!EditedBackfaceData.Vertices.IsValidIndex(B) ||
+			!EditedBackfaceData.Vertices.IsValidIndex(C))
+		{
+			continue;
+		}
+		const FVector Center = (
+			EditedBackfaceData.Vertices[A] +
+			EditedBackfaceData.Vertices[B] +
+			EditedBackfaceData.Vertices[C]) / 3.0f;
+		EVoxelBlock RoadType = EVoxelBlock::Air;
+		if (ClassifyRoadSurface(Center, RoadType) &&
+			RoadType == EVoxelBlock::Asphalt)
+		{
+			EditedBackfaceAsphaltTriangles.Add(A);
+			EditedBackfaceAsphaltTriangles.Add(B);
+			EditedBackfaceAsphaltTriangles.Add(C);
+		}
+		else if (RoadType == EVoxelBlock::DirtRoad)
+		{
+			EditedBackfaceDirtTriangles.Add(A);
+			EditedBackfaceDirtTriangles.Add(B);
+			EditedBackfaceDirtTriangles.Add(C);
+		}
+		else
+		{
+			EditedBackfaceTerrainTriangles.Add(A);
+			EditedBackfaceTerrainTriangles.Add(B);
+			EditedBackfaceTerrainTriangles.Add(C);
+		}
 	}
 
 	// Drop the previous render sections and collision bodies before applying the
@@ -538,12 +598,12 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			bCreateCollision);
 	}
 
-	if (!EditedBackfaceData.IsEmpty())
+	if (EditedBackfaceTerrainTriangles.Num() > 0)
 	{
 		Mesh->CreateMeshSection_LinearColor(
 			1,
 			EditedBackfaceData.Vertices,
-			EditedBackfaceData.Triangles,
+			EditedBackfaceTerrainTriangles,
 			EditedBackfaceData.Normals,
 			EditedBackfaceData.UV0,
 			TArray<FVector2D>(),
@@ -553,6 +613,38 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			EditedBackfaceData.Tangents,
 			false);
 		Mesh->SetMaterial(1, Material);
+	}
+	if (EditedBackfaceAsphaltTriangles.Num() > 0)
+	{
+		Mesh->CreateMeshSection_LinearColor(
+			4,
+			EditedBackfaceData.Vertices,
+			EditedBackfaceAsphaltTriangles,
+			EditedBackfaceData.Normals,
+			EditedBackfaceData.UV0,
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			EditedBackfaceData.VertexColors,
+			EditedBackfaceData.Tangents,
+			false);
+		Mesh->SetMaterial(4, AsphaltRoadSectionMaterial ? AsphaltRoadSectionMaterial : Material);
+	}
+	if (EditedBackfaceDirtTriangles.Num() > 0)
+	{
+		Mesh->CreateMeshSection_LinearColor(
+			5,
+			EditedBackfaceData.Vertices,
+			EditedBackfaceDirtTriangles,
+			EditedBackfaceData.Normals,
+			EditedBackfaceData.UV0,
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			EditedBackfaceData.VertexColors,
+			EditedBackfaceData.Tangents,
+			false);
+		Mesh->SetMaterial(5, DirtRoadSectionMaterial ? DirtRoadSectionMaterial : Material);
 	}
 
 	if (AsphaltRoadTriangles.Num() > 0)
