@@ -1819,6 +1819,74 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
+    // Explicitly seed the map centre with ordinary-road hubs. A random hub
+    // roll alone can leave the core underserved when most of the visible network
+    // is already tied into the outer desert/snow city backbone.
+    TArray<FIntPoint> CoreTemperateCandidates;
+    const FVector2D MapCenter2D(
+        static_cast<float>(WorldCenter.X),
+        static_cast<float>(WorldCenter.Y));
+    const double CoreHubRadius = HalfExtent * 0.48;
+    const double CoreHubRadiusSquared = FMath::Square(CoreHubRadius);
+    for (const FIntPoint& Candidate : SortedSiteCells)
+    {
+        if (MajorCitySet.Contains(Candidate))
+        {
+            continue;
+        }
+        const FVector2D* Position = Sites.Find(Candidate);
+        if (!Position ||
+            FVector2D::DistSquared(*Position, MapCenter2D) > CoreHubRadiusSquared)
+        {
+            continue;
+        }
+        const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(
+            Position->X, Position->Y, GenerationSettings);
+        if (Biome == ESVoxelBiome::Forest || Biome == ESVoxelBiome::Plains)
+        {
+            CoreTemperateCandidates.Add(Candidate);
+        }
+    }
+    CoreTemperateCandidates.Sort([&](const FIntPoint& A, const FIntPoint& B)
+    {
+        const FVector2D& PA = Sites.FindChecked(A);
+        const FVector2D& PB = Sites.FindChecked(B);
+        const double DA = FVector2D::DistSquared(PA, MapCenter2D);
+        const double DB = FVector2D::DistSquared(PB, MapCenter2D);
+        if (!FMath::IsNearlyEqual(DA, DB, 1.0))
+        {
+            return DA < DB;
+        }
+        return StableSiteHash(A) < StableSiteHash(B);
+    });
+
+    TArray<FIntPoint> CoreTemperateHubCells;
+    const int32 DesiredCoreHubCount = FMath::Clamp(Sites.Num() / 24, 6, 14);
+    const double CoreHubSeparationSquared = FMath::Square(Spacing * 0.55);
+    for (const FIntPoint& Candidate : CoreTemperateCandidates)
+    {
+        if (CoreTemperateHubCells.Num() >= DesiredCoreHubCount)
+        {
+            break;
+        }
+        const FVector2D& Position = Sites.FindChecked(Candidate);
+        bool bFarEnough = true;
+        for (const FIntPoint& ExistingCell : CoreTemperateHubCells)
+        {
+            if (FVector2D::DistSquared(
+                    Position, Sites.FindChecked(ExistingCell)) <
+                CoreHubSeparationSquared)
+            {
+                bFarEnough = false;
+                break;
+            }
+        }
+        if (bFarEnough)
+        {
+            CoreTemperateHubCells.Add(Candidate);
+        }
+    }
+
     // City centres lie on the global block lattice, not at seed-jittered site positions.
     TMap<FIntPoint, FVector2D> MajorCityCenters;
     TMap<FIntPoint, double> MajorCityUrbanScale;
@@ -1941,15 +2009,30 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     // Smaller hubs are sparse. Their spanning tree connects them to the
     // intercity backbone with ordinary roads; no fixed all-map rectangular grid.
-    TArray<FIntPoint> RoadHubCells = MajorCityCells;
-    TSet<FIntPoint> RoadHubSet = MajorCitySet;
+    TArray<FIntPoint> RoadHubCells;
+    TSet<FIntPoint> RoadHubSet;
+    const auto AddRoadHub = [&](const FIntPoint& Cell)
+    {
+        if (Sites.Contains(Cell) && !RoadHubSet.Contains(Cell))
+        {
+            RoadHubCells.Add(Cell);
+            RoadHubSet.Add(Cell);
+        }
+    };
+    // Start the ordinary-road spanning tree inside the temperate core, then
+    // connect small towns and the highway cities, so useful central links are
+    // generated before the outer network can consume the route budget.
+    for (const FIntPoint& CoreCell : CoreTemperateHubCells)
+    {
+        AddRoadHub(CoreCell);
+    }
     for (const FIntPoint& SettlementCell : SmallSettlementCells)
     {
-        if (!RoadHubSet.Contains(SettlementCell))
-        {
-            RoadHubCells.Add(SettlementCell);
-            RoadHubSet.Add(SettlementCell);
-        }
+        AddRoadHub(SettlementCell);
+    }
+    for (const FIntPoint& MajorCityCell : MajorCityCells)
+    {
+        AddRoadHub(MajorCityCell);
     }
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
