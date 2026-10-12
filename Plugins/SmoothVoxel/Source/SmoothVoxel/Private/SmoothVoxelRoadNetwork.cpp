@@ -175,6 +175,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     int32 DirtRoadSegmentCount = 0;
     int32 OrdinaryRoadSegmentCount = 0;
     int32 HighwayRoadSegmentCount = 0;
+    // Limit urban river crossings to a couple of deliberate bridge locations per city.
+    TMap<FIntPoint, int32> CityBridgeCrossingCounts;
     const int32 SamplesPerRoad = FMath::Max(
         2, FMath::CeilToInt(static_cast<float>(Spacing / SafeSampleSpacing)));
     // Reserve room for the hierarchy, urban blocks, POI driveways, and rural links.
@@ -245,17 +247,46 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 Sample.RiverSignedField,
                 &Sample.RiverBankInfluence);
         }
+        bool bLakeClearanceAllowed = true;
         if (GenerationSettings.bEnableLakes)
         {
             float LakeWaterLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
             FSVoxelGenerator::SampleLakeMaskAndLevel(
                 X, Y, GenerationSettings, Sample.LakeInfluence, LakeWaterLevel);
+            if (Sample.LakeInfluence < 0.10f)
+            {
+                // Dilate lake clearance by three base blocks so ordinary road
+                // centre lines do not scrape the shoreline. Diagonal probes make
+                // the buffer less dependent on the orientation of the lake edge.
+                const double LakeDirections[8][2] =
+                {
+                    { 1.0, 0.0 }, { -1.0, 0.0 }, { 0.0, 1.0 }, { 0.0, -1.0 },
+                    { 0.70710678, 0.70710678 }, { 0.70710678, -0.70710678 },
+                    { -0.70710678, 0.70710678 }, { -0.70710678, -0.70710678 }
+                };
+                const double ClearanceDistance = RoadBlockSize * 3.0;
+                for (const auto& Direction : LakeDirections)
+                {
+                    float NearbyLakeInfluence = 0.0f;
+                    float NearbyWaterLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
+                    FSVoxelGenerator::SampleLakeMaskAndLevel(
+                        X + Direction[0] * ClearanceDistance,
+                        Y + Direction[1] * ClearanceDistance,
+                        GenerationSettings, NearbyLakeInfluence, NearbyWaterLevel);
+                    if (NearbyLakeInfluence >= 0.10f)
+                    {
+                        bLakeClearanceAllowed = false;
+                        break;
+                    }
+                }
+            }
         }
         Sample.Biome = FSVoxelGenerator::SampleBiome(X, Y, GenerationSettings);
 
-        // A road must go around a lake, including its shoreline blend zone.
-        // River channels remain candidates only for a near-perpendicular crossing.
-        Sample.bAllowed = !GenerationSettings.bEnableLakes || Sample.LakeInfluence < 0.10f;
+        // Lake safety includes the shoreline mask and a three-block clearance.
+        // River channels are handled separately so deliberate bridges remain possible.
+        Sample.bAllowed = !GenerationSettings.bEnableLakes ||
+            (Sample.LakeInfluence < 0.10f && bLakeClearanceAllowed);
         return RouteGridCache.Add(GridCell, Sample);
     };
 
@@ -281,6 +312,54 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // is the approximate direction along the channel.
         OutTangent = FVector2D(-Gradient.Y, Gradient.X).GetSafeNormal();
         return OutTangent.SizeSquared() > 0.5f;
+    };
+
+    auto CountRiverCrossingsOnLine = [&](const FVector2D& A, const FVector2D& B) -> int32
+    {
+        if (!GenerationSettings.bEnableRivers)
+        {
+            return 0;
+        }
+        const FVector2D Chord = B - A;
+        const double Length = Chord.Size();
+        if (Length < 1.0)
+        {
+            return 0;
+        }
+        const FVector2D Direction = Chord / static_cast<float>(Length);
+        const int32 Steps = FMath::Max(
+            1, FMath::CeilToInt(static_cast<float>(Length / (RouteGridStep * 0.5))));
+        bool bWasInsideCrossing = false;
+        int32 CrossingCount = 0;
+        for (int32 Step = 0; Step <= Steps; ++Step)
+        {
+            const FVector2D Point =
+                A + Chord * static_cast<float>(static_cast<double>(Step) / Steps);
+            const FIntPoint Cell(
+                FMath::RoundToInt(Point.X / RouteGridStep),
+                FMath::RoundToInt(Point.Y / RouteGridStep));
+            const FRoadGridSample Sample = GetRouteGridSample(Cell);
+            const bool bInRiverEnvelope =
+                Sample.RiverInfluence > 0.02f || Sample.RiverBankInfluence > 0.12f;
+            if (!bInRiverEnvelope)
+            {
+                bWasInsideCrossing = false;
+                continue;
+            }
+
+            FVector2D RiverTangent = FVector2D::ZeroVector;
+            const bool bHasTangent = GetRiverTangent(Cell, RiverTangent);
+            const double ParallelAmount = bHasTangent
+                ? FMath::Abs(FVector2D::DotProduct(Direction, RiverTangent))
+                : 1.0;
+            const bool bPerpendicularCrossing = bHasTangent && ParallelAmount < 0.82;
+            if (bPerpendicularCrossing && !bWasInsideCrossing)
+            {
+                ++CrossingCount;
+            }
+            bWasInsideCrossing = bPerpendicularCrossing;
+        }
+        return CrossingCount;
     };
 
     const auto SnapToCardinal = [](const FVector2D& Direction) -> FVector2D
@@ -762,20 +841,23 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
         TArray<FVector2D> RoutePoints;
         const bool bAllowRiverBankFollowing = FullRoadWidth <= DirtRoadWidth + 1.0;
+        int32 PendingCityBridgeCrossings = 0;
         if (bForceGridLine)
         {
-            // City streets and approaches stay exactly on world XY axes even if
-            // terrain grades would otherwise make A* bend them diagonally.
-            const int32 CheckSteps = FMath::Max(
-                1, FMath::CeilToInt(static_cast<float>(ChordLength / (RouteGridStep * 0.5))));
-            for (int32 CheckIndex = 0; CheckIndex <= CheckSteps; ++CheckIndex)
+            // City roads remain grid-aligned, but may not pass over a steep valley
+            // unless the later bridge pass can create a safe bank-to-bank deck.
+            if (!CanTravelStraight(Start, End, MaxRouteGrade, bAllowRiverBankFollowing))
             {
-                const double Alpha = static_cast<double>(CheckIndex) / CheckSteps;
-                const FVector2D CheckPoint = Start + Chord * static_cast<float>(Alpha);
-                const FIntPoint CheckCell(
-                    FMath::RoundToInt(CheckPoint.X / RouteGridStep),
-                    FMath::RoundToInt(CheckPoint.Y / RouteGridStep));
-                if (!GetRouteGridSample(CheckCell).bAllowed)
+                ++SkippedRouteCount;
+                return;
+            }
+            if (GenerationSettings.bEnableRivers && GridCell == OtherGridCell &&
+                Sites.Contains(GridCell))
+            {
+                PendingCityBridgeCrossings = CountRiverCrossingsOnLine(Start, End);
+                const int32* ExistingCountPtr = CityBridgeCrossingCounts.Find(GridCell);
+                const int32 ExistingCount = ExistingCountPtr ? *ExistingCountPtr : 0;
+                if (ExistingCount + PendingCityBridgeCrossings > 2)
                 {
                     ++SkippedRouteCount;
                     return;
@@ -818,8 +900,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 }
 
                 const double Radius = FMath::Min(
-                    FMath::Max(FullRoadWidth * 1.5, RouteGridStep * 0.75),
-                    FMath::Min(InLength, OutLength) * 0.35);
+                    FMath::Max(FullRoadWidth * 2.0, RouteGridStep * 1.25),
+                    FMath::Min(InLength, OutLength) * 0.45);
                 if (Radius < 50.0)
                 {
                     RoundedRoute.Add(Corner);
@@ -828,11 +910,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const FVector2D Entry = Corner - Incoming * static_cast<float>(Radius);
                 const FVector2D Exit = Corner + Outgoing * static_cast<float>(Radius);
                 TArray<FVector2D> Arc;
-                Arc.Reserve(5);
+                Arc.Reserve(9);
                 Arc.Add(Entry);
-                for (int32 CurveStep = 1; CurveStep <= 4; ++CurveStep)
+                for (int32 CurveStep = 1; CurveStep <= 8; ++CurveStep)
                 {
-                    const double T = static_cast<double>(CurveStep) / 4.0;
+                    const double T = static_cast<double>(CurveStep) / 8.0;
                     const double U = 1.0 - T;
                     Arc.Add(Entry * static_cast<float>(U * U) +
                         Corner * static_cast<float>(2.0 * U * T) +
@@ -1188,6 +1270,18 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             }
         }
 
+        if (bForceGridLine && PendingCityBridgeCrossings > 0)
+        {
+            // Do not emit an unbridged road ribbon over a river. Every classified
+            // crossing must have yielded a safe deck in the bridge pass above.
+            if (BridgesInThisSegment < PendingCityBridgeCrossings)
+            {
+                ++SkippedRouteCount;
+                return;
+            }
+            CityBridgeCrossingCounts.FindOrAdd(GridCell) += PendingCityBridgeCrossings;
+        }
+
         BuiltBridgeCount += BridgesInThisSegment;
 
         if (bRecordAsNetworkRoad)
@@ -1249,19 +1343,17 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const FVector2D LeftXY = Point + Perp * static_cast<float>(SegmentHalfRoadWidth);
             const FVector2D RightXY = Point - Perp * static_cast<float>(SegmentHalfRoadWidth);
 
-            const double LeftGround = FSVoxelGenerator::SampleSurfaceHeight(
-                static_cast<double>(LeftXY.X), static_cast<double>(LeftXY.Y), GenerationSettings);
-            const double RightGround = FSVoxelGenerator::SampleSurfaceHeight(
-                static_cast<double>(RightXY.X), static_cast<double>(RightXY.Y), GenerationSettings);
             const double Lift = RoadLifts[SampleIndex];
             const double CenterGround = GroundHeights[SampleIndex];
-            const double CrossSectionCorrection = FMath::Max(
-                0.0, CenterGround - (LeftGround + RightGround) * 0.5);
             const double TerrainClearance = FMath::Max(
                 SafeSurfaceOffset,
                 static_cast<double>(GenerationSettings.BaseVoxelSize) * 0.50);
-            const double LeftZ = LeftGround + Lift + TerrainClearance + CrossSectionCorrection;
-            const double RightZ = RightGround + Lift + TerrainClearance + CrossSectionCorrection;
+
+            // Keep the carriageway level side-to-side so vehicles do not roll
+            // with the hillside. Shoulders/embankments will later fill the edge gaps.
+            const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
+            const double LeftZ = RoadDeckZ;
+            const double RightZ = RoadDeckZ;
 
             const double DistanceBefore = static_cast<double>((Point - Before).Size());
             const double DistanceAfter = static_cast<double>((After - Point).Size());
