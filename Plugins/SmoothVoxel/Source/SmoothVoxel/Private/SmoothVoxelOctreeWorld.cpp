@@ -1635,9 +1635,15 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.NoiseScale = NoiseScale;
 	Settings.DetailScale = DetailScale;
 
-	const int32 SafeMaxLod = FMath::Clamp(MaxLod, 0, 4);
+	// Use the maximum LOD the world can actually select after applying its leaf
+	// budget, not just the requested MaxLod property. Terrain, rivers and lakes
+	// must share this same coarsest sampling scale.
+	const int32 EffectiveMaxLodForSampling = GetEffectiveMaxLodForBudget(
+		GetRootLodForWorldSize(), MaxLod, MaxLeafCount);
+	const int32 SafeMaxLod = FMath::Clamp(EffectiveMaxLodForSampling, 0, 8);
 	const float CoarsestVoxelStep =
 		FMath::Max(1.0f, EffectiveBaseVoxelSize) * static_cast<float>(1 << SafeMaxLod);
+	Settings.CoarsestSurfaceSampleStep = CoarsestVoxelStep;
 	FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(Settings, CoarsestVoxelStep);
 	Settings.DetailAmplitude = DetailAmplitude;
 	Settings.bEnableRivers = bEnableRivers && bEnableWater;
