@@ -1996,7 +1996,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const int32 LongitudinalSteps = FMath::Max(
                     1, static_cast<int32>(std::ceil(SegmentLength / (RoadBlockSize * 0.5))));
                 const int32 LateralSteps = FMath::Max(
-                    1, static_cast<int32>(std::ceil(FullRoadWidth / (RoadBlockSize * 0.5))));
+                    0, FMath::RoundToInt(FullRoadWidth / RoadBlockSize) * 2 - 2);
                 const double PreviousDeckZ = RoadDeckHeights[SampleIndex - 1];
                 for (int32 LongIndex = 0; LongIndex <= LongitudinalSteps; ++LongIndex)
                 {
@@ -2008,10 +2008,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         StampDeckZ / RoadBlockSize)) - 1;
                     for (int32 LateralIndex = 0; LateralIndex <= LateralSteps; ++LateralIndex)
                     {
-                        const double LateralT = static_cast<double>(LateralIndex) /
-                            static_cast<double>(LateralSteps);
                         const double LateralOffset = -SegmentHalfRoadWidth +
-                            FullRoadWidth * LateralT;
+                            RoadBlockSize * 0.5 +
+                            RoadBlockSize * 0.5 * static_cast<double>(LateralIndex);
                         const FVector2D StampPoint = StampCenter +
                             Perp * static_cast<float>(LateralOffset);
                         const FIntVector Cell(
@@ -3890,7 +3889,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const FTransform InstanceTransform(
             FRotator::ZeroRotator,
             LocalCenter,
-            FVector(BlockInstanceScale));
+            FVector(BlockInstanceScale, BlockInstanceScale, BlockInstanceScale));
         if (Block == EVoxelBlock::Asphalt && AsphaltRoadBlocks)
         {
             const int32 InstanceIndex = AsphaltRoadBlocks->AddInstance(InstanceTransform);
