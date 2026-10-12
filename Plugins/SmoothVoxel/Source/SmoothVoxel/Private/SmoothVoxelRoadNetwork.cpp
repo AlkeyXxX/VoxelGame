@@ -2108,14 +2108,17 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             : HashA < HashB;
     });
 
-    // Materialize visible POIs at the same deterministic sites used by the road
-    // planner. Each green-biome site gets one compact landmark; the road planner
-    // below adds direct dirt access spurs for non-hub sites.
+    // Materialize deterministic, biome-specific landmarks at the same candidate sites
+    // used by the road planner. All parts are instanced primitive meshes to keep
+    // draw-call and actor overhead low even on the largest world size.
     int32 GreenPOICount = 0;
     int32 CabinPOICount = 0;
     int32 CampPOICount = 0;
     int32 RuinPOICount = 0;
     int32 LookoutPOICount = 0;
+    int32 DesertPOICount = 0;
+    int32 MountainPOICount = 0;
+    int32 SnowPOICount = 0;
     for (const FIntPoint& SiteCell : SortedSiteCells)
     {
         const FVector2D* Site = Sites.Find(SiteCell);
@@ -2123,11 +2126,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
         const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(
             Site->X, Site->Y, GenerationSettings);
-        if (Biome != ESVoxelBiome::Forest && Biome != ESVoxelBiome::Plains)
-        {
-            continue;
-        }
-
         const double GroundZ = FSVoxelGenerator::SampleSurfaceHeight(
             Site->X, Site->Y, GenerationSettings);
         const uint32 SiteHash = StableSiteHash(SiteCell);
@@ -2155,84 +2153,158 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         };
 
         const uint32 Roll = SiteHash % 100u;
-        const bool bForest = Biome == ESVoxelBiome::Forest;
-        const bool bBuildCabin = bForest ? Roll < 48u : Roll < 28u;
-        const bool bBuildCamp = bForest
-            ? (Roll >= 48u && Roll < 73u)
-            : (Roll >= 28u && Roll < 48u);
-        const bool bBuildRuins = bForest
-            ? (Roll >= 73u && Roll < 91u)
-            : (Roll >= 48u && Roll < 77u);
 
-        if (bBuildCabin)
+        if (Biome == ESVoxelBiome::Desert)
         {
-            // Timber waystation: foundation, cabin body, pitched roof, door,
-            // windows, chimney and a small porch.
-            PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(6.8f, 5.6f, 0.25f));
-            PlacePOIPart(POIWoodCubes, 0, 0, 150, FVector(4.4f, 3.6f, 2.9f));
-            PlacePOIPart(POIRoofCones, 0, 0, 335, FVector(5.4f, 4.8f, 2.25f));
-            PlacePOIPart(POIDarkCubes, 0, -184, 88, FVector(0.75f, 0.16f, 1.75f));
-            PlacePOIPart(POIDarkCubes, -124, -186, 190, FVector(0.62f, 0.14f, 0.56f));
-            PlacePOIPart(POIDarkCubes, 124, -186, 190, FVector(0.62f, 0.14f, 0.56f));
-            PlacePOIPart(POIStoneCylinders, 142, 92, 365, FVector(0.55f, 0.55f, 1.1f));
-            PlacePOIPart(POIWoodCubes, 0, -258, 24, FVector(3.8f, 1.5f, 0.24f));
-            ++CabinPOICount;
-        }
-        else if (bBuildCamp)
-        {
-            // Camps include a small tent, a ring of stones and crossed firewood.
-            PlacePOIPart(POIWoodCubes, 190, 125, 12, FVector(3.5f, 2.9f, 0.22f));
-            PlacePOIPart(POIRoofCones, 190, 125, 120, FVector(2.8f, 2.45f, 2.35f));
-            PlacePOIPart(POIWoodCylinders, 80, 125, 62, FVector(0.23f, 0.23f, 1.25f));
-            PlacePOIPart(POIWoodCylinders, 300, 125, 62, FVector(0.23f, 0.23f, 1.25f));
-            for (int32 StoneIndex = 0; StoneIndex < 8; ++StoneIndex)
+            if (Roll < 68u)
             {
-                const float Angle = static_cast<float>(StoneIndex) * 45.0f;
-                const FVector2D Offset(
-                    FMath::Cos(FMath::DegreesToRadians(Angle)) * 92.0f,
-                    FMath::Sin(FMath::DegreesToRadians(Angle)) * 92.0f);
-                PlacePOIPart(POIStoneSpheres, Offset.X, Offset.Y, 22,
-                    FVector(0.42f, 0.42f, 0.28f));
+                // Sandstone gate: two weathered columns, a heavy lintel and
+                // scattered stone fragments make a readable desert ruin.
+                PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(6.3f, 5.2f, 0.24f));
+                PlacePOIPart(POIStoneCylinders, -178, 0, 112, FVector(0.88f, 0.88f, 2.2f));
+                PlacePOIPart(POIStoneCylinders, 178, 0, 112, FVector(0.88f, 0.88f, 2.2f));
+                PlacePOIPart(POIStoneCubes, 0, 0, 231, FVector(4.5f, 0.82f, 0.42f));
+                PlacePOIPart(POIStoneCylinders, 0, 170, 78, FVector(0.62f, 0.62f, 1.55f));
+                PlacePOIPart(POIStoneSpheres, -270, 185, 25, FVector(0.62f, 0.52f, 0.36f));
+                PlacePOIPart(POIStoneSpheres, 275, -165, 25, FVector(0.50f, 0.62f, 0.32f));
             }
-            PlacePOIPart(POIWoodCylinders, -20, 0, 32,
-                FVector(1.65f, 0.17f, 0.17f), 0.0f, 90.0f);
-            PlacePOIPart(POIWoodCylinders, 0, -20, 42,
-                FVector(1.65f, 0.17f, 0.17f), 90.0f, 90.0f);
-            ++CampPOICount;
+            else
+            {
+                // Isolated desert marker / obelisk with a capped crown.
+                PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(4.8f, 4.8f, 0.22f));
+                PlacePOIPart(POIStoneCylinders, 0, 0, 148, FVector(0.9f, 0.9f, 2.85f));
+                PlacePOIPart(POIRoofCones, 0, 0, 302, FVector(1.05f, 1.05f, 0.72f));
+                PlacePOIPart(POIStoneCylinders, -145, 145, 45, FVector(0.55f, 0.55f, 0.9f));
+                PlacePOIPart(POIStoneCylinders, 145, -145, 45, FVector(0.55f, 0.55f, 0.9f));
+                PlacePOIPart(POIStoneSpheres, -145, -145, 30, FVector(0.5f, 0.5f, 0.35f));
+                PlacePOIPart(POIStoneSpheres, 145, 145, 30, FVector(0.5f, 0.5f, 0.35f));
+            }
+            ++DesertPOICount;
         }
-        else if (bBuildRuins)
+        else if (Biome == ESVoxelBiome::Snow)
         {
-            // Overgrown stone shrine with a broken lintel and fallen stones.
-            PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(6.8f, 6.2f, 0.25f));
-            PlacePOIPart(POIStoneCubes, -175, -145, 115, FVector(0.78f, 0.78f, 2.3f));
-            PlacePOIPart(POIStoneCubes, 175, -145, 115, FVector(0.78f, 0.78f, 2.3f));
-            PlacePOIPart(POIStoneCubes, -175, 145, 80, FVector(0.78f, 0.78f, 1.6f));
-            PlacePOIPart(POIStoneCubes, 175, 145, 80, FVector(0.78f, 0.78f, 1.6f));
-            PlacePOIPart(POIStoneCubes, 0, -145, 250, FVector(4.3f, 0.85f, 0.55f));
-            PlacePOIPart(POIStoneCubes, 0, 145, 210, FVector(4.3f, 0.85f, 0.45f));
-            PlacePOIPart(POIStoneCubes, 0, 0, 48, FVector(1.55f, 1.55f, 0.8f));
-            PlacePOIPart(POIStoneSpheres, -365, 260, 26, FVector(0.7f, 0.7f, 0.42f));
-            PlacePOIPart(POIStoneSpheres, 355, 285, 26, FVector(0.55f, 0.55f, 0.35f));
-            ++RuinPOICount;
+            if (Roll < 56u)
+            {
+                // Compact winter waystation: timber cabin, porch, dark doorway
+                // and chimney, using the same low-overhead instanced primitives.
+                PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(6.2f, 5.4f, 0.24f));
+                PlacePOIPart(POIWoodCubes, 0, 0, 138, FVector(3.9f, 3.15f, 2.55f));
+                PlacePOIPart(POIRoofCones, 0, 0, 305, FVector(4.9f, 4.1f, 1.75f));
+                PlacePOIPart(POIDarkCubes, 0, -165, 82, FVector(0.72f, 0.16f, 1.55f));
+                PlacePOIPart(POIDarkCubes, -102, -166, 175, FVector(0.48f, 0.13f, 0.42f));
+                PlacePOIPart(POIStoneCylinders, 128, 74, 330, FVector(0.42f, 0.42f, 0.92f));
+                PlacePOIPart(POIWoodCubes, 0, -238, 22, FVector(3.1f, 1.15f, 0.20f));
+            }
+            else
+            {
+                // Ridge signal tower with a raised beacon platform and a steep roof.
+                PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(4.7f, 4.7f, 0.24f));
+                PlacePOIPart(POIWoodCubes, -122, -122, 156, FVector(0.32f, 0.32f, 3.1f));
+                PlacePOIPart(POIWoodCubes, 122, -122, 156, FVector(0.32f, 0.32f, 3.1f));
+                PlacePOIPart(POIWoodCubes, -122, 122, 156, FVector(0.32f, 0.32f, 3.1f));
+                PlacePOIPart(POIWoodCubes, 122, 122, 156, FVector(0.32f, 0.32f, 3.1f));
+                PlacePOIPart(POIWoodCubes, 0, 0, 323, FVector(3.5f, 3.5f, 0.24f));
+                PlacePOIPart(POIWoodCubes, 0, -158, 353, FVector(3.25f, 0.16f, 0.34f));
+                PlacePOIPart(POIWoodCubes, 0, 158, 353, FVector(3.25f, 0.16f, 0.34f));
+                PlacePOIPart(POIRoofCones, 0, 0, 438, FVector(2.9f, 2.9f, 1.22f));
+                PlacePOIPart(POIDarkCubes, 0, 0, 365, FVector(0.85f, 0.85f, 0.55f));
+            }
+            ++SnowPOICount;
+        }
+        else if (Biome == ESVoxelBiome::Mountain)
+        {
+            // Mountain cairn / trail marker: stacked masonry, a capstone and
+            // scattered boulders remain visible without introducing new assets.
+            PlacePOIPart(POIStoneCubes, 0, 0, 15, FVector(4.8f, 4.8f, 0.3f));
+            PlacePOIPart(POIStoneCubes, 0, 0, 58, FVector(1.7f, 1.55f, 0.62f));
+            PlacePOIPart(POIStoneCubes, 0, 0, 111, FVector(1.25f, 1.2f, 0.48f));
+            PlacePOIPart(POIStoneCylinders, 0, 0, 182, FVector(0.58f, 0.58f, 1.15f));
+            PlacePOIPart(POIRoofCones, 0, 0, 258, FVector(0.82f, 0.82f, 0.48f));
+            PlacePOIPart(POIStoneSpheres, -145, 82, 25, FVector(0.62f, 0.55f, 0.42f));
+            PlacePOIPart(POIStoneSpheres, 140, -92, 25, FVector(0.52f, 0.48f, 0.36f));
+            ++MountainPOICount;
         }
         else
         {
-            // Timber lookout tower, elevated platform, guardrails and roof.
-            PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(4.6f, 4.6f, 0.25f));
-            PlacePOIPart(POIWoodCubes, -145, -145, 230, FVector(0.36f, 0.36f, 4.6f));
-            PlacePOIPart(POIWoodCubes, 145, -145, 230, FVector(0.36f, 0.36f, 4.6f));
-            PlacePOIPart(POIWoodCubes, -145, 145, 230, FVector(0.36f, 0.36f, 4.6f));
-            PlacePOIPart(POIWoodCubes, 145, 145, 230, FVector(0.36f, 0.36f, 4.6f));
-            PlacePOIPart(POIWoodCubes, 0, 0, 465, FVector(4.0f, 4.0f, 0.3f));
-            PlacePOIPart(POIWoodCubes, 0, -190, 505, FVector(3.8f, 0.18f, 0.48f));
-            PlacePOIPart(POIWoodCubes, 0, 190, 505, FVector(3.8f, 0.18f, 0.48f));
-            PlacePOIPart(POIWoodCubes, -190, 0, 505, FVector(0.18f, 3.8f, 0.48f));
-            PlacePOIPart(POIWoodCubes, 190, 0, 505, FVector(0.18f, 3.8f, 0.48f));
-            PlacePOIPart(POIWoodCubes, 0, 0, 580, FVector(2.5f, 2.5f, 1.5f));
-            PlacePOIPart(POIRoofCones, 0, 0, 720, FVector(3.5f, 3.5f, 1.25f));
-            ++LookoutPOICount;
+            const bool bForest = Biome == ESVoxelBiome::Forest;
+            const bool bBuildCabin = bForest ? Roll < 48u : Roll < 28u;
+            const bool bBuildCamp = bForest
+                ? (Roll >= 48u && Roll < 73u)
+                : (Roll >= 28u && Roll < 48u);
+            const bool bBuildRuins = bForest
+                ? (Roll >= 73u && Roll < 91u)
+                : (Roll >= 48u && Roll < 77u);
+
+            if (bBuildCabin)
+            {
+                // Timber waystation: foundation, cabin body, pitched roof, door,
+                // windows, chimney and a small porch.
+                PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(6.8f, 5.6f, 0.25f));
+                PlacePOIPart(POIWoodCubes, 0, 0, 150, FVector(4.4f, 3.6f, 2.9f));
+                PlacePOIPart(POIRoofCones, 0, 0, 335, FVector(5.4f, 4.8f, 2.25f));
+                PlacePOIPart(POIDarkCubes, 0, -184, 88, FVector(0.75f, 0.16f, 1.75f));
+                PlacePOIPart(POIDarkCubes, -124, -186, 190, FVector(0.62f, 0.14f, 0.56f));
+                PlacePOIPart(POIDarkCubes, 124, -186, 190, FVector(0.62f, 0.14f, 0.56f));
+                PlacePOIPart(POIStoneCylinders, 142, 92, 365, FVector(0.55f, 0.55f, 1.1f));
+                PlacePOIPart(POIWoodCubes, 0, -258, 24, FVector(3.8f, 1.5f, 0.24f));
+                ++CabinPOICount;
+            }
+            else if (bBuildCamp)
+            {
+                // Camps include a small tent, a ring of stones and crossed firewood.
+                PlacePOIPart(POIWoodCubes, 190, 125, 12, FVector(3.5f, 2.9f, 0.22f));
+                PlacePOIPart(POIRoofCones, 190, 125, 120, FVector(2.8f, 2.45f, 2.35f));
+                PlacePOIPart(POIWoodCylinders, 80, 125, 62, FVector(0.23f, 0.23f, 1.25f));
+                PlacePOIPart(POIWoodCylinders, 300, 125, 62, FVector(0.23f, 0.23f, 1.25f));
+                for (int32 StoneIndex = 0; StoneIndex < 8; ++StoneIndex)
+                {
+                    const float Angle = static_cast<float>(StoneIndex) * 45.0f;
+                    const FVector2D Offset(
+                        FMath::Cos(FMath::DegreesToRadians(Angle)) * 92.0f,
+                        FMath::Sin(FMath::DegreesToRadians(Angle)) * 92.0f);
+                    PlacePOIPart(POIStoneSpheres, Offset.X, Offset.Y, 22,
+                        FVector(0.42f, 0.42f, 0.28f));
+                }
+                PlacePOIPart(POIWoodCylinders, -20, 0, 32,
+                    FVector(1.65f, 0.17f, 0.17f), 0.0f, 90.0f);
+                PlacePOIPart(POIWoodCylinders, 0, -20, 42,
+                    FVector(1.65f, 0.17f, 0.17f), 90.0f, 90.0f);
+                ++CampPOICount;
+            }
+            else if (bBuildRuins)
+            {
+                // Overgrown stone shrine with a broken lintel and fallen stones.
+                PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(6.8f, 6.2f, 0.25f));
+                PlacePOIPart(POIStoneCubes, -175, -145, 115, FVector(0.78f, 0.78f, 2.3f));
+                PlacePOIPart(POIStoneCubes, 175, -145, 115, FVector(0.78f, 0.78f, 2.3f));
+                PlacePOIPart(POIStoneCubes, -175, 145, 80, FVector(0.78f, 0.78f, 1.6f));
+                PlacePOIPart(POIStoneCubes, 175, 145, 80, FVector(0.78f, 0.78f, 1.6f));
+                PlacePOIPart(POIStoneCubes, 0, -145, 250, FVector(4.3f, 0.85f, 0.55f));
+                PlacePOIPart(POIStoneCubes, 0, 145, 210, FVector(4.3f, 0.85f, 0.45f));
+                PlacePOIPart(POIStoneCubes, 0, 0, 48, FVector(1.55f, 1.55f, 0.8f));
+                PlacePOIPart(POIStoneSpheres, -365, 260, 26, FVector(0.7f, 0.7f, 0.42f));
+                PlacePOIPart(POIStoneSpheres, 355, 285, 26, FVector(0.55f, 0.55f, 0.35f));
+                ++RuinPOICount;
+            }
+            else
+            {
+                // Timber lookout tower, elevated platform, guardrails and roof.
+                PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(4.6f, 4.6f, 0.25f));
+                PlacePOIPart(POIWoodCubes, -145, -145, 230, FVector(0.36f, 0.36f, 4.6f));
+                PlacePOIPart(POIWoodCubes, 145, -145, 230, FVector(0.36f, 0.36f, 4.6f));
+                PlacePOIPart(POIWoodCubes, -145, 145, 230, FVector(0.36f, 0.36f, 4.6f));
+                PlacePOIPart(POIWoodCubes, 145, 145, 230, FVector(0.36f, 0.36f, 4.6f));
+                PlacePOIPart(POIWoodCubes, 0, 0, 465, FVector(4.0f, 4.0f, 0.3f));
+                PlacePOIPart(POIWoodCubes, 0, -190, 505, FVector(3.8f, 0.18f, 0.48f));
+                PlacePOIPart(POIWoodCubes, 0, 190, 505, FVector(3.8f, 0.18f, 0.48f));
+                PlacePOIPart(POIWoodCubes, -190, 0, 505, FVector(0.18f, 3.8f, 0.48f));
+                PlacePOIPart(POIWoodCubes, 190, 0, 505, FVector(0.18f, 3.8f, 0.48f));
+                PlacePOIPart(POIWoodCubes, 0, 0, 580, FVector(2.5f, 2.5f, 1.5f));
+                PlacePOIPart(POIRoofCones, 0, 0, 720, FVector(3.5f, 3.5f, 1.25f));
+                ++LookoutPOICount;
+            }
+            ++GreenPOICount;
         }
-        ++GreenPOICount;
     }
 
     const int32 TargetMajorCityCount = Sites.Num() <= 1
@@ -3770,8 +3842,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads/POIs: %d green POIs (%d cabins, %d camps, %d ruins, %d lookouts); %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges, %d embankment side quads; skipped %d routes and %d unsafe bridges."),
+        TEXT("SmoothVoxel roads/POIs: %d temperate POIs (%d cabins, %d camps, %d ruins, %d lookouts), %d desert landmarks, %d mountain landmarks, %d snow landmarks; %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges, %d embankment side quads; skipped %d routes and %d unsafe bridges."),
         GreenPOICount, CabinPOICount, CampPOICount, RuinPOICount, LookoutPOICount,
+        DesertPOICount, MountainPOICount, SnowPOICount,
         MajorCityCells.Num(), DesertMajorCityCount, SnowMajorCityCount,
         RoadHubCells.Num(), CoreTemperateHubCells.Num(),
         RoadSegmentCount, HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
