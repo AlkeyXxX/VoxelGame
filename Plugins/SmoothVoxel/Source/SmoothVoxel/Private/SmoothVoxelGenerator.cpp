@@ -138,6 +138,22 @@ namespace
         const int32 BaseX = static_cast<int32>(std::floor(X / Step));
         const int32 BaseY = static_cast<int32>(std::floor(Y / Step));
         const int32 BaseZ = static_cast<int32>(std::floor(Z / Step));
+        bool bMayHaveRoadBlock = bHasRoadBlocks;
+        if (bMayHaveRoadBlock && Settings.RoadSampleBins.IsValid())
+        {
+            constexpr int32 RoadSampleBinSize = 8;
+            const auto FloorDivideBySampleBin = [RoadSampleBinSize](int32 Value) -> int32
+            {
+                return Value >= 0
+                    ? Value / RoadSampleBinSize
+                    : (Value - (RoadSampleBinSize - 1)) / RoadSampleBinSize;
+            };
+            const FIntVector SampleBin(
+                FloorDivideBySampleBin(BaseX),
+                FloorDivideBySampleBin(BaseY),
+                FloorDivideBySampleBin(BaseZ));
+            bMayHaveRoadBlock = Settings.RoadSampleBins->Contains(SampleBin);
+        }
 
         // Block placement is a visual/collision actor and must not carve
         // procedural terrain. State +2 is only a logical occupancy marker.
@@ -149,7 +165,7 @@ namespace
         // solid field as terrain. Their box SDF is unioned first; persistent
         // MinedNodes are applied afterwards so breaking a road cell removes it
         // from the terrain mesh and its collision on the next nearby chunk build.
-        if (bHasRoadBlocks)
+        if (bMayHaveRoadBlock)
         {
             const double RoadHalfExtent = Step * 0.5 +
                 FMath::Max(0.05, Step * 0.005);
