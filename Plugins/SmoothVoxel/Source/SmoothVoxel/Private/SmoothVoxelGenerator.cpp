@@ -870,17 +870,14 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // channels, while keeping RiverScale as the user-facing tuning control.
     const double Scale = FMath::Max(
         0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
-    const double ConfiguredHalfWidth =
-        FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
-    if (ConfiguredHalfWidth <= 0.0)
+    const double HalfWidth = FMath::Max(
+        0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
+    if (HalfWidth <= 0.0)
     {
         return;
     }
-    // Keep the channel visible in the coarsest terrain lattice allowed by the
-    // octree's leaf budget; otherwise water can span an uncut terrain surface.
-    const double HalfWidth = FMath::Max(
-        ConfiguredHalfWidth,
-        std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 1.25);
+    // RiverHalfWidth directly controls the visible channel width. Do not enlarge
+    // the water mask at distant LODs; terrain carving must not change river width.
 
     // Domain warp makes the zero-contours meander instead of looking like a
     // repeated grid. The signed field also provides a stable local channel
@@ -898,7 +895,7 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // the same signed field. The inner mask stays narrow enough for a riverbed;
     // the outer bank mask spans tens of metres and is faded at its outer edge.
     const double Threshold = FMath::Clamp(HalfWidth * Scale * 2.0, 0.0001, 0.20);
-    const double BankHalfWidth = FMath::Max(ConfiguredHalfWidth * 10.0, 5000.0);
+    const double BankHalfWidth = FMath::Max(HalfWidth * 10.0, 5000.0);
     const double BankThreshold = FMath::Max(
         Threshold,
         FMath::Min(BankHalfWidth * Scale * 2.0, 0.20));
@@ -1186,15 +1183,12 @@ double FSVoxelGenerator::SampleSurfaceHeight(
         {
             const double RiverScale = FMath::Max(
                 0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
-            const double ConfiguredRiverHalfWidth = FMath::Max(
-                0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
             const double RiverHalfWidth = FMath::Max(
-                ConfiguredRiverHalfWidth,
-                std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 1.25);
+                0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
             const double ChannelThreshold = FMath::Clamp(
                 RiverHalfWidth * RiverScale * 2.0, 0.0001, 0.20);
             const double BankHalfWidth = FMath::Max(
-                ConfiguredRiverHalfWidth * 10.0, 5000.0);
+                RiverHalfWidth * 10.0, 5000.0);
             const double BankThreshold = FMath::Max(
                 ChannelThreshold,
                 FMath::Min(BankHalfWidth * RiverScale * 2.0, 0.20));
@@ -1221,7 +1215,11 @@ double FSVoxelGenerator::SampleSurfaceHeight(
         // bank profile affects adjacent terrain only, not the water-channel depth.
         const double RiverBedLevel = static_cast<double>(S.RiverWaterLevel) -
             std::abs(static_cast<double>(S.RiverDepth));
-        SurfaceHeight = FMath::Lerp(SurfaceHeight, RiverBedLevel, RiverInfluence);
+        // Lerp alone raises low terrain toward the target bed, creating a raised
+        // ribbon. A riverbed is a cut: preserve any ground already below target.
+        const double CarvedChannelHeight = FMath::Lerp(
+            SurfaceHeight, RiverBedLevel, static_cast<double>(RiverInfluence));
+        SurfaceHeight = FMath::Min(SurfaceHeight, CarvedChannelHeight);
     }
 
     float LakeInfluence = 0.0f;
@@ -1231,8 +1229,10 @@ double FSVoxelGenerator::SampleSurfaceHeight(
     {
         const double LakeBedLevel = static_cast<double>(LakeWaterLevel) -
             FMath::Min(500.0, std::abs(static_cast<double>(S.LakeDepth)));
-        SurfaceHeight = FMath::Lerp(
+        // A lake basin must never lift the existing terrain up to its target floor.
+        const double CarvedLakeHeight = FMath::Lerp(
             SurfaceHeight, LakeBedLevel, static_cast<double>(LakeInfluence));
+        SurfaceHeight = FMath::Min(SurfaceHeight, CarvedLakeHeight);
     }
     return SurfaceHeight;
 }
