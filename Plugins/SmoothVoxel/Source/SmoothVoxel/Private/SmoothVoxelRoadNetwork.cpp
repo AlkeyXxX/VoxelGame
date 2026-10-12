@@ -184,7 +184,7 @@ ASmoothVoxelRoadNetwork::GetRoadBlockSnapshotForChunk(
     const int32 MaxCellY = ChunkOriginCells.Y + CellsPerAxis * LodStride + Border;
     const int32 MaxCellZ = ChunkOriginCells.Z + CellsPerAxis * LodStride + Border;
 
-    const auto FloorDivideByBin = [](int32 Value) -> int32
+    const auto FloorDivideByBin = [BinSize](int32 Value) -> int32
     {
         return Value >= 0 ? Value / BinSize : (Value - (BinSize - 1)) / BinSize;
     };
@@ -3866,7 +3866,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // into its immutable settings snapshot, so distant terrain samples pay no
     // hash-lookup cost for roads on the other side of the map.
     constexpr int32 RoadBlockBinSize = 32;
-    const auto FloorDivideByRoadBin = [](int32 Value) -> int32
+    const auto FloorDivideByRoadBin = [RoadBlockBinSize](int32 Value) -> int32
     {
         return Value >= 0
             ? Value / RoadBlockBinSize
