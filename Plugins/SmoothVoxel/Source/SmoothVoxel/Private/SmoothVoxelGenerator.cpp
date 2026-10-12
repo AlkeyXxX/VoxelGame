@@ -673,6 +673,19 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         (1.0 - static_cast<double>(HillBlend)) *
         (1.0 - static_cast<double>(MountainBlend));
 
+    // Even where the configured desert hill mask is sparse, keep broad,
+    // drivable rolling terrain rather than kilometre-wide perfectly flat plains.
+    // The relief fades out where real hills begin and is applied before POI
+    // plateaus, so future city clearings can remain flat.
+    const double DesertRollingNoise = FBM2D(
+        X * RegionScale * 1.15,
+        Y * RegionScale * 1.15,
+        S.Seed + 6449);
+    const double DesertRollingRelief = DesertRollingNoise * 1200.0 *
+        static_cast<double>(DesertBlend) *
+        (1.0 - static_cast<double>(HillBlend)) *
+        (1.0 - static_cast<double>(MountainBlend));
+
     // Mountain height is a separate, rare macro-form. Its broad noise is
     // continuous across chunks/LODs and cannot create narrow, jagged peaks.
     const double MountainRegionNoise = FBM2D(
@@ -692,7 +705,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         1.5 * static_cast<double>(DesertBlend);
 
     return static_cast<double>(S.BaseHeight) + MicroRelief + HillRelief +
-        GentleRelief + MountainLift + DuneLift;
+        GentleRelief + DesertRollingRelief + MountainLift + DuneLift;
 }
 
 
@@ -875,10 +888,12 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // the same signed field. The inner mask stays narrow enough for a riverbed;
     // the outer bank mask spans tens of metres and is faded at its outer edge.
     const double Threshold = FMath::Clamp(HalfWidth * Scale * 2.0, 0.0001, 0.20);
-    const double BankHalfWidth = FMath::Max(HalfWidth * 10.0, 5000.0);
+    // Extend the valley shoulder beyond the narrow channel so the cut blends
+    // through the final part of a gorge instead of stopping at an abrupt-looking lip.
+    const double BankHalfWidth = FMath::Max(HalfWidth * 12.0, 6000.0);
     const double BankThreshold = FMath::Max(
         Threshold,
-        FMath::Min(BankHalfWidth * Scale * 2.0, 0.20));
+        FMath::Min(BankHalfWidth * Scale * 2.0, 0.24));
     const float T = FMath::Clamp(
         static_cast<float>(std::abs(Field) / Threshold),
         0.0f,
@@ -891,7 +906,7 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     {
         const float BankDistance01 = FMath::Clamp(
             static_cast<float>(std::abs(Field) / BankThreshold), 0.0f, 1.0f);
-        const float BankFadeT = FMath::Clamp((BankDistance01 - 0.70f) / 0.30f, 0.0f, 1.0f);
+        const float BankFadeT = FMath::Clamp((BankDistance01 - 0.78f) / 0.22f, 0.0f, 1.0f);
         const float BankFade = BankFadeT * BankFadeT * (3.0f - 2.0f * BankFadeT);
         *OutBankInfluence = 1.0f - BankFade;
     }
@@ -1148,10 +1163,10 @@ double FSVoxelGenerator::SampleSurfaceHeight(
                 0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
             const double ChannelThreshold = FMath::Clamp(
                 RiverHalfWidth * RiverScale * 2.0, 0.0001, 0.20);
-            const double BankHalfWidth = FMath::Max(RiverHalfWidth * 10.0, 5000.0);
+            const double BankHalfWidth = FMath::Max(RiverHalfWidth * 12.0, 6000.0);
             const double BankThreshold = FMath::Max(
                 ChannelThreshold,
-                FMath::Min(BankHalfWidth * RiverScale * 2.0, 0.20));
+                FMath::Min(BankHalfWidth * RiverScale * 2.0, 0.24));
             const double BankProgress = FMath::Clamp(
                 (std::abs(static_cast<double>(RiverSignedField)) - ChannelThreshold) /
                     FMath::Max(0.0001, BankThreshold - ChannelThreshold),
