@@ -1705,12 +1705,28 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             if (FMath::IsNearlyEqual(FullRoadWidth, HighwayRoadWidth, 1.0))
             {
                 HighwayRoadPaths.Add(Path);
-                for (const FVector2D& HighwayPoint : Path)
+                // Keep the overlap index coarse: route samples no farther apart
+                // than roughly half one A* cell are sufficient for road-width checks.
+                const int32 HighwaySampleStride = FMath::Max(
+                    1, FMath::FloorToInt(
+                        RouteGridStep / FMath::Max(1.0, SafeSampleSpacing) * 0.5));
+                for (int32 HighwaySampleIndex = 0;
+                    HighwaySampleIndex < Path.Num();
+                    HighwaySampleIndex += HighwaySampleStride)
                 {
+                    const FVector2D& HighwayPoint = Path[HighwaySampleIndex];
                     const FIntPoint SampleCell(
                         FMath::RoundToInt(HighwayPoint.X / RouteGridStep),
                         FMath::RoundToInt(HighwayPoint.Y / RouteGridStep));
                     HighwayRouteSamplesByCell.FindOrAdd(SampleCell).Add(HighwayPoint);
+                }
+                if (Path.Num() > 0)
+                {
+                    const FVector2D& LastHighwayPoint = Path.Last();
+                    const FIntPoint LastSampleCell(
+                        FMath::RoundToInt(LastHighwayPoint.X / RouteGridStep),
+                        FMath::RoundToInt(LastHighwayPoint.Y / RouteGridStep));
+                    HighwayRouteSamplesByCell.FindOrAdd(LastSampleCell).Add(LastHighwayPoint);
                 }
             }
             if (!bForceGridLine &&
