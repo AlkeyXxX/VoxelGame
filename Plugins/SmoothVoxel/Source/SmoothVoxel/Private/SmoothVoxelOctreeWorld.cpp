@@ -1939,6 +1939,13 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() cons
 	const float Step = GetEffectiveBlockSize();
 	FSVoxelGenerationSettings Settings =
 		MakeGenerationSettings(FVector::ZeroVector, FIntVector::ZeroValue, Step, Step, false);
+	// Interaction probes march through arbitrary world coordinates, so they use
+	// the full shared road map; chunk generation gets a small spatially filtered
+	// map from MakeGenerationSettings instead.
+	if (IsValid(RoadNetworkActor))
+	{
+		Settings.RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshot();
+	}
 	// Interaction probes need the complete immutable world snapshots.
 	Settings.BlockEdits = BlockEditSnapshot;
 	Settings.BlockEditCenters = BlockEditCenterSnapshot;
