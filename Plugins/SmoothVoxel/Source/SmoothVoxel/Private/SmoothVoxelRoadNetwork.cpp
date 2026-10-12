@@ -1919,6 +1919,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const auto AddEmbankmentToe = [&](
             const FVector2D& EdgeXY,
             const FVector2D& Outward,
+            const FVector2D& RoadTangent,
             double DeckZ,
             int32 RoadEdgeVertex,
             double U,
@@ -1984,7 +1985,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 static_cast<float>(1.0 + Run / 1000.0)));
             VertexColors.Add(FLinearColor(0.42f, 0.31f, 0.21f, 1.0f));
             Tangents.Add(FProcMeshTangent(
-                FVector(PathTangents[ToeSampleIndex].X, PathTangents[ToeSampleIndex].Y, 0.0f),
+                FVector(RoadTangent.X, RoadTangent.Y, 0.0f),
                 false));
             OutRun = Run;
             return ToeVertex;
@@ -2001,6 +2002,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const int32 LeftToe = AddEmbankmentToe(
                 LeftEdgePositions[ToeSampleIndex],
                 Perp,
+                PathTangents[ToeSampleIndex],
                 RoadDeckHeights[ToeSampleIndex],
                 LeftRoadVertex,
                 RoadDistances[ToeSampleIndex] / 1000.0,
@@ -2009,6 +2011,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const int32 RightToe = AddEmbankmentToe(
                 RightEdgePositions[ToeSampleIndex],
                 Perp * -1.0f,
+                PathTangents[ToeSampleIndex],
                 RoadDeckHeights[ToeSampleIndex],
                 RightRoadVertex,
                 RoadDistances[ToeSampleIndex] / 1000.0,
