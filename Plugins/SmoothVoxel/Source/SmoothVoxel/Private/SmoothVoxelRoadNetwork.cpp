@@ -1271,9 +1271,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // a drivable-looking ribbon through deep water.
         for (int32 SampleIndex = 0; SampleIndex < Path.Num(); ++SampleIndex)
         {
-            if ((RiverInfluences[SampleIndex] > 0.05f ||
+            const bool bInRiverCut =
+                (RiverInfluences[SampleIndex] > 0.05f ||
                  RiverBankInfluences[SampleIndex] > 0.50f) &&
-                RoadLifts[SampleIndex] < 1.0)
+                GroundHeights[SampleIndex] <
+                    static_cast<double>(GenerationSettings.RiverWaterLevel) + RoadBlockSize * 3.0;
+            if (bInRiverCut && RoadLifts[SampleIndex] < 1.0)
             {
                 ++SkippedUnsafeBridgeCount;
                 ++SkippedRouteCount;
