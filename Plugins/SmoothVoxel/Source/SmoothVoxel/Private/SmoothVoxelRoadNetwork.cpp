@@ -279,6 +279,91 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         return OutTangent.SizeSquared() > 0.5f;
     };
 
+    // Test a direct road segment against cached terrain, lake and river rules.
+    // This lets the route simplify A*'s lattice without cutting dangerous corners.
+    auto CanTravelStraight = [&](
+        const FVector2D& A,
+        const FVector2D& B,
+        double MaxGrade,
+        bool bAllowRiverBankFollowing) -> bool
+    {
+        const FVector2D Chord = B - A;
+        const double Length = Chord.Size();
+        if (Length < 1.0)
+        {
+            return GetRouteGridSample(FIntPoint(
+                FMath::RoundToInt(A.X / RouteGridStep),
+                FMath::RoundToInt(A.Y / RouteGridStep))).bAllowed;
+        }
+        const int32 Steps = FMath::Max(
+            1, FMath::CeilToInt(static_cast<float>(Length / (RouteGridStep * 0.5))));
+        const FVector2D Direction = Chord / static_cast<float>(Length);
+        FVector2D PreviousPoint = A;
+        FRoadGridSample Previous = GetRouteGridSample(FIntPoint(
+            FMath::RoundToInt(A.X / RouteGridStep),
+            FMath::RoundToInt(A.Y / RouteGridStep)));
+        if (!Previous.bAllowed)
+        {
+            return false;
+        }
+
+        for (int32 Step = 1; Step <= Steps; ++Step)
+        {
+            const FVector2D Point = A + Chord *
+                static_cast<float>(static_cast<double>(Step) / Steps);
+            const FIntPoint Cell(
+                FMath::RoundToInt(Point.X / RouteGridStep),
+                FMath::RoundToInt(Point.Y / RouteGridStep));
+            const FRoadGridSample Current = GetRouteGridSample(Cell);
+            if (!Current.bAllowed)
+            {
+                return false;
+            }
+
+            const double SegmentLength = FVector2D::Distance(PreviousPoint, Point);
+            const double Grade = FMath::Abs(Current.Height - Previous.Height) /
+                FMath::Max(1.0, SegmentLength);
+            const float RiverInfluence = 0.5f *
+                (Previous.RiverInfluence + Current.RiverInfluence);
+            const float RiverBank = 0.5f *
+                (Previous.RiverBankInfluence + Current.RiverBankInfluence);
+            bool bHasRiverTangent = false;
+            double ParallelAmount = 0.0;
+            FVector2D RiverTangent = FVector2D::ZeroVector;
+            if (GenerationSettings.bEnableRivers && RiverBank > 0.08f)
+            {
+                bHasRiverTangent = GetRiverTangent(Cell, RiverTangent);
+                if (bHasRiverTangent)
+                {
+                    ParallelAmount = FMath::Abs(
+                        FVector2D::DotProduct(Direction, RiverTangent));
+                    const bool bParallelToRiver = ParallelAmount > 0.82;
+                    if ((!bAllowRiverBankFollowing &&
+                            ((RiverInfluence > 0.10f && bParallelToRiver) ||
+                             (RiverBank > 0.38f && ParallelAmount > 0.94))) ||
+                        (bAllowRiverBankFollowing &&
+                            ((RiverInfluence > 0.35f && bParallelToRiver) ||
+                             (RiverBank > 0.72f && ParallelAmount > 0.94))))
+                    {
+                        return false;
+                    }
+                }
+            }
+            const bool bCrossRiver = bHasRiverTangent &&
+                RiverBank > 0.12f &&
+                (RiverInfluence > 0.03f || RiverBank > 0.20f) &&
+                ParallelAmount < 0.82;
+            if (Grade > (bCrossRiver ? 1.25 : MaxGrade) + 0.03)
+            {
+                return false;
+            }
+
+            PreviousPoint = Point;
+            Previous = Current;
+        }
+        return true;
+    };
+
     struct FRoadOpenNode
     {
         double Score = 0.0;
@@ -521,7 +606,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     }
 
                     const double CostGrade = bCrossRiver ? FMath::Min(Grade, 0.12) : Grade;
-                    double StepCost = TravelDistance * (1.0 + CostGrade * CostGrade * 100.0) + RiverPenalty;
+                    // Moderate slopes should not trigger long, unrealistic switchbacks.
+                    double StepCost = TravelDistance *
+                        (1.0 + CostGrade * CostGrade * 32.0) + RiverPenalty;
 
                     // Highways favour a direct corridor, but terrain and river
                     // costs can still bend the path around an obstacle.
@@ -551,6 +638,18 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         Next.Biome == ESVoxelBiome::Mountain)
                     {
                         StepCost *= 2.5;
+                    }
+                    else if (Current.Biome == ESVoxelBiome::Forest ||
+                        Next.Biome == ESVoxelBiome::Forest)
+                    {
+                        StepCost *= 0.82;
+                    }
+                    else if (Current.Biome == ESVoxelBiome::Desert ||
+                        Next.Biome == ESVoxelBiome::Desert ||
+                        Current.Biome == ESVoxelBiome::Snow ||
+                        Next.Biome == ESVoxelBiome::Snow)
+                    {
+                        StepCost *= 1.12;
                     }
 
                     const double TentativeDistance = Distance[CurrentIndex] + StepCost;
@@ -589,14 +688,41 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 continue;
             }
 
-            OutRoute.Reserve(Reversed.Num() + 2);
-            OutRoute.Add(Start);
+            TArray<FVector2D> RawRoute;
+            RawRoute.Reserve(Reversed.Num() + 2);
+            RawRoute.Add(Start);
             for (int32 PointIndex = Reversed.Num() - 1; PointIndex >= 0; --PointIndex)
             {
-                OutRoute.Add(Reversed[PointIndex]);
+                RawRoute.Add(Reversed[PointIndex]);
             }
-            OutRoute.Add(End);
-            return true;
+            RawRoute.Add(End);
+
+            // String-pull multiple grid nodes at once when a safe direct piece
+            // exists. This removes short zig-zags but keeps lake and grade detours.
+            OutRoute.Reset();
+            OutRoute.Reserve(RawRoute.Num());
+            int32 RouteIndex = 0;
+            OutRoute.Add(RawRoute[0]);
+            constexpr int32 MaxShortcutLookAhead = 24;
+            while (RouteIndex < RawRoute.Num() - 1)
+            {
+                int32 BestNextIndex = RouteIndex + 1;
+                const int32 Farthest = FMath::Min(
+                    RawRoute.Num() - 1, RouteIndex + MaxShortcutLookAhead);
+                for (int32 Candidate = Farthest; Candidate >= RouteIndex + 2; --Candidate)
+                {
+                    if (CanTravelStraight(
+                        RawRoute[RouteIndex], RawRoute[Candidate],
+                        AttemptMaxGrade, bAllowRiverBankFollowing))
+                    {
+                        BestNextIndex = Candidate;
+                        break;
+                    }
+                }
+                OutRoute.Add(RawRoute[BestNextIndex]);
+                RouteIndex = BestNextIndex;
+            }
+            return OutRoute.Num() >= 2;
         }
 
         return false;
@@ -630,6 +756,85 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 TEXT("SmoothVoxel roads: could not route from site (%d,%d) to (%d,%d)."),
                 GridCell.X, GridCell.Y, OtherGridCell.X, OtherGridCell.Y);
             return;
+        }
+
+        // Round corners into shallow curves. Reject curves which cut a lake or
+        // create a grade beyond the road/river limits, keeping that original corner.
+        if (RoutePoints.Num() >= 3)
+        {
+            TArray<FVector2D> RoundedRoute;
+            RoundedRoute.Reserve(RoutePoints.Num() * 2);
+            RoundedRoute.Add(RoutePoints[0]);
+            for (int32 CornerIndex = 1; CornerIndex < RoutePoints.Num() - 1; ++CornerIndex)
+            {
+                const FVector2D& A = RoutePoints[CornerIndex - 1];
+                const FVector2D& Corner = RoutePoints[CornerIndex];
+                const FVector2D& C = RoutePoints[CornerIndex + 1];
+                const FVector2D Incoming = (Corner - A).GetSafeNormal();
+                const FVector2D Outgoing = (C - Corner).GetSafeNormal();
+                const double InLength = FVector2D::Distance(A, Corner);
+                const double OutLength = FVector2D::Distance(Corner, C);
+                if (InLength < 1.0 || OutLength < 1.0 ||
+                    FVector2D::DotProduct(Incoming, Outgoing) > 0.985)
+                {
+                    RoundedRoute.Add(Corner);
+                    continue;
+                }
+
+                const double Radius = FMath::Min(
+                    FMath::Max(FullRoadWidth * 1.5, RouteGridStep * 0.75),
+                    FMath::Min(InLength, OutLength) * 0.35);
+                if (Radius < 50.0)
+                {
+                    RoundedRoute.Add(Corner);
+                    continue;
+                }
+                const FVector2D Entry = Corner - Incoming * static_cast<float>(Radius);
+                const FVector2D Exit = Corner + Outgoing * static_cast<float>(Radius);
+                TArray<FVector2D> Arc;
+                Arc.Reserve(5);
+                Arc.Add(Entry);
+                for (int32 CurveStep = 1; CurveStep <= 4; ++CurveStep)
+                {
+                    const double T = static_cast<double>(CurveStep) / 4.0;
+                    const double U = 1.0 - T;
+                    Arc.Add(Entry * static_cast<float>(U * U) +
+                        Corner * static_cast<float>(2.0 * U * T) +
+                        Exit * static_cast<float>(T * T));
+                }
+
+                bool bSafe = CanTravelStraight(
+                    RoundedRoute.Last(), Arc[0], 0.70, bAllowRiverBankFollowing);
+                for (int32 ArcIndex = 1; bSafe && ArcIndex < Arc.Num(); ++ArcIndex)
+                {
+                    bSafe = CanTravelStraight(
+                        Arc[ArcIndex - 1], Arc[ArcIndex], 0.70, bAllowRiverBankFollowing);
+                }
+                if (bSafe)
+                {
+                    RoundedRoute.Append(Arc);
+                }
+                else
+                {
+                    RoundedRoute.Add(Corner);
+                }
+            }
+            RoundedRoute.Add(RoutePoints.Last());
+            bool bRoundedPathSafe = true;
+            for (int32 Index = 1; Index < RoundedRoute.Num(); ++Index)
+            {
+                if (!CanTravelStraight(
+                    RoundedRoute[Index - 1], RoundedRoute[Index],
+                    0.70, bAllowRiverBankFollowing))
+                {
+                    bRoundedPathSafe = false;
+                    break;
+                }
+            }
+            if (bRoundedPathSafe)
+            {
+                RoutePoints = MoveTemp(RoundedRoute);
+            }
         }
 
         TArray<FVector2D> Path;
