@@ -248,6 +248,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     Mesh->ClearAllMeshSections();
     RoadBlockSnapshot.Reset();
+    RoadSurfaceHeightSnapshot.Reset();
+    RoadSurfaceHeights.Reset();
     RoadSampleBinsSnapshot.Reset();
     RoadBlockBins.Reset();
     RoadBlockTypes.Reset();
@@ -1927,10 +1929,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             // Keep the carriageway level side-to-side so vehicles do not roll
             // with the hillside. The new earthen bevels close the small clearance
             // gap while wider fills grow naturally on the low side of a slope.
-            // Road blocks occupy whole base cells. Snap the top upward so it
-            // never ends up buried below the analytical terrain surface.
-            const double RoadDeckZ = std::ceil(
-                (CenterGround + Lift + TerrainClearance) / RoadBlockSize) * RoadBlockSize;
+            // Keep the deck at its analytical height instead of quantizing it to
+            // whole voxel planes. Density sampling below preserves this continuous
+            // height while the integer cell key remains available for mining.
+            const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
             const double LeftZ = RoadDeckZ;
             const double RightZ = RoadDeckZ;
 
@@ -2019,6 +2021,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                             *ExistingType != EVoxelBlock::Asphalt)
                         {
                             RoadBlockTypes.Add(Cell, RoadBlockType);
+                            RoadSurfaceHeights.Add(Cell, StampDeckZ);
                         }
                     }
                 }
@@ -3909,6 +3912,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
     RoadSampleBinsSnapshot = MakeShared<FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe>(
         MoveTemp(RoadSampleBins));
+    RoadSurfaceHeightSnapshot = MakeShared<FSVoxelRoadSurfaceHeightMap, ESPMode::ThreadSafe>(
+        MoveTemp(RoadSurfaceHeights));
     // The generation map is no longer needed on the actor after bins are built.
     // Move it into the immutable snapshot instead of duplicating the full TMap.
     RoadBlockSnapshot = MakeShared<FSVoxelRoadBlockMap, ESPMode::ThreadSafe>(
