@@ -9,7 +9,6 @@
 class UProceduralMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInterface;
-class UPrimitiveComponent;
 
 /**
  * Deterministic road ribbons linking the same seed-stable candidate sites used
@@ -39,17 +38,14 @@ public:
         const FSVoxelGenerationSettings& GenerationSettings,
         bool bEnableCollision);
 
-    /** Resolve a destructible road-block HISM hit back to its world-aligned voxel cell. */
-    bool GetRoadBlockForHit(
-        const UPrimitiveComponent* HitComponent,
-        int32 InstanceIndex,
-        FIntVector& OutCell,
-        EVoxelBlock& OutBlock) const;
+    /** Road cells are shared with terrain chunk workers and remain stable until roads regenerate. */
+    TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> GetRoadBlockSnapshot() const
+    {
+        return RoadBlockSnapshot;
+    }
 
-    /** Remove only the hit road block; remaining instances retain their cell mapping. */
-    bool RemoveRoadBlockForHit(
-        const UPrimitiveComponent* HitComponent,
-        int32 InstanceIndex);
+    UMaterialInterface* GetActiveDirtRoadMaterial() const { return ActiveDirtRoadMaterial; }
+    UMaterialInterface* GetActiveAsphaltRoadMaterial() const { return ActiveAsphaltRoadMaterial; }
 
     bool GetRoadBlockTypeAtCell(const FIntVector& Cell, EVoxelBlock& OutBlock) const;
 
@@ -76,16 +72,8 @@ private:
     UPROPERTY()
     UMaterialInterface* ActiveAsphaltRoadMaterial = nullptr;
 
-    UPROPERTY()
-    UHierarchicalInstancedStaticMeshComponent* DirtRoadBlocks = nullptr;
-
-    UPROPERTY()
-    UHierarchicalInstancedStaticMeshComponent* AsphaltRoadBlocks = nullptr;
-
-    // Instance indices returned by the HISM hit result map to these cells.
-    TArray<FIntVector> DirtRoadBlockCells;
-    TArray<FIntVector> AsphaltRoadBlockCells;
     TMap<FIntVector, EVoxelBlock> RoadBlockTypes;
+    TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlockSnapshot;
 
     // Seed-stable landmarks are instanced so large worlds do not spawn hundreds
     // of independent actors.
