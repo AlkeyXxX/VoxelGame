@@ -1916,7 +1916,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         RightToeIndices.Reserve(SampleCount + 1);
         LeftToeRuns.Reserve(SampleCount + 1);
         RightToeRuns.Reserve(SampleCount + 1);
-        const double MinimumFillHeight = RoadBlockSize * 0.10;
+        // Ignore the intentional anti-z-fighting clearance on nearly level
+        // ground; only build earthwork once the edge gap is a noticeable fraction
+        // of a block. This keeps flat road meshes lightweight.
+        const double MinimumFillHeight = RoadBlockSize * 0.25;
         const double MaximumEmbankmentRun = RoadBlockSize * 18.0;
         const auto AddEmbankmentToe = [&](
             const FVector2D& EdgeXY,
@@ -1944,7 +1947,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
             double Run = FMath::Clamp(
                 EdgeFillHeight * 1.5,
-                RoadBlockSize * 0.25,
+                RoadBlockSize * 0.50,
                 MaximumEmbankmentRun);
             FVector2D ToeXY = EdgeXY + Outward * static_cast<float>(Run);
             double ToeGroundZ = FSVoxelGenerator::SampleSurfaceHeight(
@@ -1957,7 +1960,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             // estimate predicted. A hard maximum keeps very tall banks bounded.
             const double NeededRun = FMath::Clamp(
                 (DeckZ - ToeZ) * 1.5,
-                RoadBlockSize * 0.75,
+                RoadBlockSize * 0.50,
                 MaximumEmbankmentRun);
             if (NeededRun > Run + RoadBlockSize * 0.10)
             {
