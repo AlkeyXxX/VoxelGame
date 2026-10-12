@@ -253,6 +253,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     TArray<FProcMeshTangent> Tangents;
 
     int32 RoadSegmentCount = 0;
+    int32 EmbankmentSideQuadCount = 0;
     int32 TotalRoadSamples = 0;
     int32 SkippedRouteCount = 0;
     int32 BuiltBridgeCount = 0;
@@ -2040,6 +2041,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 DirtRoadTriangles.Add(LeftToeIndices[SampleIndex - 1]);
                 DirtRoadTriangles.Add(CurrentLeft);
                 DirtRoadTriangles.Add(LeftToeIndices[SampleIndex]);
+                ++EmbankmentSideQuadCount;
             }
             if (RightToeRuns[SampleIndex - 1] > 0.0 || RightToeRuns[SampleIndex] > 0.0)
             {
@@ -2049,6 +2051,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 DirtRoadTriangles.Add(RightToeIndices[SampleIndex - 1]);
                 DirtRoadTriangles.Add(RightToeIndices[SampleIndex]);
                 DirtRoadTriangles.Add(CurrentRight);
+                ++EmbankmentSideQuadCount;
             }
         }
 
@@ -3756,13 +3759,13 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads/POIs: %d green POIs (%d cabins, %d camps, %d ruins, %d lookouts); %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges; skipped %d routes and %d unsafe bridges."),
+        TEXT("SmoothVoxel roads/POIs: %d green POIs (%d cabins, %d camps, %d ruins, %d lookouts); %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges, %d embankment side quads; skipped %d routes and %d unsafe bridges."),
         GreenPOICount, CabinPOICount, CampPOICount, RuinPOICount, LookoutPOICount,
         MajorCityCells.Num(), DesertMajorCityCount, SnowMajorCityCount,
         RoadHubCells.Num(), CoreTemperateHubCells.Num(),
         RoadSegmentCount, HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
         Sites.Num(), TemperateSiteCount, DesertSiteCount, SnowSiteCount,
         TemperateHubCount, DesertHubCount, SnowHubCount,
-        SmallSettlementCells.Num(), RuralConnectorsBuilt, BuiltBridgeCount,
+        SmallSettlementCells.Num(), RuralConnectorsBuilt, BuiltBridgeCount, EmbankmentSideQuadCount,
         SkippedRouteCount, SkippedUnsafeBridgeCount);
 }
