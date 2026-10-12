@@ -459,16 +459,75 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			TwoSidedTriangleCount);
 	}
 
-	// Drop the previous render section and its collision body before applying
-	// the new snapshot. Combined with synchronous cooking on terrain chunks,
-	// this prevents a stale triangle from surviving a mined-cell rebuild.
+	// Split only the road-facing triangles into material sections. All geometry
+	// stays inside the terrain chunk's single procedural component and shares
+	// that chunk's voxel collision body; there are no per-road block actors.
+	TArray<int32> TerrainTriangles;
+	TArray<int32> AsphaltRoadTriangles;
+	TArray<int32> DirtRoadTriangles;
+	TerrainTriangles.Reserve(Data.Triangles.Num());
+	AsphaltRoadTriangles.Reserve(Data.Triangles.Num() / 8);
+	DirtRoadTriangles.Reserve(Data.Triangles.Num() / 8);
+	const bool bHasRoadMap = PendingSettings.RoadBlocks.IsValid() &&
+		PendingSettings.RoadBlocks->Num() > 0;
+	const float RoadCellStep = FMath::Max(1.0f, PendingSettings.BaseVoxelSize);
+	for (int32 TriangleIndex = 0;
+		TriangleIndex + 2 < Data.Triangles.Num();
+		TriangleIndex += 3)
+	{
+		const int32 A = Data.Triangles[TriangleIndex];
+		const int32 B = Data.Triangles[TriangleIndex + 1];
+		const int32 C = Data.Triangles[TriangleIndex + 2];
+		if (!Data.Vertices.IsValidIndex(A) ||
+			!Data.Vertices.IsValidIndex(B) ||
+			!Data.Vertices.IsValidIndex(C))
+		{
+			continue;
+		}
+
+		const FVector Center = (
+			Data.Vertices[A] + Data.Vertices[B] + Data.Vertices[C]) / 3.0f;
+		FIntVector SurfaceCell = LocalPositionToVoxelCell(Center, PendingSettings);
+		// Top faces sit exactly on the upper grid plane. Bias down very slightly
+		// so they are assigned to the solid road cell rather than the air cell above.
+		SurfaceCell.Z = FMath::FloorToInt(
+			(Center.Z + PendingSettings.ChunkOriginCells.Z * RoadCellStep -
+				RoadCellStep * 0.01f) / RoadCellStep);
+		if (bHasRoadMap)
+		{
+			if (const EVoxelBlock* RoadType = PendingSettings.RoadBlocks->Find(SurfaceCell))
+			{
+				if (*RoadType == EVoxelBlock::Asphalt)
+				{
+					AsphaltRoadTriangles.Add(A);
+					AsphaltRoadTriangles.Add(B);
+					AsphaltRoadTriangles.Add(C);
+					continue;
+				}
+				if (*RoadType == EVoxelBlock::DirtRoad)
+				{
+					DirtRoadTriangles.Add(A);
+					DirtRoadTriangles.Add(B);
+					DirtRoadTriangles.Add(C);
+					continue;
+				}
+			}
+		}
+
+		TerrainTriangles.Add(A);
+		TerrainTriangles.Add(B);
+		TerrainTriangles.Add(C);
+	}
+
+	// Drop the previous render sections and collision bodies before applying the
+	// new snapshot, preventing stale triangles after road or terrain mining.
 	Mesh->ClearAllMeshSections();
-	if (!Data.IsEmpty())
+	if (TerrainTriangles.Num() > 0)
 	{
 		Mesh->CreateMeshSection_LinearColor(
 			0,
 			Data.Vertices,
-			Data.Triangles,
+			TerrainTriangles,
 			Data.Normals,
 			Data.UV0,
 			TArray<FVector2D>(),
@@ -493,7 +552,41 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			EditedBackfaceData.VertexColors,
 			EditedBackfaceData.Tangents,
 			false);
-		Mesh->SetMaterial(1, Mesh->GetMaterial(0));
+		Mesh->SetMaterial(1, Material);
+	}
+
+	if (AsphaltRoadTriangles.Num() > 0)
+	{
+		Mesh->CreateMeshSection_LinearColor(
+			2,
+			Data.Vertices,
+			AsphaltRoadTriangles,
+			Data.Normals,
+			Data.UV0,
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			Data.VertexColors,
+			Data.Tangents,
+			bCreateCollision);
+		Mesh->SetMaterial(2, AsphaltRoadSectionMaterial ? AsphaltRoadSectionMaterial : Material);
+	}
+
+	if (DirtRoadTriangles.Num() > 0)
+	{
+		Mesh->CreateMeshSection_LinearColor(
+			3,
+			Data.Vertices,
+			DirtRoadTriangles,
+			Data.Normals,
+			Data.UV0,
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			TArray<FVector2D>(),
+			Data.VertexColors,
+			Data.Tangents,
+			bCreateCollision);
+		Mesh->SetMaterial(3, DirtRoadSectionMaterial ? DirtRoadSectionMaterial : Material);
 	}
 
 	// Only fine terrain casts shadows; distant coarse chunks otherwise multiply
@@ -2292,6 +2385,9 @@ void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(
 
 		const FSVoxelGenerationSettings GeneratorSettings = MakeGenerationSettings(
 			*ChunkOrigin, Pair.Key.OriginCells, DesiredBaseVoxelSize, *VoxelSize);
+		Pair.Value->SetRoadMaterials(
+			IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveDirtRoadMaterial() : DirtRoadMaterial,
+			IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveAsphaltRoadMaterial() : RoadMaterial);
 		Pair.Value->QueueBuild(
 			Pair.Key, DesiredCellsPerAxis, *VoxelSize, *FaceMask, GeneratorSettings, *bCollision);
 		EnqueueChunkBuild(Pair.Value);
@@ -3136,6 +3232,9 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 					Node.OriginCells,
 					DesiredBaseVoxelSize,
 					*VoxelSize);
+			Chunk->SetRoadMaterials(
+				IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveDirtRoadMaterial() : DirtRoadMaterial,
+				IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveAsphaltRoadMaterial() : RoadMaterial);
 			Chunk->QueueBuild(
 				Node,
 				DesiredCellsPerAxis,
