@@ -1970,8 +1970,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // Small temperate settlements are deliberately more compact than outer-region
     // cities. They still join the ordinary-road tree, but do not become highway hubs.
     TArray<FIntPoint> SmallSettlementCells;
-    const int32 DesiredSmallSettlementCount = FMath::Clamp(Sites.Num() / 16, 0, 18);
-    const double SmallSettlementSeparationSquared = FMath::Square(Spacing * 1.60);
+    // Double the temperate-town target and reduce spacing so it is reachable.
+    const int32 DesiredSmallSettlementCount = FMath::Clamp(Sites.Num() / 8, 0, 36);
+    const double SmallSettlementSeparationSquared = FMath::Square(Spacing * 1.25);
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
         if (SmallSettlementCells.Num() >= DesiredSmallSettlementCount)
@@ -2129,87 +2130,218 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     TMap<FIntPoint, FVector2D> MajorCityAxis;
-    TMap<FIntPoint, int32> MajorCityDegree;
     TMap<FIntPoint, TArray<FVector2D>> MajorCityDirections;
-    if (MajorCityCells.Num() >= 2)
+    TMap<FIntPoint, TArray<FVector2D>> MajorCityOrdinaryDirections;
+
+    // A single closed circuit visits every major city instead of branching like
+    // the previous minimum-spanning tree.
+    TArray<FIntPoint> MainlineCityOrder = MajorCityCells;
+    MainlineCityOrder.Sort([&](const FIntPoint& A, const FIntPoint& B)
     {
-        // Prim tree connects every major city without creating redundant highway rings.
-        TSet<FIntPoint> ConnectedCities;
-        ConnectedCities.Add(MajorCityCells[0]);
-        while (ConnectedCities.Num() < MajorCityCells.Num())
+        const FVector2D& PositionA = MajorCityCenters.FindChecked(A);
+        const FVector2D& PositionB = MajorCityCenters.FindChecked(B);
+        const double AngleA = std::atan2(
+            static_cast<double>(PositionA.Y - MapCenter2D.Y),
+            static_cast<double>(PositionA.X - MapCenter2D.X));
+        const double AngleB = std::atan2(
+            static_cast<double>(PositionB.Y - MapCenter2D.Y),
+            static_cast<double>(PositionB.X - MapCenter2D.X));
+        if (!FMath::IsNearlyEqual(AngleA, AngleB, 0.0001))
         {
-            double BestDistanceSquared = TNumericLimits<double>::Max();
-            FIntPoint BestFrom = FIntPoint::ZeroValue;
-            FIntPoint BestTo = FIntPoint::ZeroValue;
-            bool bFoundEdge = false;
-            for (const FIntPoint& FromCell : MajorCityCells)
-            {
-                if (!ConnectedCities.Contains(FromCell))
-                {
-                    continue;
-                }
-                const FVector2D* From = MajorCityCenters.Find(FromCell);
-                if (!From)
-                {
-                    continue;
-                }
-                for (const FIntPoint& ToCell : MajorCityCells)
-                {
-                    if (ConnectedCities.Contains(ToCell))
-                    {
-                        continue;
-                    }
-                    const FVector2D* To = MajorCityCenters.Find(ToCell);
-                    if (!To)
-                    {
-                        continue;
-                    }
-                    const double DistanceSquared = FVector2D::DistSquared(*From, *To);
-                    if (DistanceSquared < BestDistanceSquared)
-                    {
-                        BestDistanceSquared = DistanceSquared;
-                        BestFrom = FromCell;
-                        BestTo = ToCell;
-                        bFoundEdge = true;
-                    }
-                }
-            }
-            if (!bFoundEdge)
-            {
-                break;
-            }
-
-            const FVector2D* From = MajorCityCenters.Find(BestFrom);
-            const FVector2D* To = MajorCityCenters.Find(BestTo);
-            if (From && To)
-            {
-                const FVector2D Direction = SnapToCardinal(*To - *From);
-                const FVector2D ReverseDirection = Direction * -1.0f;
-                if (!MajorCityAxis.Contains(BestFrom))
-                {
-                    MajorCityAxis.Add(BestFrom, Direction);
-                }
-                if (!MajorCityAxis.Contains(BestTo))
-                {
-                    MajorCityAxis.Add(BestTo, ReverseDirection);
-                }
-                ++MajorCityDegree.FindOrAdd(BestFrom);
-                ++MajorCityDegree.FindOrAdd(BestTo);
-                MajorCityDirections.FindOrAdd(BestFrom).AddUnique(Direction);
-                MajorCityDirections.FindOrAdd(BestTo).AddUnique(ReverseDirection);
-
-                // Intercity highways stop at cardinal gates; city approaches are
-                // built separately as straight block-grid-aligned streets.
-                const FVector2D FromPort = *From +
-                    Direction * static_cast<float>(CityPortDistance);
-                const FVector2D ToPort = *To +
-                    ReverseDirection * static_cast<float>(CityPortDistance);
-                BuildSegment(
-                    BestFrom, BestTo, FromPort, ToPort,
-                    HighwayRoadWidth, true, true, false);
-            }
-            ConnectedCities.Add(BestTo);
+            return AngleA < AngleB;
         }
+        return StableSiteHash(A) < StableSiteHash(B);
+    });
+
+    // Force one stretch of the trunk through safe forest/plains terrain. Keep
+    // the waypoint away from POI sites so small towns are passed at a distance.
+    FVector2D GreenCorridorWaypoint = MapCenter2D;
+    bool bHasGreenCorridorWaypoint = false;
+    double BestGreenWaypointScore = TNumericLimits<double>::Max();
+    const double GreenSearchRadius = FMath::Min(HalfExtent * 0.45, Spacing * 4.0);
+    const double GreenSearchStep = FMath::Max(RouteGridStep, Spacing * 0.20);
+    const double GreenWaypointSiteClearanceSquared = FMath::Square(Spacing * 0.22);
+    const auto ConsiderGreenWaypoint = [&](const FVector2D& Candidate)
+    {
+        if (Candidate.X < MinX + HighwayRoadWidth ||
+            Candidate.X > MaxX - HighwayRoadWidth ||
+            Candidate.Y < MinY + HighwayRoadWidth ||
+            Candidate.Y > MaxY - HighwayRoadWidth)
+        {
+            return;
+        }
+        const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(
+            Candidate.X, Candidate.Y, GenerationSettings);
+        if (Biome != ESVoxelBiome::Forest && Biome != ESVoxelBiome::Plains)
+        {
+            return;
+        }
+        if (GenerationSettings.bEnablePOIPlateaus &&
+            FSVoxelGenerator::SamplePOISuitability(
+                Candidate.X, Candidate.Y, GenerationSettings) <= 0.25f)
+        {
+            return;
+        }
+        if (GenerationSettings.bEnableLakes)
+        {
+            float LakeInfluence = 0.0f;
+            float LakeLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
+            FSVoxelGenerator::SampleLakeMaskAndLevel(
+                Candidate.X, Candidate.Y, GenerationSettings, LakeInfluence, LakeLevel);
+            if (LakeInfluence >= 0.10f)
+            {
+                return;
+            }
+        }
+        for (const FIntPoint& SiteCell : SortedSiteCells)
+        {
+            const FVector2D* Site = Sites.Find(SiteCell);
+            if (Site && FVector2D::DistSquared(*Site, Candidate) <
+                GreenWaypointSiteClearanceSquared)
+            {
+                return;
+            }
+        }
+        const double Score = FVector2D::DistSquared(Candidate, MapCenter2D);
+        if (Score < BestGreenWaypointScore)
+        {
+            BestGreenWaypointScore = Score;
+            GreenCorridorWaypoint = Candidate;
+            bHasGreenCorridorWaypoint = true;
+        }
+    };
+
+    for (double Y = MapCenter2D.Y - GreenSearchRadius;
+        Y <= MapCenter2D.Y + GreenSearchRadius; Y += GreenSearchStep)
+    {
+        for (double X = MapCenter2D.X - GreenSearchRadius;
+            X <= MapCenter2D.X + GreenSearchRadius; X += GreenSearchStep)
+        {
+            ConsiderGreenWaypoint(FVector2D(static_cast<float>(X), static_cast<float>(Y)));
+        }
+    }
+    if (!bHasGreenCorridorWaypoint)
+    {
+        const FVector2D* NearestGreenSite = nullptr;
+        double NearestGreenSiteDistanceSquared = TNumericLimits<double>::Max();
+        for (const FIntPoint& SiteCell : SortedSiteCells)
+        {
+            const FVector2D* Site = Sites.Find(SiteCell);
+            if (!Site) continue;
+            const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(
+                Site->X, Site->Y, GenerationSettings);
+            if (Biome != ESVoxelBiome::Forest && Biome != ESVoxelBiome::Plains) continue;
+            const double DistanceSquared = FVector2D::DistSquared(*Site, MapCenter2D);
+            if (DistanceSquared < NearestGreenSiteDistanceSquared)
+            {
+                NearestGreenSiteDistanceSquared = DistanceSquared;
+                NearestGreenSite = Site;
+            }
+        }
+        if (NearestGreenSite)
+        {
+            const FVector2D Offsets[8] =
+            {
+                FVector2D(1.0f, 0.0f), FVector2D(-1.0f, 0.0f),
+                FVector2D(0.0f, 1.0f), FVector2D(0.0f, -1.0f),
+                FVector2D(0.70710678f, 0.70710678f),
+                FVector2D(0.70710678f, -0.70710678f),
+                FVector2D(-0.70710678f, 0.70710678f),
+                FVector2D(-0.70710678f, -0.70710678f)
+            };
+            for (const FVector2D& Offset : Offsets)
+            {
+                ConsiderGreenWaypoint(*NearestGreenSite +
+                    Offset * static_cast<float>(Spacing * 0.25));
+                if (bHasGreenCorridorWaypoint) break;
+            }
+        }
+    }
+
+    int32 GreenWaypointEdgeIndex = INDEX_NONE;
+    if (bHasGreenCorridorWaypoint && MainlineCityOrder.Num() >= 2)
+    {
+        double BestDetour = TNumericLimits<double>::Max();
+        for (int32 CityIndex = 0; CityIndex < MainlineCityOrder.Num(); ++CityIndex)
+        {
+            const int32 NextIndex = (CityIndex + 1) % MainlineCityOrder.Num();
+            const FVector2D& A = MajorCityCenters.FindChecked(MainlineCityOrder[CityIndex]);
+            const FVector2D& B = MajorCityCenters.FindChecked(MainlineCityOrder[NextIndex]);
+            const double Detour =
+                FVector2D::Distance(A, GreenCorridorWaypoint) +
+                FVector2D::Distance(GreenCorridorWaypoint, B) - FVector2D::Distance(A, B);
+            if (Detour < BestDetour)
+            {
+                BestDetour = Detour;
+                GreenWaypointEdgeIndex = CityIndex;
+            }
+        }
+    }
+
+    const auto BuildMainlineLeg = [&](
+        const FIntPoint& FromCell, const FIntPoint& ToCell,
+        const FVector2D& StartPoint, const FVector2D& EndPoint)
+    {
+        const int32 SegmentsBefore = RoadSegmentCount;
+        BuildSegment(FromCell, ToCell, StartPoint, EndPoint,
+            HighwayRoadWidth, true, true, false);
+        if (RoadSegmentCount == SegmentsBefore)
+        {
+            BuildSegment(FromCell, ToCell, StartPoint, EndPoint,
+                HighwayRoadWidth, false, true, false);
+        }
+        return RoadSegmentCount > SegmentsBefore;
+    };
+
+    if (MainlineCityOrder.Num() >= 2)
+    {
+        for (int32 CityIndex = 0; CityIndex < MainlineCityOrder.Num(); ++CityIndex)
+        {
+            if (MainlineCityOrder.Num() == 2 &&
+                CityIndex == 1 && !bHasGreenCorridorWaypoint)
+            {
+                continue;
+            }
+            const int32 NextIndex = (CityIndex + 1) % MainlineCityOrder.Num();
+            const FIntPoint FromCell = MainlineCityOrder[CityIndex];
+            const FIntPoint ToCell = MainlineCityOrder[NextIndex];
+            const FVector2D& From = MajorCityCenters.FindChecked(FromCell);
+            const FVector2D& To = MajorCityCenters.FindChecked(ToCell);
+            const bool bRouteViaGreen =
+                bHasGreenCorridorWaypoint && CityIndex == GreenWaypointEdgeIndex;
+            const FVector2D FromDirection = SnapToCardinal(
+                (bRouteViaGreen ? GreenCorridorWaypoint : To) - From);
+            const FVector2D ToDirection = SnapToCardinal(
+                (bRouteViaGreen ? GreenCorridorWaypoint : From) - To);
+
+            if (!MajorCityAxis.Contains(FromCell)) MajorCityAxis.Add(FromCell, FromDirection);
+            if (!MajorCityAxis.Contains(ToCell)) MajorCityAxis.Add(ToCell, ToDirection);
+            MajorCityDirections.FindOrAdd(FromCell).AddUnique(FromDirection);
+            MajorCityDirections.FindOrAdd(ToCell).AddUnique(ToDirection);
+
+            if (bRouteViaGreen)
+            {
+                const bool bFirstLegBuilt = BuildMainlineLeg(
+                    FromCell, ToCell, From, GreenCorridorWaypoint);
+                const bool bSecondLegBuilt = BuildMainlineLeg(
+                    FromCell, ToCell, GreenCorridorWaypoint, To);
+                if (!bFirstLegBuilt || !bSecondLegBuilt)
+                {
+                    BuildMainlineLeg(FromCell, ToCell, From, To);
+                }
+            }
+            else
+            {
+                BuildMainlineLeg(FromCell, ToCell, From, To);
+            }
+        }
+    }
+    else if (MainlineCityOrder.Num() == 1)
+    {
+        const FIntPoint CityCell = MainlineCityOrder[0];
+        MajorCityAxis.Add(CityCell, FVector2D(1.0f, 0.0f));
+        MajorCityDirections.FindOrAdd(CityCell).AddUnique(FVector2D(1.0f, 0.0f));
+        MajorCityDirections.FindOrAdd(CityCell).AddUnique(FVector2D(-1.0f, 0.0f));
     }
 
     const auto GetRoadNodePosition = [&](const FIntPoint& Cell) -> FVector2D
@@ -2225,8 +2357,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         return FVector2D::ZeroVector;
     };
 
-    // Smaller hubs are sparse. Their spanning tree connects them to the
-    // intercity backbone with ordinary roads; no fixed all-map rectangular grid.
+    // The highway circuit is the connected backbone. Green POIs that are not
+    // towns are excluded from the road hub lattice and receive short dirt access roads.
     TArray<FIntPoint> RoadHubCells;
     TSet<FIntPoint> RoadHubSet;
     const auto AddRoadHub = [&](const FIntPoint& Cell)
@@ -2237,33 +2369,27 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             RoadHubSet.Add(Cell);
         }
     };
-    // Start the ordinary-road spanning tree inside the temperate core, then
-    // connect small towns and the highway cities, so useful central links are
-    // generated before the outer network can consume the route budget.
     for (const FIntPoint& CoreCell : CoreTemperateHubCells)
     {
-        AddRoadHub(CoreCell);
+        if (SmallSettlementCells.Contains(CoreCell) || MajorCitySet.Contains(CoreCell))
+        {
+            AddRoadHub(CoreCell);
+        }
     }
-    for (const FIntPoint& SettlementCell : SmallSettlementCells)
-    {
-        AddRoadHub(SettlementCell);
-    }
-    for (const FIntPoint& MajorCityCell : MajorCityCells)
-    {
-        AddRoadHub(MajorCityCell);
-    }
+    for (const FIntPoint& SettlementCell : SmallSettlementCells) AddRoadHub(SettlementCell);
+    for (const FIntPoint& MajorCityCell : MajorCityCells) AddRoadHub(MajorCityCell);
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
-        if (RoadHubSet.Contains(Candidate))
+        if (RoadHubSet.Contains(Candidate)) continue;
+        const FVector2D* CandidatePosition = Sites.Find(Candidate);
+        if (!CandidatePosition) continue;
+        const ESVoxelBiome CandidateBiome = FSVoxelGenerator::SampleBiome(
+            CandidatePosition->X, CandidatePosition->Y, GenerationSettings);
+        if (CandidateBiome == ESVoxelBiome::Forest || CandidateBiome == ESVoxelBiome::Plains)
         {
             continue;
         }
-        const uint32 HubRoll = StableSiteHash(Candidate) % 1000u;
-
-        // The same deterministic hub rate in desert, snow and temperate regions
-        // keeps ordinary-road density proportional to eligible POI-site density.
-        // A moderate rate also spaces hubs far enough apart for longer intercity roads.
-        if (HubRoll < 400u)
+        if (StableSiteHash(Candidate) % 1000u < 400u)
         {
             RoadHubCells.Add(Candidate);
             RoadHubSet.Add(Candidate);
@@ -2272,21 +2398,36 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const int32 MinimumHubCount = FMath::Min(3, Sites.Num());
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
-        if (RoadHubCells.Num() >= MinimumHubCount)
-        {
-            break;
-        }
-        if (!RoadHubSet.Contains(Candidate))
+        if (RoadHubCells.Num() >= MinimumHubCount) break;
+        if (!RoadHubSet.Contains(Candidate) && !SmallSettlementCells.Contains(Candidate))
         {
             RoadHubCells.Add(Candidate);
             RoadHubSet.Add(Candidate);
         }
     }
 
+    TMap<FIntPoint, int32> OrdinaryRoadDegreeByHub;
+    TMap<FIntPoint, TSet<FIntPoint>> OrdinaryRoadNeighbors;
+    TMap<FIntPoint, int32> MajorCityOrdinaryRoadDegree;
+    TSet<uint64> FailedHubEdges;
+    TSet<FIntPoint> ConnectedHubs;
+    const auto GetHubEdgeKey = [&](const FIntPoint& A, const FIntPoint& B) -> uint64
+    {
+        return (static_cast<uint64>(StableSiteHash(A)) << 32) |
+            static_cast<uint64>(StableSiteHash(B));
+    };
+
     if (RoadHubCells.Num() >= 2)
     {
-        TSet<FIntPoint> ConnectedHubs;
-        ConnectedHubs.Add(RoadHubCells[0]);
+        if (MajorCityCells.Num() > 0)
+        {
+            for (const FIntPoint& CityCell : MajorCityCells) ConnectedHubs.Add(CityCell);
+        }
+        else
+        {
+            ConnectedHubs.Add(RoadHubCells[0]);
+        }
+
         while (ConnectedHubs.Num() < RoadHubCells.Num())
         {
             double BestDistanceSquared = TNumericLimits<double>::Max();
@@ -2295,25 +2436,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             bool bFoundEdge = false;
             for (const FIntPoint& FromCell : RoadHubCells)
             {
-                if (!ConnectedHubs.Contains(FromCell))
-                {
-                    continue;
-                }
-                if (!Sites.Contains(FromCell))
-                {
-                    continue;
-                }
+                if (!ConnectedHubs.Contains(FromCell) || !Sites.Contains(FromCell)) continue;
+                if (MajorCitySet.Contains(FromCell) &&
+                    MajorCityOrdinaryRoadDegree.FindRef(FromCell) >= 2) continue;
                 const FVector2D From = GetRoadNodePosition(FromCell);
                 for (const FIntPoint& ToCell : RoadHubCells)
                 {
-                    if (ConnectedHubs.Contains(ToCell))
-                    {
-                        continue;
-                    }
-                    if (!Sites.Contains(ToCell))
-                    {
-                        continue;
-                    }
+                    if (ConnectedHubs.Contains(ToCell) || !Sites.Contains(ToCell)) continue;
+                    if (FailedHubEdges.Contains(GetHubEdgeKey(FromCell, ToCell))) continue;
                     const FVector2D To = GetRoadNodePosition(ToCell);
                     const double DistanceSquared = FVector2D::DistSquared(From, To);
                     if (DistanceSquared < BestDistanceSquared)
@@ -2325,41 +2455,159 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     }
                 }
             }
-            if (!bFoundEdge)
+            if (!bFoundEdge) break;
+
+            const FVector2D From = GetRoadNodePosition(BestFrom);
+            const FVector2D To = GetRoadNodePosition(BestTo);
+            FVector2D RouteStart = From;
+            FVector2D RouteEnd = To;
+            const FVector2D ConnectionDirection = SnapToCardinal(To - From);
+            if (MajorCitySet.Contains(BestFrom))
+                RouteStart += ConnectionDirection * static_cast<float>(CityPortDistance);
+            if (MajorCitySet.Contains(BestTo))
+                RouteEnd -= ConnectionDirection * static_cast<float>(CityPortDistance);
+
+            const int32 SegmentsBefore = RoadSegmentCount;
+            BuildSegment(BestFrom, BestTo, RouteStart, RouteEnd,
+                OrdinaryRoadWidth, true, true, false);
+            if (RoadSegmentCount == SegmentsBefore)
             {
-                break;
+                BuildSegment(BestFrom, BestTo, RouteStart, RouteEnd,
+                    OrdinaryRoadWidth, false, true, false);
+            }
+            if (RoadSegmentCount == SegmentsBefore)
+            {
+                FailedHubEdges.Add(GetHubEdgeKey(BestFrom, BestTo));
+                continue;
             }
 
-            // All major centres are connected by the highway tree, so an
-            // additional ordinary road between two major cities is unnecessary.
-            const bool bBothMajor =
-                MajorCitySet.Contains(BestFrom) && MajorCitySet.Contains(BestTo);
-            if (!bBothMajor)
+            ConnectedHubs.Add(BestTo);
+            OrdinaryRoadNeighbors.FindOrAdd(BestFrom).Add(BestTo);
+            OrdinaryRoadNeighbors.FindOrAdd(BestTo).Add(BestFrom);
+            ++OrdinaryRoadDegreeByHub.FindOrAdd(BestFrom);
+            ++OrdinaryRoadDegreeByHub.FindOrAdd(BestTo);
+            if (MajorCitySet.Contains(BestFrom))
             {
-                const FVector2D From = GetRoadNodePosition(BestFrom);
-                const FVector2D To = GetRoadNodePosition(BestTo);
-                FVector2D RouteStart = From;
-                FVector2D RouteEnd = To;
-                const FVector2D ConnectionDirection = SnapToCardinal(To - From);
-                if (MajorCitySet.Contains(BestFrom))
+                ++MajorCityOrdinaryRoadDegree.FindOrAdd(BestFrom);
+                MajorCityOrdinaryDirections.FindOrAdd(BestFrom).AddUnique(ConnectionDirection);
+            }
+            if (MajorCitySet.Contains(BestTo))
+            {
+                ++MajorCityOrdinaryRoadDegree.FindOrAdd(BestTo);
+                MajorCityOrdinaryDirections.FindOrAdd(BestTo).AddUnique(ConnectionDirection * -1.0f);
+            }
+        }
+    }
+
+    // Towns get two successful ordinary-road links: entry and exit. Prefer a
+    // second connection from the opposite side of the town.
+    for (const FIntPoint& SettlementCell : SmallSettlementCells)
+    {
+        const FVector2D* SettlementPosition = Sites.Find(SettlementCell);
+        if (!SettlementPosition) continue;
+
+        while (OrdinaryRoadDegreeByHub.FindRef(SettlementCell) < 2)
+        {
+            bool bFoundCandidate = false;
+            FIntPoint BestCandidate = FIntPoint::ZeroValue;
+            FVector2D BestRouteEnd = FVector2D::ZeroVector;
+            FVector2D BestConnectionDirection = FVector2D::ZeroVector;
+            double BestScore = TNumericLimits<double>::Max();
+
+            for (const FIntPoint& CandidateCell : RoadHubCells)
+            {
+                if (CandidateCell == SettlementCell ||
+                    !ConnectedHubs.Contains(CandidateCell) ||
+                    !Sites.Contains(CandidateCell)) continue;
+                const TSet<FIntPoint>* ExistingNeighbors = OrdinaryRoadNeighbors.Find(SettlementCell);
+                if (ExistingNeighbors && ExistingNeighbors->Contains(CandidateCell)) continue;
+                if (MajorCitySet.Contains(CandidateCell) &&
+                    MajorCityOrdinaryRoadDegree.FindRef(CandidateCell) >= 2) continue;
+                if (FailedHubEdges.Contains(GetHubEdgeKey(SettlementCell, CandidateCell))) continue;
+
+                const FVector2D CandidatePosition = GetRoadNodePosition(CandidateCell);
+                FVector2D RouteEnd = CandidatePosition;
+                const FVector2D Direction = SnapToCardinal(CandidatePosition - *SettlementPosition);
+                if (MajorCitySet.Contains(CandidateCell))
+                    RouteEnd -= Direction * static_cast<float>(CityPortDistance);
+                const double Distance = FVector2D::Distance(*SettlementPosition, RouteEnd);
+                if (Distance < OrdinaryRoadWidth || Distance > Spacing * 2.5) continue;
+
+                int32 DirectionRank = 0;
+                if (ExistingNeighbors && ExistingNeighbors->Num() > 0)
                 {
-                    RouteStart += ConnectionDirection * static_cast<float>(CityPortDistance);
-                    MajorCityDirections.FindOrAdd(BestFrom).AddUnique(ConnectionDirection);
+                    DirectionRank = 2;
+                    const FVector2D CandidateDirection =
+                        (CandidatePosition - *SettlementPosition).GetSafeNormal();
+                    for (const FIntPoint& NeighborCell : *ExistingNeighbors)
+                    {
+                        const FVector2D NeighborPosition = GetRoadNodePosition(NeighborCell);
+                        const FVector2D ExistingDirection =
+                            (NeighborPosition - *SettlementPosition).GetSafeNormal();
+                        const double Alignment =
+                            FVector2D::DotProduct(CandidateDirection, ExistingDirection);
+                        if (Alignment < -0.30)
+                        {
+                            DirectionRank = 0;
+                            break;
+                        }
+                        if (FMath::Abs(Alignment) < 0.65)
+                        {
+                            DirectionRank = FMath::Min(DirectionRank, 1);
+                        }
+                    }
                 }
-                if (MajorCitySet.Contains(BestTo))
+                const double Score = static_cast<double>(DirectionRank) * Spacing * 4.0 + Distance;
+                if (Score < BestScore)
                 {
-                    RouteEnd -= ConnectionDirection * static_cast<float>(CityPortDistance);
-                    MajorCityDirections.FindOrAdd(BestTo).AddUnique(ConnectionDirection * -1.0f);
-                }
-                if (Sites.Contains(BestFrom) && Sites.Contains(BestTo))
-                {
-                    BuildSegment(
-                        BestFrom, BestTo, RouteStart, RouteEnd,
-                        OrdinaryRoadWidth, true, true, false);
+                    BestScore = Score;
+                    BestCandidate = CandidateCell;
+                    BestRouteEnd = RouteEnd;
+                    BestConnectionDirection = Direction;
+                    bFoundCandidate = true;
                 }
             }
-            ConnectedHubs.Add(BestTo);
+            if (!bFoundCandidate) break;
+
+            const int32 SegmentsBefore = RoadSegmentCount;
+            BuildSegment(SettlementCell, BestCandidate, *SettlementPosition, BestRouteEnd,
+                OrdinaryRoadWidth, true, true, false);
+            if (RoadSegmentCount == SegmentsBefore)
+            {
+                BuildSegment(SettlementCell, BestCandidate, *SettlementPosition, BestRouteEnd,
+                    OrdinaryRoadWidth, false, true, false);
+            }
+            if (RoadSegmentCount == SegmentsBefore)
+            {
+                FailedHubEdges.Add(GetHubEdgeKey(SettlementCell, BestCandidate));
+                continue;
+            }
+
+            ConnectedHubs.Add(SettlementCell);
+            OrdinaryRoadNeighbors.FindOrAdd(SettlementCell).Add(BestCandidate);
+            OrdinaryRoadNeighbors.FindOrAdd(BestCandidate).Add(SettlementCell);
+            ++OrdinaryRoadDegreeByHub.FindOrAdd(SettlementCell);
+            ++OrdinaryRoadDegreeByHub.FindOrAdd(BestCandidate);
+            if (MajorCitySet.Contains(BestCandidate))
+            {
+                ++MajorCityOrdinaryRoadDegree.FindOrAdd(BestCandidate);
+                MajorCityOrdinaryDirections.FindOrAdd(BestCandidate)
+                    .AddUnique(BestConnectionDirection * -1.0f);
+            }
         }
+    }
+
+    int32 TownsWithoutTwoRoadConnections = 0;
+    for (const FIntPoint& SettlementCell : SmallSettlementCells)
+    {
+        if (OrdinaryRoadDegreeByHub.FindRef(SettlementCell) < 2)
+            ++TownsWithoutTwoRoadConnections;
+    }
+    if (TownsWithoutTwoRoadConnections > 0)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("SmoothVoxel roads: %d small towns could not get two safe ordinary-road connections."),
+            TownsWithoutTwoRoadConnections);
     }
 
     // Compact 4-by-3 block layouts are generated only around major cities.
@@ -2400,8 +2648,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 CityStreetDirections.AddUnique(SnapToCardinal(Direction));
             }
         }
-        CityStreetDirections.AddUnique(Axis);
-        CityStreetDirections.AddUnique(Axis * -1.0f);
+        if (CityStreetDirections.Num() == 0)
+        {
+            CityStreetDirections.AddUnique(Axis);
+            CityStreetDirections.AddUnique(Axis * -1.0f);
+        }
         for (const FVector2D& SideDirection : CityStreetDirections)
         {
             const FVector2D ExtensionEnd =
@@ -2412,6 +2663,24 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 BuildSegment(
                     CityCell, CityCell, *City, ExtensionEnd,
                     HighwayRoadWidth, true, true, true);
+            }
+        }
+
+        // Optional ordinary exits are separate from the mainline approaches.
+        if (const TArray<FVector2D>* OrdinaryDirections =
+            MajorCityOrdinaryDirections.Find(CityCell))
+        {
+            for (const FVector2D& SideDirection : *OrdinaryDirections)
+            {
+                const FVector2D ExtensionEnd =
+                    *City + SideDirection * static_cast<float>(CityPortDistance);
+                if (IsRoadPointInBounds(*City, OrdinaryRoadWidth) &&
+                    IsRoadPointInBounds(ExtensionEnd, OrdinaryRoadWidth))
+                {
+                    BuildSegment(
+                        CityCell, CityCell, *City, ExtensionEnd,
+                        OrdinaryRoadWidth, true, true, true);
+                }
             }
         }
 
@@ -2507,7 +2776,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // a ring around every POI or another rectangular network.
     // Aim for a substantial rural network without letting new dirt lanes cross
     // existing roads or overlap them for long stretches.
-    const int32 DesiredRuralConnectorCount = FMath::Min(160, FMath::Max(1, Sites.Num() / 2));
+    const int32 DesiredRuralConnectorCount = FMath::Min(60, FMath::Max(1, Sites.Num() / 12));
     int32 RuralConnectorsBuilt = 0;
     const double RuralConnectorEndpointSpacing = Spacing * 0.65;
     const double RuralConnectorEndpointSpacingSquared =
@@ -2588,6 +2857,26 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     }
                 }
             }
+        }
+        return false;
+    };
+
+    const auto RuralLinkServesPOI = [&](const FVector2D& LinkStart,
+        const FVector2D& LinkEnd) -> bool
+    {
+        const FVector2D Link = LinkEnd - LinkStart;
+        const double LengthSquared = Link.SizeSquared();
+        if (LengthSquared < 1.0) return false;
+        const double POIAccessRadiusSquared = FMath::Square(Spacing * 0.40);
+        for (const FIntPoint& POICell : SortedSiteCells)
+        {
+            if (RoadHubSet.Contains(POICell)) continue;
+            const FVector2D* POI = Sites.Find(POICell);
+            if (!POI) continue;
+            const double Projection = FMath::Clamp(
+                FVector2D::DotProduct(*POI - LinkStart, Link) / LengthSquared, 0.0, 1.0);
+            const FVector2D Closest = LinkStart + Link * static_cast<float>(Projection);
+            if (FVector2D::DistSquared(*POI, Closest) <= POIAccessRadiusSquared) return true;
         }
         return false;
     };
@@ -2695,7 +2984,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     {
                         // Do expensive terrain and intersection checks only for candidates
                         // that would improve the current best connector.
-                        if (!CanTravelStraight(Start, End, 0.50, true) ||
+                        if (!RuralLinkServesPOI(Start, End) ||
+                            !CanTravelStraight(Start, End, 0.50, true) ||
                             RuralLinkIntersectsExistingRoad(Start, End))
                         {
                             continue;
@@ -2788,7 +3078,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             const double DrivewayDistance = std::sqrt(BestDistanceSquared);
             if (DrivewayDistance > OrdinaryRoadWidth * 0.75 &&
-                DrivewayDistance <= Spacing * 1.25)
+                DrivewayDistance <= Spacing * 0.85)
             {
                 BuildSegment(
                     POICell, POICell, *POI, BestRoadPoint,
