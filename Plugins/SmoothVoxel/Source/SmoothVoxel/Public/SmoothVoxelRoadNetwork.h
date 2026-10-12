@@ -44,6 +44,12 @@ public:
         return RoadBlockSnapshot;
     }
 
+    /** Continuous road deck heights, shared with terrain density workers. */
+    TSharedPtr<const FSVoxelRoadSurfaceHeightMap, ESPMode::ThreadSafe> GetRoadSurfaceHeightSnapshot() const
+    {
+        return RoadSurfaceHeightSnapshot;
+    }
+
     TSharedPtr<const FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe> GetRoadSampleBinsSnapshot() const
     {
         return RoadSampleBinsSnapshot;
@@ -85,7 +91,9 @@ private:
     UMaterialInterface* ActiveAsphaltRoadMaterial = nullptr;
 
     TMap<FIntVector, EVoxelBlock> RoadBlockTypes;
+    TMap<FIntVector, double> RoadSurfaceHeights;
     TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlockSnapshot;
+    TSharedPtr<const FSVoxelRoadSurfaceHeightMap, ESPMode::ThreadSafe> RoadSurfaceHeightSnapshot;
     TSharedPtr<const FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe> RoadSampleBinsSnapshot;
     // 32x32-cell XY buckets make per-chunk road snapshot extraction independent
     // of the total number of roads in the full world.
