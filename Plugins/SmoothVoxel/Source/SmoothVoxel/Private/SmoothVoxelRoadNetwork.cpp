@@ -91,7 +91,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const double OrdinaryRoadWidth = RoadBlockSize * 10.0;
     const double HighwayRoadWidth = RoadBlockSize * 20.0;
     (void)RoadWidth; // Retained for compatibility; road classes now scale with block size.
-    const double HalfRoadWidth = HighwayRoadWidth * 0.5;
     const double SafeSampleSpacing = FMath::Clamp(
         std::abs(static_cast<double>(SampleSpacing)), 250.0, 5000.0);
     const double SafeSurfaceOffset = FMath::Clamp(
@@ -110,9 +109,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const int32 MaxGridY = FMath::CeilToInt(MaxY / Spacing) + 1;
 
     TMap<FIntPoint, FVector2D> Sites;
-    TSet<FIntPoint> POIRingSites;
     Sites.Reserve((MaxGridX - MinGridX + 1) * (MaxGridY - MinGridY + 1));
-    POIRingSites.Reserve((MaxGridX - MinGridX + 1) * (MaxGridY - MinGridY + 1));
     for (int32 GridY = MinGridY; GridY <= MaxGridY; ++GridY)
     {
         for (int32 GridX = MinGridX; GridX <= MaxGridX; ++GridX)
@@ -176,8 +173,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     int32 HighwayRoadSegmentCount = 0;
     const int32 SamplesPerRoad = FMath::Max(
         2, FMath::CeilToInt(static_cast<float>(Spacing / SafeSampleSpacing)));
-    // Four possible long-range site links plus the local POI ring create
-    // substantially more geometry than the old two-links-per-site estimate.
+    // Reserve room for the hierarchy, urban blocks, POI driveways, and rural links.
     const int32 ExpectedSamples = FMath::Clamp(
         SamplesPerRoad * Sites.Num() * 8,
         0, 300000);
@@ -206,31 +202,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const int32 WorldGridMinY = FMath::CeilToInt(MinY / RouteGridStep);
     const int32 WorldGridMaxY = FMath::FloorToInt(MaxY / RouteGridStep);
     const double MaxRouteGrade = 0.30; // Preferred maximum for ordinary road segments.
-    constexpr int32 RoadRingPointCount = 16;
-    const double SiteConnectionRadius = FMath::Min(
-        std::abs(static_cast<double>(GenerationSettings.POIPlateauRadius)) +
-            std::abs(static_cast<double>(GenerationSettings.POIPlateauBlendDistance)) +
-            HalfRoadWidth + RouteGridStep * 0.75,
-        Spacing * 0.45);
-
-    // A complete ring must fit inside the finite map. Border sites cannot host
-    // a full safe POI footprint, so remove them from both the ring set and the
-    // road graph; neighbouring links will bridge the gap to the next viable site.
-    for (auto It = POIRingSites.CreateIterator(); It; ++It)
-    {
-        const FIntPoint SiteCell = *It;
-        const FVector2D* Site = Sites.Find(SiteCell);
-        if (!Site ||
-            Site->X - SiteConnectionRadius - HalfRoadWidth < MinX ||
-            Site->X + SiteConnectionRadius + HalfRoadWidth > MaxX ||
-            Site->Y - SiteConnectionRadius - HalfRoadWidth < MinY ||
-            Site->Y + SiteConnectionRadius + HalfRoadWidth > MaxY)
-        {
-            Sites.Remove(SiteCell);
-            It.RemoveCurrent();
-        }
-    }
-
     struct FRoadGridSample
     {
         double Height = 0.0;
@@ -282,103 +253,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // River channels remain candidates only for a near-perpendicular crossing.
         Sample.bAllowed = !GenerationSettings.bEnableLakes || Sample.LakeInfluence < 0.10f;
         return RouteGridCache.Add(GridCell, Sample);
-    };
-
-    // A lake may overlap only the outer edge of a POI clearing even if its
-    // centre is dry. Reject the whole ring if any gate is inside the lake mask;
-    // otherwise some arcs disappear and disconnect incoming roads from each other.
-    TArray<FIntPoint> SitesWithBlockedRings;
-    for (const FIntPoint& SiteCell : POIRingSites)
-    {
-        const FVector2D* Site = Sites.Find(SiteCell);
-        if (!Site)
-        {
-            SitesWithBlockedRings.Add(SiteCell);
-            continue;
-        }
-
-        for (int32 RingIndex = 0; RingIndex < RoadRingPointCount; ++RingIndex)
-        {
-            const double Angle = static_cast<double>(RingIndex) *
-                6.283185307179586 / static_cast<double>(RoadRingPointCount);
-            const FVector2D Gate(
-                static_cast<float>(Site->X + std::cos(Angle) * SiteConnectionRadius),
-                static_cast<float>(Site->Y + std::sin(Angle) * SiteConnectionRadius));
-            const FIntPoint GateCell(
-                FMath::RoundToInt(Gate.X / RouteGridStep),
-                FMath::RoundToInt(Gate.Y / RouteGridStep));
-            if (!GetRouteGridSample(GateCell).bAllowed)
-            {
-                SitesWithBlockedRings.Add(SiteCell);
-                break;
-            }
-        }
-    }
-    for (const FIntPoint& SiteCell : SitesWithBlockedRings)
-    {
-        Sites.Remove(SiteCell);
-        POIRingSites.Remove(SiteCell);
-    }
-
-    auto FindSiteGate = [&](
-        const FIntPoint& SiteCell,
-        const FVector2D& Site,
-        const FVector2D& DirectionToOtherSite,
-        FVector2D& OutGate) -> bool
-    {
-        if (!POIRingSites.Contains(SiteCell))
-        {
-            OutGate = Site;
-            return true;
-        }
-
-        const FVector2D NormalizedDirection = DirectionToOtherSite.GetSafeNormal();
-        double BestAlignment = -2.0;
-        FVector2D BestDirection = FVector2D::ZeroVector;
-
-        // Match one of the generated ring vertices, not an arbitrary radial
-        // point. Seed jitter can rotate the approach away from the cardinal
-        // axes; choosing the nearest safe gate prevents tiny gaps at the ring.
-        for (int32 RingIndex = 0; RingIndex < RoadRingPointCount; ++RingIndex)
-        {
-            const double Angle = static_cast<double>(RingIndex) *
-                0.39269908169872415;
-            const FVector2D GateDirection(
-                static_cast<float>(std::cos(Angle)),
-                static_cast<float>(std::sin(Angle)));
-            const FVector2D Gate = Site +
-                GateDirection * static_cast<float>(SiteConnectionRadius);
-
-            if (Gate.X - HalfRoadWidth < MinX || Gate.X + HalfRoadWidth > MaxX ||
-                Gate.Y - HalfRoadWidth < MinY || Gate.Y + HalfRoadWidth > MaxY)
-            {
-                continue;
-            }
-
-            const FIntPoint GateCell(
-                FMath::RoundToInt(Gate.X / RouteGridStep),
-                FMath::RoundToInt(Gate.Y / RouteGridStep));
-            if (!GetRouteGridSample(GateCell).bAllowed)
-            {
-                continue;
-            }
-
-            const double Alignment = FVector2D::DotProduct(
-                GateDirection, NormalizedDirection);
-            if (Alignment > BestAlignment)
-            {
-                BestAlignment = Alignment;
-                BestDirection = GateDirection;
-            }
-        }
-
-        if (BestAlignment < -1.0)
-        {
-            return false;
-        }
-
-        OutGate = Site + BestDirection * static_cast<float>(SiteConnectionRadius);
-        return true;
     };
 
     auto GetRiverTangent = [&](const FIntPoint& GridCell, FVector2D& OutTangent) -> bool
@@ -733,7 +607,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const FIntPoint& OtherGridCell,
         const FVector2D& Start,
         const FVector2D& End,
-        bool bUseSiteGates,
         double FullRoadWidth,
         bool bPreferStraight,
         bool bRecordAsNetworkRoad)
@@ -744,17 +617,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const double ChordLength = static_cast<double>(Chord.Size());
         if (ChordLength < 1000.0)
         {
-            return;
-        }
-
-        const FVector2D ChordDirection = (Chord / static_cast<float>(ChordLength)).GetSafeNormal();
-        FVector2D RouteStart = Start;
-        FVector2D RouteEnd = End;
-        if (bUseSiteGates &&
-            (!FindSiteGate(GridCell, Start, ChordDirection, RouteStart) ||
-             !FindSiteGate(OtherGridCell, End, -ChordDirection, RouteEnd)))
-        {
-            ++SkippedRouteCount;
             return;
         }
 
@@ -1249,7 +1111,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 MajorCityDirections.FindOrAdd(BestTo).Add((*From - *To).GetSafeNormal());
                 BuildSegment(
                     BestFrom, BestTo, *From, *To,
-                    true, HighwayRoadWidth, true, true);
+                    HighwayRoadWidth, true, true);
             }
             ConnectedCities.Add(BestTo);
         }
@@ -1344,7 +1206,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 {
                     BuildSegment(
                         BestFrom, BestTo, *From, *To,
-                        true, OrdinaryRoadWidth, false, true);
+                        OrdinaryRoadWidth, false, true);
                 }
             }
             ConnectedHubs.Add(BestTo);
@@ -1406,7 +1268,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     CityCell, CityCell, *City, ExtensionEnd,
-                    false, HighwayRoadWidth, true, true);
+                    HighwayRoadWidth, true, true);
             }
         }
 
@@ -1428,7 +1290,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     CityCell, CityCell, Start, End,
-                    false, OrdinaryRoadWidth, false, true);
+                    OrdinaryRoadWidth, false, true);
             }
         }
 
@@ -1445,7 +1307,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     CityCell, CityCell, Start, End,
-                    false, OrdinaryRoadWidth, false, true);
+                    OrdinaryRoadWidth, false, true);
             }
         }
     }
@@ -1539,7 +1401,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             BuildSegment(
                 FIntPoint::ZeroValue, FIntPoint::ZeroValue,
-                BestStart, BestEnd, false, DirtRoadWidth, false, false);
+                BestStart, BestEnd, DirtRoadWidth, false, false);
         }
     }
 
@@ -1591,7 +1453,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     POICell, POICell, *POI, BestRoadPoint,
-                    false, DirtRoadWidth, false, false);
+                    DirtRoadWidth, false, false);
             }
         }
     }
