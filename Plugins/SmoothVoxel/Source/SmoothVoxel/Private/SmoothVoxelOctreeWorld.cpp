@@ -193,6 +193,19 @@ void ASmoothVoxelTransvoxelChunk::SetTerrainMaterial(UMaterialInterface* InMater
 	}
 }
 
+void ASmoothVoxelTransvoxelChunk::SetRoadMaterials(
+	UMaterialInterface* InDirtRoadMaterial,
+	UMaterialInterface* InAsphaltRoadMaterial)
+{
+	DirtRoadSectionMaterial = InDirtRoadMaterial ? InDirtRoadMaterial : Material;
+	AsphaltRoadSectionMaterial = InAsphaltRoadMaterial ? InAsphaltRoadMaterial : Material;
+	if (Mesh)
+	{
+		Mesh->SetMaterial(2, AsphaltRoadSectionMaterial);
+		Mesh->SetMaterial(3, DirtRoadSectionMaterial);
+	}
+}
+
 void ASmoothVoxelTransvoxelChunk::QueueBuild(
 	const FSVoxelOctreeNode& Node,
 	int32 InCellsPerAxis,
@@ -1702,6 +1715,13 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.CaveStrength = CaveStrength;
 	Settings.ChunkWorldOrigin = ChunkOrigin;
 
+	// Share the immutable road map with chunk workers rather than copying all
+	// road cells for every streamed chunk.
+	if (bFilterBlockEdits && IsValid(RoadNetworkActor))
+	{
+		Settings.RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshot();
+	}
+
 	const bool bHasBlockEdits =
 		BlockEditSnapshot.IsValid() && BlockEditSnapshot->Num() > 0;
 	const bool bHasMinedNodes =
@@ -1841,6 +1861,13 @@ float ASmoothVoxelOctreeWorld::SampleCurrentDensityAt(const FVector& WorldPositi
 
 EVoxelBlock ASmoothVoxelOctreeWorld::GetBlockTypeForCell(const FIntVector& Cell) const
 {
+	// Road and terrain mining share the same persistent voxel cut. The generated
+	// road-cell map stays immutable so streamed chunks can safely share it.
+	if (MinedTerrainNodes.Contains(Cell))
+	{
+		return EVoxelBlock::Air;
+	}
+
 	if (const int8* EditState = EditedBlockCells.Find(Cell))
 	{
 		if (*EditState < 0)
@@ -2332,20 +2359,11 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	EVoxelBlock HitBlock = EVoxelBlock::Air;
 	FVector InsidePoint = Hit.ImpactPoint;
 	ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor());
-	ASmoothVoxelRoadNetwork* HitRoadNetwork = Cast<ASmoothVoxelRoadNetwork>(Hit.GetActor());
-	bool bHitRoadBlock = false;
 	if (IsValid(HitCube) && HitCube->GetOwner() == this)
 	{
-		// Cube collision already identifies the exact logical cell.
+		// Hand-placed hard blocks remain separate cube actors.
 		Cell = HitCube->BlockCell;
 		HitBlock = HitCube->BlockType;
-	}
-	else if (IsValid(HitRoadNetwork) && HitRoadNetwork->GetOwner() == this &&
-		HitRoadNetwork->GetRoadBlockForHit(
-			Hit.GetComponent(), Hit.Item, Cell, HitBlock))
-	{
-		// HISM instance indices are mapped back to the generated absolute cell.
-		bHitRoadBlock = true;
 	}
 	else
 	{
@@ -2414,20 +2432,6 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		!Inventory->CanAddBlock(DropBlock, 1))
 	{
 		return false;
-	}
-
-	if (bHitRoadBlock)
-	{
-		if (!IsValid(HitRoadNetwork) ||
-			!HitRoadNetwork->RemoveRoadBlockForHit(Hit.GetComponent(), Hit.Item))
-		{
-			return false;
-		}
-		if (Inventory && DropBlock != EVoxelBlock::Air)
-		{
-			Inventory->AddBlock(DropBlock, 1);
-		}
-		return true;
 	}
 
 	if (IsValid(HitCube))
@@ -2541,19 +2545,6 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		// Continue from the cube's logical cell, not its transform. This keeps
 		// towers and walls aligned even when the ray hits an edge.
 		Cell = HitCube->BlockCell + FaceStep;
-	}
-	else if (ASmoothVoxelRoadNetwork* HitRoadNetwork = Cast<ASmoothVoxelRoadNetwork>(Hit.GetActor()))
-	{
-		EVoxelBlock HitRoadBlock = EVoxelBlock::Air;
-		if (HitRoadNetwork->GetOwner() != this ||
-			!HitRoadNetwork->GetRoadBlockForHit(
-				Hit.GetComponent(), Hit.Item, Cell, HitRoadBlock))
-		{
-			return false;
-		}
-		// Road cubes share the world's absolute voxel grid, so place adjacent
-		// to their logical cell just like an ordinary placed cube.
-		Cell += FaceStep;
 	}
 	else
 	{
@@ -2708,6 +2699,14 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	{
 		// Generated road cells are already occupied; a manual block cannot stack
 		// into the carriageway cell itself (placing on its top face is allowed).
+		return false;
+	}
+
+	EVoxelBlock ExistingRoadBlock = EVoxelBlock::Air;
+	if (!MinedTerrainNodes.Contains(Cell) && IsValid(RoadNetworkActor) &&
+		RoadNetworkActor->GetRoadBlockTypeAtCell(Cell, ExistingRoadBlock))
+	{
+		// A generated road cell is already solid in the terrain density field.
 		return false;
 	}
 
