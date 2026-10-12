@@ -219,6 +219,10 @@ namespace
                 double H10 = 0.0;
                 double H01 = 0.0;
                 double H11 = 0.0;
+                bool bHasH00 = false;
+                bool bHasH10 = false;
+                bool bHasH01 = false;
+                bool bHasH11 = false;
             };
             FRoadHeightQuadCache HeightQuadCache[4];
             int32 HeightQuadCacheCount = 0;
@@ -230,8 +234,14 @@ namespace
                     const FRoadHeightQuadCache& Cached = HeightQuadCache[CacheIndex];
                     if (Cached.Layer == ReferenceLayer)
                     {
-                        const double Low = FMath::Lerp(Cached.H00, Cached.H10, TX);
-                        const double High = FMath::Lerp(Cached.H01, Cached.H11, TX);
+                        // Missing columns use the current cell's height, not the
+                        // first cached cell's height, so ramps stay graded at edges.
+                        const double H00 = Cached.bHasH00 ? Cached.H00 : DeckHeight;
+                        const double H10 = Cached.bHasH10 ? Cached.H10 : DeckHeight;
+                        const double H01 = Cached.bHasH01 ? Cached.H01 : DeckHeight;
+                        const double H11 = Cached.bHasH11 ? Cached.H11 : DeckHeight;
+                        const double Low = FMath::Lerp(H00, H10, TX);
+                        const double High = FMath::Lerp(H01, H11, TX);
                         return FMath::Lerp(Low, High, TY);
                     }
                 }
@@ -242,16 +252,18 @@ namespace
                 Quad.H10 = DeckHeight;
                 Quad.H01 = DeckHeight;
                 Quad.H11 = DeckHeight;
-                FindRoadHeightAtColumn(X0,     Y0,     DeckHeight, Quad.H00);
-                FindRoadHeightAtColumn(X0 + 1, Y0,     DeckHeight, Quad.H10);
-                FindRoadHeightAtColumn(X0,     Y0 + 1, DeckHeight, Quad.H01);
-                FindRoadHeightAtColumn(X0 + 1, Y0 + 1, DeckHeight, Quad.H11);
+                Quad.bHasH00 = FindRoadHeightAtColumn(X0,     Y0,     DeckHeight, Quad.H00);
+                Quad.bHasH10 = FindRoadHeightAtColumn(X0 + 1, Y0,     DeckHeight, Quad.H10);
+                Quad.bHasH01 = FindRoadHeightAtColumn(X0,     Y0 + 1, DeckHeight, Quad.H01);
+                Quad.bHasH11 = FindRoadHeightAtColumn(X0 + 1, Y0 + 1, DeckHeight, Quad.H11);
                 if (HeightQuadCacheCount < 4)
                 {
                     HeightQuadCache[HeightQuadCacheCount++] = Quad;
                 }
-                const double Low = FMath::Lerp(Quad.H00, Quad.H10, TX);
-                const double High = FMath::Lerp(Quad.H01, Quad.H11, TX);
+                const double Low = FMath::Lerp(Quad.bHasH00 ? Quad.H00 : DeckHeight,
+                    Quad.bHasH10 ? Quad.H10 : DeckHeight, TX);
+                const double High = FMath::Lerp(Quad.bHasH01 ? Quad.H01 : DeckHeight,
+                    Quad.bHasH11 ? Quad.H11 : DeckHeight, TX);
                 return FMath::Lerp(Low, High, TY);
             };
 
