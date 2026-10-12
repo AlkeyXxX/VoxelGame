@@ -1762,6 +1762,18 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             FullRoadWidth <= DirtRoadWidth + 1.0
                 ? DirtRoadTriangles
                 : AsphaltRoadTriangles;
+        TArray<FVector2D> LeftEdgePositions;
+        TArray<FVector2D> RightEdgePositions;
+        TArray<FVector2D> PathTangents;
+        TArray<FVector2D> PathPerpendiculars;
+        TArray<double> RoadDeckHeights;
+        TArray<double> RoadDistances;
+        LeftEdgePositions.Reserve(SampleCount + 1);
+        RightEdgePositions.Reserve(SampleCount + 1);
+        PathTangents.Reserve(SampleCount + 1);
+        PathPerpendiculars.Reserve(SampleCount + 1);
+        RoadDeckHeights.Reserve(SampleCount + 1);
+        RoadDistances.Reserve(SampleCount + 1);
         double TravelledDistance = 0.0;
         for (int32 SampleIndex = 0; SampleIndex <= SampleCount; ++SampleIndex)
         {
@@ -1829,6 +1841,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 TravelledDistance += DistanceBefore;
             }
+
+            LeftEdgePositions.Add(LeftXY);
+            RightEdgePositions.Add(RightXY);
+            PathTangents.Add(Tangent2D);
+            PathPerpendiculars.Add(Perp);
+            RoadDeckHeights.Add(RoadDeckZ);
+            RoadDistances.Add(TravelledDistance);
+
             const double LengthForGradient = FMath::Max(
                 1.0, DistanceBefore + DistanceAfter);
             const double DHAlong = SampleIndex == 0 || SampleIndex == SampleCount
@@ -1879,6 +1899,153 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 SegmentTriangles.Add(PreviousRight);
                 SegmentTriangles.Add(CurrentLeft);
                 SegmentTriangles.Add(CurrentRight);
+            }
+        }
+
+        // Build fill embankments on the low sides of the road. The road deck
+        // remains level across its width; the dirt shoulders descend with a
+        // gentle 1:1.5 grade until they meet the sampled terrain. Skip the span
+        // over a classified bridge so this fill never closes the waterway.
+        TArray<int32> LeftToeIndices;
+        TArray<int32> RightToeIndices;
+        TArray<double> LeftToeRuns;
+        TArray<double> RightToeRuns;
+        LeftToeIndices.Reserve(SampleCount + 1);
+        RightToeIndices.Reserve(SampleCount + 1);
+        LeftToeRuns.Reserve(SampleCount + 1);
+        RightToeRuns.Reserve(SampleCount + 1);
+        const double MinimumFillHeight = RoadBlockSize * 0.75;
+        const double MaximumEmbankmentRun = RoadBlockSize * 18.0;
+        const auto AddEmbankmentToe = [&](
+            const FVector2D& EdgeXY,
+            const FVector2D& Outward,
+            double DeckZ,
+            int32 RoadEdgeVertex,
+            double U,
+            bool bSkipFill,
+            double& OutRun) -> int32
+        {
+            OutRun = 0.0;
+            if (bSkipFill)
+            {
+                return RoadEdgeVertex;
+            }
+
+            const double EdgeGroundZ = FSVoxelGenerator::SampleSurfaceHeight(
+                EdgeXY.X, EdgeXY.Y, GenerationSettings);
+            const double EdgeFillHeight = DeckZ - EdgeGroundZ;
+            if (EdgeFillHeight < MinimumFillHeight)
+            {
+                return RoadEdgeVertex;
+            }
+
+            double Run = FMath::Clamp(
+                EdgeFillHeight * 1.5,
+                RoadBlockSize * 0.75,
+                MaximumEmbankmentRun);
+            FVector2D ToeXY = EdgeXY + Outward * static_cast<float>(Run);
+            double ToeGroundZ = FSVoxelGenerator::SampleSurfaceHeight(
+                ToeXY.X, ToeXY.Y, GenerationSettings);
+            double ToeZ = FMath::Min(
+                ToeGroundZ + SafeSurfaceOffset * 0.25,
+                DeckZ - RoadBlockSize * 0.10);
+
+            // Extend the toe if the terrain falls away farther than the first
+            // estimate predicted. A hard maximum keeps very tall banks bounded.
+            const double NeededRun = FMath::Clamp(
+                (DeckZ - ToeZ) * 1.5,
+                RoadBlockSize * 0.75,
+                MaximumEmbankmentRun);
+            if (NeededRun > Run + RoadBlockSize * 0.10)
+            {
+                Run = NeededRun;
+                ToeXY = EdgeXY + Outward * static_cast<float>(Run);
+                ToeGroundZ = FSVoxelGenerator::SampleSurfaceHeight(
+                    ToeXY.X, ToeXY.Y, GenerationSettings);
+                ToeZ = FMath::Min(
+                    ToeGroundZ + SafeSurfaceOffset * 0.25,
+                    DeckZ - RoadBlockSize * 0.10);
+            }
+
+            const double HorizontalRun = FMath::Max(1.0, Run);
+            const double Slope = (DeckZ - ToeZ) / HorizontalRun;
+            const FVector Normal = FVector(
+                static_cast<float>(Outward.X * Slope),
+                static_cast<float>(Outward.Y * Slope),
+                1.0f).GetSafeNormal();
+            const int32 ToeVertex = Vertices.Num();
+            Vertices.Add(FVector(
+                static_cast<float>(ToeXY.X - WorldCenter.X),
+                static_cast<float>(ToeXY.Y - WorldCenter.Y),
+                static_cast<float>(ToeZ)));
+            Normals.Add(Normal);
+            UV0.Add(FVector2D(
+                static_cast<float>(U),
+                static_cast<float>(1.0 + Run / 1000.0)));
+            VertexColors.Add(FLinearColor(0.42f, 0.31f, 0.21f, 1.0f));
+            Tangents.Add(FProcMeshTangent(
+                FVector(PathTangents[ToeSampleIndex].X, PathTangents[ToeSampleIndex].Y, 0.0f),
+                false));
+            OutRun = Run;
+            return ToeVertex;
+        };
+
+        for (int32 ToeSampleIndex = 0; ToeSampleIndex <= SampleCount; ++ToeSampleIndex)
+        {
+            const int32 LeftRoadVertex = FirstVertex + ToeSampleIndex * 2;
+            const int32 RightRoadVertex = LeftRoadVertex + 1;
+            const bool bSkipFill = bBridgeCrossing[ToeSampleIndex] != 0;
+            const FVector2D& Perp = PathPerpendiculars[ToeSampleIndex];
+            double LeftRun = 0.0;
+            double RightRun = 0.0;
+            const int32 LeftToe = AddEmbankmentToe(
+                LeftEdgePositions[ToeSampleIndex],
+                Perp,
+                RoadDeckHeights[ToeSampleIndex],
+                LeftRoadVertex,
+                RoadDistances[ToeSampleIndex] / 1000.0,
+                bSkipFill,
+                LeftRun);
+            const int32 RightToe = AddEmbankmentToe(
+                RightEdgePositions[ToeSampleIndex],
+                Perp * -1.0f,
+                RoadDeckHeights[ToeSampleIndex],
+                RightRoadVertex,
+                RoadDistances[ToeSampleIndex] / 1000.0,
+                bSkipFill,
+                RightRun);
+            LeftToeIndices.Add(LeftToe);
+            RightToeIndices.Add(RightToe);
+            LeftToeRuns.Add(LeftRun);
+            RightToeRuns.Add(RightRun);
+        }
+
+        // Surface vertices are two-per-sample at the beginning of this segment.
+        // Add the earthen slope triangles to the dirt section, even below asphalt.
+        for (int32 SampleIndex = 1; SampleIndex <= SampleCount; ++SampleIndex)
+        {
+            const int32 PreviousLeft = FirstVertex + (SampleIndex - 1) * 2;
+            const int32 PreviousRight = PreviousLeft + 1;
+            const int32 CurrentLeft = FirstVertex + SampleIndex * 2;
+            const int32 CurrentRight = CurrentLeft + 1;
+
+            if (LeftToeRuns[SampleIndex - 1] > 0.0 || LeftToeRuns[SampleIndex] > 0.0)
+            {
+                DirtRoadTriangles.Add(PreviousLeft);
+                DirtRoadTriangles.Add(CurrentLeft);
+                DirtRoadTriangles.Add(LeftToeIndices[SampleIndex - 1]);
+                DirtRoadTriangles.Add(LeftToeIndices[SampleIndex - 1]);
+                DirtRoadTriangles.Add(CurrentLeft);
+                DirtRoadTriangles.Add(LeftToeIndices[SampleIndex]);
+            }
+            if (RightToeRuns[SampleIndex - 1] > 0.0 || RightToeRuns[SampleIndex] > 0.0)
+            {
+                DirtRoadTriangles.Add(PreviousRight);
+                DirtRoadTriangles.Add(RightToeIndices[SampleIndex - 1]);
+                DirtRoadTriangles.Add(CurrentRight);
+                DirtRoadTriangles.Add(RightToeIndices[SampleIndex - 1]);
+                DirtRoadTriangles.Add(RightToeIndices[SampleIndex]);
+                DirtRoadTriangles.Add(CurrentRight);
             }
         }
 
