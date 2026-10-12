@@ -15,6 +15,8 @@ using FSVoxelMinedNodeSet = TSet<FIntVector>;
 // Seed-generated road blocks are sampled directly by the terrain density field.
 // The shared immutable map avoids copying thousands of road cells into every chunk.
 using FSVoxelRoadBlockMap = TMap<FIntVector, EVoxelBlock>;
+// Continuous top elevation for each generated road cell, keyed by the same cell.
+using FSVoxelRoadSurfaceHeightMap = TMap<FIntVector, double>;
 using FSVoxelRoadSampleBinSet = TSet<FIntVector>;
 
 struct FSVoxelGenerationSettings
@@ -119,6 +121,8 @@ struct FSVoxelGenerationSettings
 	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedRoadBlocks;
 	// Road carriageways are part of the scalar terrain field, not separate cube actors.
 	TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlocks;
+	// Continuous deck elevations prevent the road's top from snapping to voxel planes.
+	TSharedPtr<const FSVoxelRoadSurfaceHeightMap, ESPMode::ThreadSafe> RoadSurfaceHeights;
 	// Coarse 3D occupancy bins let density queries reject samples far from any
 	// road with one set lookup instead of 27 TMap searches.
 	TSharedPtr<const FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe> RoadSampleBins;
