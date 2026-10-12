@@ -38,6 +38,12 @@ public:
         const FSVoxelGenerationSettings& GenerationSettings,
         bool bEnableCollision);
 
+    /** Full immutable snapshot used by interaction ray-marching. */
+    TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> GetRoadBlockSnapshot() const
+    {
+        return RoadBlockSnapshot;
+    }
+
     /** Return only road cells that overlap a chunk plus a small LOD/transition border. */
     TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> GetRoadBlockSnapshotForChunk(
         const FIntVector& ChunkOriginCells,
@@ -74,6 +80,7 @@ private:
     UMaterialInterface* ActiveAsphaltRoadMaterial = nullptr;
 
     TMap<FIntVector, EVoxelBlock> RoadBlockTypes;
+    TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlockSnapshot;
     // 32x32-cell XY buckets make per-chunk road snapshot extraction independent
     // of the total number of roads in the full world.
     TMap<FIntPoint, TArray<FIntVector>> RoadBlockBins;
