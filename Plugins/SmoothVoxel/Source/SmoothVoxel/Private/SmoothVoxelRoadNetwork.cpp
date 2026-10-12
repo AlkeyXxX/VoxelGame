@@ -151,10 +151,13 @@ bool ASmoothVoxelRoadNetwork::GetRoadBlockTypeAtCell(
     const FIntVector& Cell,
     EVoxelBlock& OutBlock) const
 {
-    if (const EVoxelBlock* Block = RoadBlockTypes.Find(Cell))
+    if (RoadBlockSnapshot.IsValid())
     {
-        OutBlock = *Block;
-        return true;
+        if (const EVoxelBlock* Block = RoadBlockSnapshot->Find(Cell))
+        {
+            OutBlock = *Block;
+            return true;
+        }
     }
     return false;
 }
@@ -166,7 +169,8 @@ ASmoothVoxelRoadNetwork::GetRoadBlockSnapshotForChunk(
     float BaseVoxelSize,
     float VoxelSize) const
 {
-    if (RoadBlockBins.Num() == 0 || CellsPerAxis <= 0)
+    if (RoadBlockBins.Num() == 0 || CellsPerAxis <= 0 ||
+        !RoadBlockSnapshot.IsValid())
     {
         return nullptr;
     }
@@ -212,7 +216,7 @@ ASmoothVoxelRoadNetwork::GetRoadBlockSnapshotForChunk(
                 {
                     continue;
                 }
-                if (const EVoxelBlock* Block = RoadBlockTypes.Find(Cell))
+                if (const EVoxelBlock* Block = RoadBlockSnapshot->Find(Cell))
                 {
                     LocalRoadBlocks.Add(Cell, *Block);
                 }
@@ -3869,7 +3873,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             ? Value / RoadBlockBinSize
             : (Value - (RoadBlockBinSize - 1)) / RoadBlockBinSize;
     };
-    RoadBlockSnapshot = MakeShared<FSVoxelRoadBlockMap, ESPMode::ThreadSafe>(RoadBlockTypes);
     constexpr int32 RoadSampleBinSize = 8;
     const auto FloorDivideByRoadSampleBin = [RoadSampleBinSize](int32 Value) -> int32
     {
@@ -3906,6 +3909,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
     RoadSampleBinsSnapshot = MakeShared<FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe>(
         MoveTemp(RoadSampleBins));
+    // The generation map is no longer needed on the actor after bins are built.
+    // Move it into the immutable snapshot instead of duplicating the full TMap.
+    RoadBlockSnapshot = MakeShared<FSVoxelRoadBlockMap, ESPMode::ThreadSafe>(
+        MoveTemp(RoadBlockTypes));
 
     // Flat road stretches still work: the shared road-cell map produces their
     // carriageway inside terrain chunks, even when there are no side slopes.
@@ -3992,8 +3999,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     const auto CountRoadBlocks = [this](EVoxelBlock BlockType) -> int32
     {
+        if (!RoadBlockSnapshot.IsValid())
+        {
+            return 0;
+        }
         int32 Count = 0;
-        for (const TPair<FIntVector, EVoxelBlock>& RoadBlock : RoadBlockTypes)
+        for (const TPair<FIntVector, EVoxelBlock>& RoadBlock : *RoadBlockSnapshot)
         {
             if (RoadBlock.Value == BlockType)
             {
