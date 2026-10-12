@@ -1193,6 +1193,27 @@ void ASmoothVoxelOctreeWorld::UpdateRoadNetwork()
 		RoadSettingsStep,
 		false);
 
+	// Road surfaces use the same logical block definitions as the rest of the
+	// game. Explicit per-road overrides take precedence; missing table rows or
+	// materials fall back to the actor's built-in gravel/concrete materials.
+	UMaterialInterface* EffectiveDirtRoadMaterial = DirtRoadMaterial;
+	if (!EffectiveDirtRoadMaterial)
+	{
+		const FVoxelBlockDefinition DirtRoadDefinition =
+			UVoxelBlockLibrary::GetBlockDefinitionFromTable(
+				BlockDataTable, EVoxelBlock::DirtRoad);
+		EffectiveDirtRoadMaterial = DirtRoadDefinition.Material.LoadSynchronous();
+	}
+
+	UMaterialInterface* EffectiveAsphaltRoadMaterial = RoadMaterial;
+	if (!EffectiveAsphaltRoadMaterial)
+	{
+		const FVoxelBlockDefinition AsphaltDefinition =
+			UVoxelBlockLibrary::GetBlockDefinitionFromTable(
+				BlockDataTable, EVoxelBlock::Asphalt);
+		EffectiveAsphaltRoadMaterial = AsphaltDefinition.Material.LoadSynchronous();
+	}
+
 	RoadNetworkActor->ConfigureRoadNetwork(
 		RootWorldCenter,
 		GetWorldSizeCentimeters(),
@@ -1200,7 +1221,8 @@ void ASmoothVoxelOctreeWorld::UpdateRoadNetwork()
 		RoadWidth,
 		RoadSampleSpacing,
 		RoadSurfaceOffset,
-		RoadMaterial,
+		EffectiveDirtRoadMaterial,
+		EffectiveAsphaltRoadMaterial,
 		RoadGenerationSettings,
 		bRoadCollision);
 }
