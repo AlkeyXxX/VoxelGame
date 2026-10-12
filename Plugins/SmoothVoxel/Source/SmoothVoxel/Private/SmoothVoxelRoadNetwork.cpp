@@ -1361,6 +1361,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 return TNumericLimits<double>::Max();
             };
 
+            bool bCouldNotMeetRiverSetback = false;
             auto TrimRiverEnd = [&](bool bTrimStart)
             {
                 int32 EndpointIndex = bTrimStart ? 0 : Path.Num() - 1;
@@ -1448,9 +1449,21 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         bBridgeCrossing.RemoveAt(EndpointIndex, 1, false);
                     }
                 }
+                if (Path.Num() <= 2 &&
+                    (!bReachedDryTerrain || RemovedDistance + 1.0 < RequiredBacktrack))
+                {
+                    bCouldNotMeetRiverSetback = true;
+                }
             };
             TrimRiverEnd(true);
             TrimRiverEnd(false);
+            if (bCouldNotMeetRiverSetback)
+            {
+                ++SkippedRouteCount;
+                UE_LOG(LogTemp, Verbose,
+                    TEXT("SmoothVoxel roads: dropped a short ordinary-road stub that could not maintain river setback."));
+                return;
+            }
             SampleCount = Path.Num() - 1;
             if (SampleCount < 1)
             {
