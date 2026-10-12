@@ -2162,6 +2162,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // Aim for a substantial rural network without letting new dirt lanes cross
     // existing roads or overlap them for long stretches.
     const int32 DesiredRuralConnectorCount = FMath::Max(1, Sites.Num() / 4);
+    int32 RuralConnectorsBuilt = 0;
     const double RuralConnectorEndpointSpacing = Spacing * 0.65;
     const double RuralConnectorEndpointSpacingSquared =
         FMath::Square(RuralConnectorEndpointSpacing);
@@ -2387,6 +2388,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 ++RuralConnectorCountByRoad.FindOrAdd(BestPathBIndex);
                 RuralEndpointsByRoad.FindOrAdd(BestPathAIndex).Add(BestStart);
                 RuralEndpointsByRoad.FindOrAdd(BestPathBIndex).Add(BestEnd);
+                ++RuralConnectorsBuilt;
             }
         }
         else
@@ -2472,10 +2474,68 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
     Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
 
+    int32 TemperateSiteCount = 0;
+    int32 DesertSiteCount = 0;
+    int32 SnowSiteCount = 0;
+    int32 TemperateHubCount = 0;
+    int32 DesertHubCount = 0;
+    int32 SnowHubCount = 0;
+    int32 DesertMajorCityCount = 0;
+    int32 SnowMajorCityCount = 0;
+    const auto CountBiome = [&](const FVector2D& Position,
+        int32& OutTemperate, int32& OutDesert, int32& OutSnow)
+    {
+        const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(
+            Position.X, Position.Y, GenerationSettings);
+        if (Biome == ESVoxelBiome::Desert)
+        {
+            ++OutDesert;
+        }
+        else if (Biome == ESVoxelBiome::Snow)
+        {
+            ++OutSnow;
+        }
+        else
+        {
+            ++OutTemperate;
+        }
+    };
+    for (const auto& SiteEntry : Sites)
+    {
+        CountBiome(SiteEntry.Value,
+            TemperateSiteCount, DesertSiteCount, SnowSiteCount);
+    }
+    for (const FIntPoint& HubCell : RoadHubCells)
+    {
+        if (const FVector2D* HubPosition = Sites.Find(HubCell))
+        {
+            CountBiome(*HubPosition,
+                TemperateHubCount, DesertHubCount, SnowHubCount);
+        }
+    }
+    for (const FIntPoint& CityCell : MajorCityCells)
+    {
+        if (const FVector2D* CityPosition = Sites.Find(CityCell))
+        {
+            const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(
+                CityPosition->X, CityPosition->Y, GenerationSettings);
+            if (Biome == ESVoxelBiome::Desert)
+            {
+                ++DesertMajorCityCount;
+            }
+            else if (Biome == ESVoxelBiome::Snow)
+            {
+                ++SnowMajorCityCount;
+            }
+        }
+    }
+
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads: %d major cities, %d hubs; %d total segments (%d highway, %d ordinary, %d dirt) from %d sites (%d samples), %d bridges; skipped %d routes and %d unsafe bridges."),
-        MajorCityCells.Num(), RoadHubCells.Num(), RoadSegmentCount,
-        HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
-        Sites.Num(), TotalRoadSamples, BuiltBridgeCount,
+        TEXT("SmoothVoxel roads: %d major cities (%d desert, %d snow), %d hubs; %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges; skipped %d routes and %d unsafe bridges."),
+        MajorCityCells.Num(), DesertMajorCityCount, SnowMajorCityCount, RoadHubCells.Num(),
+        RoadSegmentCount, HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
+        Sites.Num(), TemperateSiteCount, DesertSiteCount, SnowSiteCount,
+        TemperateHubCount, DesertHubCount, SnowHubCount,
+        SmallSettlementCells.Num(), RuralConnectorsBuilt, BuiltBridgeCount,
         SkippedRouteCount, SkippedUnsafeBridgeCount);
 }
