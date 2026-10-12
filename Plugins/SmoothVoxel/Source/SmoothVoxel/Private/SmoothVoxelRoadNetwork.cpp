@@ -90,6 +90,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const double DirtRoadWidth = RoadBlockSize * 3.0;
     const double OrdinaryRoadWidth = RoadBlockSize * 10.0;
     const double HighwayRoadWidth = RoadBlockSize * 20.0;
+    const int32 CityBlockCount = FMath::Clamp(
+        FMath::RoundToInt((Spacing * 0.13 / RoadBlockSize) * 0.5) * 2, 46, 74);
+    const double CityBlockSize = static_cast<double>(CityBlockCount) * RoadBlockSize;
+    const double CityPortDistance = CityBlockSize * 2.0;
     (void)RoadWidth; // Retained for compatibility; road classes now scale with block size.
     const double SafeSampleSpacing = FMath::Clamp(
         std::abs(static_cast<double>(SampleSpacing)), 250.0, 5000.0);
@@ -277,6 +281,15 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // is the approximate direction along the channel.
         OutTangent = FVector2D(-Gradient.Y, Gradient.X).GetSafeNormal();
         return OutTangent.SizeSquared() > 0.5f;
+    };
+
+    const auto SnapToCardinal = [](const FVector2D& Direction) -> FVector2D
+    {
+        if (FMath::Abs(Direction.X) >= FMath::Abs(Direction.Y))
+        {
+            return FVector2D(Direction.X >= 0.0f ? 1.0f : -1.0f, 0.0f);
+        }
+        return FVector2D(0.0f, Direction.Y >= 0.0f ? 1.0f : -1.0f);
     };
 
     // Test a direct road segment against cached terrain, lake and river rules.
@@ -1202,24 +1215,67 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             2,
             FMath::Min(12, Sites.Num()));
 
+    // Prefer at least one viable forest POI as a major city when the map contains
+    // one, so a main highway is guaranteed to reach a green exploration region.
+    TArray<FIntPoint> CityCandidateCells;
+    CityCandidateCells.Reserve(SortedSiteCells.Num());
+    FIntPoint PreferredForestCity = FIntPoint::ZeroValue;
+    bool bFoundForestCity = false;
+    const double CityMargin = CityPortDistance + HighwayRoadWidth * 0.5;
+    for (const FIntPoint& Candidate : SortedSiteCells)
+    {
+        const FVector2D* Position = Sites.Find(Candidate);
+        if (!Position ||
+            Position->X - CityMargin < MinX || Position->X + CityMargin > MaxX ||
+            Position->Y - CityMargin < MinY || Position->Y + CityMargin > MaxY)
+        {
+            continue;
+        }
+        if (!bFoundForestCity &&
+            FSVoxelGenerator::SampleBiome(
+                Position->X, Position->Y, GenerationSettings) == ESVoxelBiome::Forest)
+        {
+            PreferredForestCity = Candidate;
+            bFoundForestCity = true;
+        }
+    }
+    if (bFoundForestCity)
+    {
+        CityCandidateCells.Add(PreferredForestCity);
+    }
+    for (const FIntPoint& Candidate : SortedSiteCells)
+    {
+        if (!bFoundForestCity || Candidate != PreferredForestCity)
+        {
+            CityCandidateCells.Add(Candidate);
+        }
+    }
+
     TArray<FIntPoint> MajorCityCells;
     TSet<FIntPoint> MajorCitySet;
     MajorCityCells.Reserve(TargetMajorCityCount);
     MajorCitySet.Reserve(TargetMajorCityCount);
     const double MinimumCitySeparationSquared = FMath::Square(Spacing * 1.25);
-    for (const FIntPoint& Candidate : SortedSiteCells)
+    for (const FIntPoint& Candidate : CityCandidateCells)
     {
         if (MajorCityCells.Num() >= TargetMajorCityCount)
         {
             break;
         }
-        const FVector2D* CandidatePosition = Sites.Find(Candidate);
-        bool bFarEnough = CandidatePosition != nullptr;
+        const FVector2D* Position = Sites.Find(Candidate);
+        if (!Position ||
+            Position->X - CityMargin < MinX || Position->X + CityMargin > MaxX ||
+            Position->Y - CityMargin < MinY || Position->Y + CityMargin > MaxY)
+        {
+            continue;
+        }
+
+        bool bFarEnough = true;
         for (const FIntPoint& ExistingCell : MajorCityCells)
         {
             const FVector2D* ExistingPosition = Sites.Find(ExistingCell);
-            if (CandidatePosition && ExistingPosition &&
-                FVector2D::DistSquared(*CandidatePosition, *ExistingPosition) <
+            if (ExistingPosition &&
+                FVector2D::DistSquared(*Position, *ExistingPosition) <
                     MinimumCitySeparationSquared)
             {
                 bFarEnough = false;
@@ -1232,17 +1288,33 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             MajorCitySet.Add(Candidate);
         }
     }
-    // The spacing guard is best-effort; small maps still get enough city nodes.
-    for (const FIntPoint& Candidate : SortedSiteCells)
+    // On small maps, fill any remaining city slots while still respecting margins.
+    for (const FIntPoint& Candidate : CityCandidateCells)
     {
         if (MajorCityCells.Num() >= TargetMajorCityCount)
         {
             break;
         }
-        if (!MajorCitySet.Contains(Candidate))
+        const FVector2D* Position = Sites.Find(Candidate);
+        if (!Position || MajorCitySet.Contains(Candidate) ||
+            Position->X - CityMargin < MinX || Position->X + CityMargin > MaxX ||
+            Position->Y - CityMargin < MinY || Position->Y + CityMargin > MaxY)
         {
-            MajorCityCells.Add(Candidate);
-            MajorCitySet.Add(Candidate);
+            continue;
+        }
+        MajorCityCells.Add(Candidate);
+        MajorCitySet.Add(Candidate);
+    }
+
+    // City centres lie on the global block lattice, not at seed-jittered site positions.
+    TMap<FIntPoint, FVector2D> MajorCityCenters;
+    for (const FIntPoint& CityCell : MajorCityCells)
+    {
+        if (const FVector2D* Position = Sites.Find(CityCell))
+        {
+            MajorCityCenters.Add(CityCell, FVector2D(
+                FMath::RoundToInt(Position->X / RoadBlockSize) * RoadBlockSize,
+                FMath::RoundToInt(Position->Y / RoadBlockSize) * RoadBlockSize));
         }
     }
 
@@ -1251,8 +1323,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     TMap<FIntPoint, TArray<FVector2D>> MajorCityDirections;
     if (MajorCityCells.Num() >= 2)
     {
-        // Prim-style minimum spanning tree: every major city belongs to one
-        // connected highway backbone, without a ring of redundant long roads.
+        // Prim tree connects every major city without creating redundant highway rings.
         TSet<FIntPoint> ConnectedCities;
         ConnectedCities.Add(MajorCityCells[0]);
         while (ConnectedCities.Num() < MajorCityCells.Num())
@@ -1267,7 +1338,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 {
                     continue;
                 }
-                const FVector2D* From = Sites.Find(FromCell);
+                const FVector2D* From = MajorCityCenters.Find(FromCell);
                 if (!From)
                 {
                     continue;
@@ -1278,7 +1349,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     {
                         continue;
                     }
-                    const FVector2D* To = Sites.Find(ToCell);
+                    const FVector2D* To = MajorCityCenters.Find(ToCell);
                     if (!To)
                     {
                         continue;
@@ -1298,29 +1369,51 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 break;
             }
 
-            const FVector2D* From = Sites.Find(BestFrom);
-            const FVector2D* To = Sites.Find(BestTo);
+            const FVector2D* From = MajorCityCenters.Find(BestFrom);
+            const FVector2D* To = MajorCityCenters.Find(BestTo);
             if (From && To)
             {
+                const FVector2D Direction = SnapToCardinal(*To - *From);
+                const FVector2D ReverseDirection = Direction * -1.0f;
                 if (!MajorCityAxis.Contains(BestFrom))
                 {
-                    MajorCityAxis.Add(BestFrom, (*To - *From).GetSafeNormal());
+                    MajorCityAxis.Add(BestFrom, Direction);
                 }
                 if (!MajorCityAxis.Contains(BestTo))
                 {
-                    MajorCityAxis.Add(BestTo, (*From - *To).GetSafeNormal());
+                    MajorCityAxis.Add(BestTo, ReverseDirection);
                 }
                 ++MajorCityDegree.FindOrAdd(BestFrom);
                 ++MajorCityDegree.FindOrAdd(BestTo);
-                MajorCityDirections.FindOrAdd(BestFrom).Add((*To - *From).GetSafeNormal());
-                MajorCityDirections.FindOrAdd(BestTo).Add((*From - *To).GetSafeNormal());
+                MajorCityDirections.FindOrAdd(BestFrom).AddUnique(Direction);
+                MajorCityDirections.FindOrAdd(BestTo).AddUnique(ReverseDirection);
+
+                // Intercity highways stop at cardinal gates; city approaches are
+                // built separately as straight block-grid-aligned streets.
+                const FVector2D FromPort = *From +
+                    Direction * static_cast<float>(CityPortDistance);
+                const FVector2D ToPort = *To +
+                    ReverseDirection * static_cast<float>(CityPortDistance);
                 BuildSegment(
-                    BestFrom, BestTo, *From, *To,
+                    BestFrom, BestTo, FromPort, ToPort,
                     HighwayRoadWidth, true, true);
             }
             ConnectedCities.Add(BestTo);
         }
     }
+
+    const auto GetRoadNodePosition = [&](const FIntPoint& Cell) -> FVector2D
+    {
+        if (const FVector2D* CityCenter = MajorCityCenters.Find(Cell))
+        {
+            return *CityCenter;
+        }
+        if (const FVector2D* Site = Sites.Find(Cell))
+        {
+            return *Site;
+        }
+        return FVector2D::ZeroVector;
+    };
 
     // Smaller hubs are sparse. Their spanning tree connects them to the
     // intercity backbone with ordinary roads; no fixed all-map rectangular grid.
