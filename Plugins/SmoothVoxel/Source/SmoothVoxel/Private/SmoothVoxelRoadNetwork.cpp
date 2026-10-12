@@ -30,6 +30,14 @@ ASmoothVoxelRoadNetwork::ASmoothVoxelRoadNetwork()
         FallbackRoadMaterial = RoadAsset.Object;
     }
 
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> AsphaltAsset(
+        TEXT("/Game/StarterContent/Materials/M_Concrete_Poured.M_Concrete_Poured"));
+    FallbackAsphaltRoadMaterial = AsphaltAsset.Succeeded()
+        ? AsphaltAsset.Object
+        : (FallbackRoadMaterial
+            ? FallbackRoadMaterial
+            : UMaterial::GetDefaultMaterial(MD_Surface));
+
     // Engine primitive meshes + Starter Content materials keep POIs self-contained.
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeAsset(
         TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -95,22 +103,29 @@ void ASmoothVoxelRoadNetwork::ConfigureRoadNetwork(
     float RoadWidth,
     float SampleSpacing,
     float SurfaceOffset,
-    UMaterialInterface* InRoadMaterial,
+    UMaterialInterface* InDirtRoadMaterial,
+    UMaterialInterface* InAsphaltRoadMaterial,
     const FSVoxelGenerationSettings& GenerationSettings,
     bool bEnableCollision)
 {
     check(IsInGameThread());
 
-    ActiveRoadMaterial = InRoadMaterial
-        ? InRoadMaterial
+    ActiveDirtRoadMaterial = InDirtRoadMaterial
+        ? InDirtRoadMaterial
         : (FallbackRoadMaterial ? FallbackRoadMaterial : UMaterial::GetDefaultMaterial(MD_Surface));
+    ActiveAsphaltRoadMaterial = InAsphaltRoadMaterial
+        ? InAsphaltRoadMaterial
+        : (FallbackAsphaltRoadMaterial
+            ? FallbackAsphaltRoadMaterial
+            : UMaterial::GetDefaultMaterial(MD_Surface));
 
     SetActorLocation(FVector(WorldCenter.X, WorldCenter.Y, 0.0f));
     SetActorHiddenInGame(false);
     SetActorEnableCollision(bEnableCollision);
     if (Mesh)
     {
-        Mesh->SetMaterial(0, ActiveRoadMaterial);
+        Mesh->SetMaterial(0, ActiveDirtRoadMaterial);
+        Mesh->SetMaterial(1, ActiveAsphaltRoadMaterial);
     }
 
     BuildRoadMesh(
@@ -226,8 +241,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
+    // Both road classes share a vertex buffer but use independent triangle
+    // sections/material slots. Earthen embankment triangles are assigned to the
+    // dirt-road section; carriageways use DirtRoad or Asphalt block semantics.
     TArray<FVector> Vertices;
-    TArray<int32> Triangles;
+    TArray<int32> DirtRoadTriangles;
+    TArray<int32> AsphaltRoadTriangles;
     TArray<FVector> Normals;
     TArray<FVector2D> UV0;
     TArray<FLinearColor> VertexColors;
@@ -258,9 +277,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const int32 ExpectedSamples = FMath::Clamp(
         SamplesPerRoad * Sites.Num() * 8,
         0, 300000);
-    Vertices.Reserve(ExpectedSamples * 2);
-    Triangles.Reserve(ExpectedSamples * 6);
-    Normals.Reserve(ExpectedSamples * 2);
+    Vertices.Reserve(ExpectedSamples * 4);
+    DirtRoadTriangles.Reserve(ExpectedSamples * 3);
+    AsphaltRoadTriangles.Reserve(ExpectedSamples * 3);
+    Normals.Reserve(ExpectedSamples * 4);
     UV0.Reserve(ExpectedSamples * 2);
     VertexColors.Reserve(ExpectedSamples * 2);
     Tangents.Reserve(ExpectedSamples * 2);
@@ -1738,6 +1758,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
 
         const int32 FirstVertex = Vertices.Num();
+        TArray<int32>& SegmentTriangles =
+            FullRoadWidth <= DirtRoadWidth + 1.0
+                ? DirtRoadTriangles
+                : AsphaltRoadTriangles;
         double TravelledDistance = 0.0;
         for (int32 SampleIndex = 0; SampleIndex <= SampleCount; ++SampleIndex)
         {
@@ -1848,13 +1872,13 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 // Match the voxel mesher's winding convention: the raw triangle
                 // cross product points into the solid. With the upward vertex normals
                 // above, reverse the index order so the road is front-facing from above.
-                Triangles.Add(PreviousLeft);
-                Triangles.Add(CurrentLeft);
-                Triangles.Add(PreviousRight);
+                SegmentTriangles.Add(PreviousLeft);
+                SegmentTriangles.Add(CurrentLeft);
+                SegmentTriangles.Add(PreviousRight);
 
-                Triangles.Add(PreviousRight);
-                Triangles.Add(CurrentLeft);
-                Triangles.Add(CurrentRight);
+                SegmentTriangles.Add(PreviousRight);
+                SegmentTriangles.Add(CurrentLeft);
+                SegmentTriangles.Add(CurrentRight);
             }
         }
 
@@ -3459,25 +3483,48 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
-    if (Vertices.Num() == 0 || Triangles.Num() == 0)
+    if (Vertices.Num() == 0 ||
+        (DirtRoadTriangles.Num() == 0 && AsphaltRoadTriangles.Num() == 0))
     {
         UE_LOG(LogTemp, Warning, TEXT("SmoothVoxel roads: no road segments were generated."));
         return;
     }
 
-    Mesh->CreateMeshSection_LinearColor(
-        0,
-        Vertices,
-        Triangles,
-        Normals,
-        UV0,
-        TArray<FVector2D>(),
-        TArray<FVector2D>(),
-        TArray<FVector2D>(),
-        VertexColors,
-        Tangents,
-        bEnableCollision);
-    Mesh->SetMaterial(0, ActiveRoadMaterial);
+    const TArray<FVector2D> EmptyUV1;
+    const TArray<FVector2D> EmptyUV2;
+    const TArray<FVector2D> EmptyUV3;
+    if (DirtRoadTriangles.Num() > 0)
+    {
+        Mesh->CreateMeshSection_LinearColor(
+            0,
+            Vertices,
+            DirtRoadTriangles,
+            Normals,
+            UV0,
+            EmptyUV1,
+            EmptyUV2,
+            EmptyUV3,
+            VertexColors,
+            Tangents,
+            bEnableCollision);
+        Mesh->SetMaterial(0, ActiveDirtRoadMaterial);
+    }
+    if (AsphaltRoadTriangles.Num() > 0)
+    {
+        Mesh->CreateMeshSection_LinearColor(
+            1,
+            Vertices,
+            AsphaltRoadTriangles,
+            Normals,
+            UV0,
+            EmptyUV1,
+            EmptyUV2,
+            EmptyUV3,
+            VertexColors,
+            Tangents,
+            bEnableCollision);
+        Mesh->SetMaterial(1, ActiveAsphaltRoadMaterial);
+    }
     Mesh->SetCollisionEnabled(
         bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
     Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
