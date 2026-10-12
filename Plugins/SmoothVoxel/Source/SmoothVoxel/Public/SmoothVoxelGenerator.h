@@ -38,6 +38,10 @@ struct FSVoxelGenerationSettings
 
 	float IsoLevel = 0.0f;
 
+	// Road carriageways use the terrain mesh, but may disable their road-face
+	// collision independently from ordinary terrain chunk collision.
+	bool bEnableRoadCollision = true;
+
 	int32 Seed = 555;
 
 	// Biomes follow one stable layout tied to the finite map rather than independent
