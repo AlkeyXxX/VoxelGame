@@ -478,7 +478,7 @@ void FSVoxelGenerator::SampleBiomeRegionWeights(
         NX * 3.2 + 13.7, NY * 2.7 - 8.4, S.Seed + 4811);
     const double CentralDetailNoise = FBM2D(
         NX * 6.1 - 4.3, NY * 5.4 + 11.9, S.Seed + 4819);
-    const double CentralRadius = 0.54 +
+    const double CentralRadius = 0.68 +
         CentralEdgeNoise * 0.045 + CentralDetailNoise * 0.018;
     const double RadialDistance = std::sqrt(
         NX * NX * 0.96 * 0.96 + NY * NY * 1.04 * 1.04);
@@ -918,8 +918,22 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     float TemperateWeight = 1.0f;
     SampleBiomeRegionWeights(
         X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
-    // Fade river channels and valley shoulders through the same broad desert
-    // transition instead of cutting either off at a categorical biome edge.
+
+    // Use one consistent biome decision for river masks, terrain carving and
+    // visible water. A soft regional blend alone can leave weak river fragments
+    // inside cells already classified as desert, where fixed-level water appears
+    // as isolated floating patches.
+    if (S.bEnableBiomes && SampleBiome(X, Y, S) == ESVoxelBiome::Desert)
+    {
+        OutInfluence = 0.0f;
+        if (OutBankInfluence)
+        {
+            *OutBankInfluence = 0.0f;
+        }
+        return;
+    }
+
+    // Fade the river as it approaches the desert biome boundary.
     const float NonDesertWeight = 1.0f - DesertWeight;
     OutInfluence *= NonDesertWeight;
     if (OutBankInfluence)
