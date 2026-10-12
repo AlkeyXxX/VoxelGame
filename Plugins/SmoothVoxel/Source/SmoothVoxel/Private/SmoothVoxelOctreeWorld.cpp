@@ -675,11 +675,11 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	CreateCompactSection(
 		2, Data, AsphaltRoadTriangles,
 		AsphaltRoadSectionMaterial ? AsphaltRoadSectionMaterial : Material,
-		bCreateCollision);
+		bCreateCollision && PendingSettings.bEnableRoadCollision);
 	CreateCompactSection(
 		3, Data, DirtRoadTriangles,
 		DirtRoadSectionMaterial ? DirtRoadSectionMaterial : Material,
-		bCreateCollision);
+		bCreateCollision && PendingSettings.bEnableRoadCollision);
 	CreateCompactSection(
 		4, EditedBackfaceData, EditedBackfaceAsphaltTriangles,
 		AsphaltRoadSectionMaterial ? AsphaltRoadSectionMaterial : Material,
@@ -1839,6 +1839,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.bUseChunkLatticeCoordinates = true;
 	Settings.NormalSampleStep = FMath::Max(5.0f, EffectiveBaseVoxelSize * 0.5f);
 	Settings.IsoLevel = 0.0f;
+	Settings.bEnableRoadCollision = bRoadCollision;
 	Settings.Seed = Seed;
 	Settings.bEnableBiomes = bEnableBiomes;
 	Settings.BiomeScale = BiomeScale;
