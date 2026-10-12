@@ -127,7 +127,9 @@ namespace
             Settings.BlockEdits.IsValid() && Settings.BlockEdits->Num() > 0;
         const bool bHasMinedNodes =
             Settings.MinedNodes.IsValid() && Settings.MinedNodes->Num() > 0;
-        if (!bHasBlockEdits && !bHasMinedNodes)
+        const bool bHasRoadBlocks =
+            Settings.RoadBlocks.IsValid() && Settings.RoadBlocks->Num() > 0;
+        if (!bHasBlockEdits && !bHasMinedNodes && !bHasRoadBlocks)
         {
             return Density;
         }
@@ -142,6 +144,39 @@ namespace
         // Terrain mining uses MinedNodes as integer voxel-cell coordinates.
         const double RoundRadius = Step * 0.28;
         const double SmoothBlend = Step * 0.10;
+
+        // Treat generated asphalt/dirt road cells as part of the same implicit
+        // solid field as terrain. Their box SDF is unioned first; persistent
+        // MinedNodes are applied afterwards so breaking a road cell removes it
+        // from the terrain mesh and its collision on the next nearby chunk build.
+        if (bHasRoadBlocks)
+        {
+            const double RoadHalfExtent = Step * 0.5 +
+                FMath::Max(0.05, Step * 0.005);
+            for (int32 DZ = -1; DZ <= 1; ++DZ)
+            {
+                for (int32 DY = -1; DY <= 1; ++DY)
+                {
+                    for (int32 DX = -1; DX <= 1; ++DX)
+                    {
+                        const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        if (!Settings.RoadBlocks->Contains(Cell))
+                        {
+                            continue;
+                        }
+
+                        const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
+                        const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
+                        const double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
+                        const double RoadSdf = BoxSdf(
+                            X, Y, Z, CenterX, CenterY, CenterZ,
+                            RoadHalfExtent, 0.0);
+                        Density = static_cast<float>(FMath::Max(
+                            static_cast<double>(Density), -RoadSdf));
+                    }
+                }
+            }
+        }
 
         int8 CandidateStates[27];
         double CandidateSdfs[27];
