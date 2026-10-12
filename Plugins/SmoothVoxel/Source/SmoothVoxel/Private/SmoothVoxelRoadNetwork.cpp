@@ -609,7 +609,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                                      (RiverBank > 0.38f && ParallelAmount > 0.94)) ) ||
                                 (bAllowRiverBankFollowing &&
                                     ((RiverInfluence > 0.35f && bParallelToRiver) ||
-                                     (RiverBank > 0.72f && ParallelAmount > 0.94)))
+                                     (RiverBank > 0.72f && ParallelAmount > 0.94))))
                             {
                                 continue;
                             }
