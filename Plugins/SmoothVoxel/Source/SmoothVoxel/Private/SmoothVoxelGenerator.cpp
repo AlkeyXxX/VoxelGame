@@ -882,18 +882,11 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // channels, while keeping RiverScale as the user-facing tuning control.
     const double Scale = FMath::Max(
         0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
-    const double ConfiguredHalfWidth =
-        FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
-    if (ConfiguredHalfWidth <= 0.0)
+    const double HalfWidth = FMath::Max(0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
+    if (HalfWidth <= 0.0)
     {
         return;
     }
-    // The fixed water mesh is finer than distant terrain LODs. Widen the
-    // shared channel mask enough for the coarsest terrain samples to capture
-    // the bed, while keeping the broad bank shoulder at its authored width.
-    const double HalfWidth = FMath::Max(
-        ConfiguredHalfWidth,
-        std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 0.75);
 
     // Domain warp makes the zero-contours meander instead of looking like a
     // repeated grid. The signed field also provides a stable local channel
@@ -1199,11 +1192,8 @@ double FSVoxelGenerator::SampleSurfaceHeight(
         {
             const double RiverScale = FMath::Max(
                 0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
-            const double ConfiguredRiverHalfWidth = FMath::Max(
-                0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
             const double RiverHalfWidth = FMath::Max(
-                ConfiguredRiverHalfWidth,
-                std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 0.75);
+                0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
             const double ChannelThreshold = FMath::Clamp(
                 RiverHalfWidth * RiverScale * 2.0, 0.0001, 0.20);
             const double BankHalfWidth = FMath::Max(
@@ -1220,12 +1210,11 @@ double FSVoxelGenerator::SampleSurfaceHeight(
                 (3.0 - 2.0 * BankProgress);
             const double BankRise = FMath::Clamp(
                 std::abs(static_cast<double>(S.HillHeight)) * 1.15, 1500.0, 7000.0);
-            // Let the inner bank profile sit slightly below the water plane.
-            // A narrow sub-water shoulder ensures that coarse terrain LODs still
-            // capture the river gorge instead of interpolating a bridge-like land
-            // surface above the separately sampled fixed-level water mesh.
-            const double BankProfileHeight = static_cast<double>(S.RiverWaterLevel) -
-                400.0 + BankRise * SmoothBankProgress;
+            // Let the inner bank profile start slightly above the water plane.
+            // The actual narrow channel is carved to its separate bed level below,
+            // while this broad shoulder gives the bank a gradual visible slope.
+            const double BankProfileHeight = static_cast<double>(S.RiverWaterLevel) +
+                150.0 + BankRise * SmoothBankProgress;
             const double CarvedBankHeight = FMath::Min(SurfaceHeight, BankProfileHeight);
             SurfaceHeight = FMath::Lerp(
                 SurfaceHeight, CarvedBankHeight, static_cast<double>(RiverBankInfluence));
