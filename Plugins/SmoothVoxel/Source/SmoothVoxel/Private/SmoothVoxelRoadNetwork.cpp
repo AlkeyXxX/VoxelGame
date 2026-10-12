@@ -1032,6 +1032,60 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 return;
             }
         }
+        const bool bIsOrdinaryRoad =
+            FMath::IsNearlyEqual(FullRoadWidth, OrdinaryRoadWidth, 1.0);
+        if (bIsOrdinaryRoad && GenerationSettings.bEnableRivers &&
+            BridgesInThisSegment == 0 && Path.Num() > 2)
+        {
+            const double RiverSetbackDistance = RoadBlockSize * 4.5;
+            auto TrimRiverEnd = [&](bool bTrimStart)
+            {
+                int32 EndpointIndex = bTrimStart ? 0 : Path.Num() - 1;
+                if (RiverInfluences[EndpointIndex] <= 0.02f)
+                {
+                    return;
+                }
+                double RemovedDistance = 0.0;
+                while (Path.Num() > 2)
+                {
+                    EndpointIndex = bTrimStart ? 0 : Path.Num() - 1;
+                    if (RemovedDistance >= RiverSetbackDistance &&
+                        RiverInfluences[EndpointIndex] <= 0.02f)
+                    {
+                        break;
+                    }
+                    const int32 AdjacentIndex = bTrimStart ? 1 : Path.Num() - 2;
+                    RemovedDistance += FVector2D::Distance(
+                        Path[EndpointIndex], Path[AdjacentIndex]);
+                    if (bTrimStart)
+                    {
+                        Path.RemoveAt(0, 1, false);
+                        GroundHeights.RemoveAt(0, 1, false);
+                        RoadLifts.RemoveAt(0, 1, false);
+                        RiverInfluences.RemoveAt(0, 1, false);
+                        RiverBankInfluences.RemoveAt(0, 1, false);
+                        bBridgeCrossing.RemoveAt(0, 1, false);
+                    }
+                    else
+                    {
+                        Path.RemoveAt(EndpointIndex, 1, false);
+                        GroundHeights.RemoveAt(EndpointIndex, 1, false);
+                        RoadLifts.RemoveAt(EndpointIndex, 1, false);
+                        RiverInfluences.RemoveAt(EndpointIndex, 1, false);
+                        RiverBankInfluences.RemoveAt(EndpointIndex, 1, false);
+                        bBridgeCrossing.RemoveAt(EndpointIndex, 1, false);
+                    }
+                }
+            };
+            TrimRiverEnd(true);
+            TrimRiverEnd(false);
+            SampleCount = Path.Num() - 1;
+            if (SampleCount < 1)
+            {
+                return;
+            }
+        }
+
         BuiltBridgeCount += BridgesInThisSegment;
 
         if (bRecordAsNetworkRoad)
@@ -1461,23 +1515,23 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 {
                     continue;
                 }
-                const FVector2D* From = Sites.Find(FromCell);
-                if (!From)
+                if (!Sites.Contains(FromCell))
                 {
                     continue;
                 }
+                const FVector2D From = GetRoadNodePosition(FromCell);
                 for (const FIntPoint& ToCell : RoadHubCells)
                 {
                     if (ConnectedHubs.Contains(ToCell))
                     {
                         continue;
                     }
-                    const FVector2D* To = Sites.Find(ToCell);
-                    if (!To)
+                    if (!Sites.Contains(ToCell))
                     {
                         continue;
                     }
-                    const double DistanceSquared = FVector2D::DistSquared(*From, *To);
+                    const FVector2D To = GetRoadNodePosition(ToCell);
+                    const double DistanceSquared = FVector2D::DistSquared(From, To);
                     if (DistanceSquared < BestDistanceSquared)
                     {
                         BestDistanceSquared = DistanceSquared;
@@ -1498,13 +1552,26 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 MajorCitySet.Contains(BestFrom) && MajorCitySet.Contains(BestTo);
             if (!bBothMajor)
             {
-                const FVector2D* From = Sites.Find(BestFrom);
-                const FVector2D* To = Sites.Find(BestTo);
-                if (From && To)
+                const FVector2D From = GetRoadNodePosition(BestFrom);
+                const FVector2D To = GetRoadNodePosition(BestTo);
+                FVector2D RouteStart = From;
+                FVector2D RouteEnd = To;
+                const FVector2D ConnectionDirection = SnapToCardinal(To - From);
+                if (MajorCitySet.Contains(BestFrom))
+                {
+                    RouteStart += ConnectionDirection * static_cast<float>(CityPortDistance);
+                    MajorCityDirections.FindOrAdd(BestFrom).AddUnique(ConnectionDirection);
+                }
+                if (MajorCitySet.Contains(BestTo))
+                {
+                    RouteEnd -= ConnectionDirection * static_cast<float>(CityPortDistance);
+                    MajorCityDirections.FindOrAdd(BestTo).AddUnique(ConnectionDirection * -1.0f);
+                }
+                if (Sites.Contains(BestFrom) && Sites.Contains(BestTo))
                 {
                     BuildSegment(
-                        BestFrom, BestTo, *From, *To,
-                        OrdinaryRoadWidth, false, true);
+                        BestFrom, BestTo, RouteStart, RouteEnd,
+                        OrdinaryRoadWidth, true, true);
                 }
             }
             ConnectedHubs.Add(BestTo);
@@ -1512,8 +1579,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     // Compact 4-by-3 block layouts are generated only around major cities.
-    // The highway corridor occupies the central axis, avoiding stacked meshes.
-    const double CityBlockSize = FMath::Clamp(Spacing * 0.13, 4500.0, 7500.0);
+    // City centres and block intervals are snapped to the global block grid.
     const auto IsRoadPointInBounds = [&](const FVector2D& Point, double FullWidth)
     {
         const double HalfWidth = FullWidth * 0.5;
@@ -1523,7 +1589,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     for (const FIntPoint& CityCell : MajorCityCells)
     {
-        const FVector2D* City = Sites.Find(CityCell);
+        const FVector2D* City = MajorCityCenters.Find(CityCell);
         if (!City)
         {
             continue;
@@ -1532,35 +1598,26 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         FVector2D Axis(1.0f, 0.0f);
         if (const FVector2D* SavedAxis = MajorCityAxis.Find(CityCell))
         {
-            Axis = SavedAxis->GetSafeNormal();
+            Axis = SnapToCardinal(*SavedAxis);
         }
         const FVector2D Perpendicular(-Axis.Y, Axis.X);
 
-        // Ensure the central street continues across the urban grid. Extend the
-        // highway-width axis only on sides without an aligned incoming/outgoing
-        // highway, avoiding duplicate ribbons where the backbone already passes.
-        const TArray<FVector2D>* CityDirections = MajorCityDirections.Find(CityCell);
-        for (const double Sign : { -1.0, 1.0 })
+        // Build straight cardinal central streets between the snapped city
+        // centre and every highway/ordinary-road port.
+        TArray<FVector2D> CityStreetDirections;
+        if (const TArray<FVector2D>* CityDirections = MajorCityDirections.Find(CityCell))
         {
-            const FVector2D SideDirection = Axis * static_cast<float>(Sign);
-            bool bHasHighwayOnSide = false;
-            if (CityDirections)
+            for (const FVector2D& Direction : *CityDirections)
             {
-                for (const FVector2D& Direction : *CityDirections)
-                {
-                    if (FVector2D::DotProduct(Direction, SideDirection) > 0.65)
-                    {
-                        bHasHighwayOnSide = true;
-                        break;
-                    }
-                }
+                CityStreetDirections.AddUnique(SnapToCardinal(Direction));
             }
-            if (bHasHighwayOnSide)
-            {
-                continue;
-            }
+        }
+        CityStreetDirections.AddUnique(Axis);
+        CityStreetDirections.AddUnique(Axis * -1.0f);
+        for (const FVector2D& SideDirection : CityStreetDirections)
+        {
             const FVector2D ExtensionEnd =
-                *City + SideDirection * static_cast<float>(CityBlockSize * 2.0);
+                *City + SideDirection * static_cast<float>(CityPortDistance);
             if (IsRoadPointInBounds(*City, HighwayRoadWidth) &&
                 IsRoadPointInBounds(ExtensionEnd, HighwayRoadWidth))
             {
