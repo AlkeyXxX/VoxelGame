@@ -481,11 +481,11 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			return false;
 		}
 		FIntVector SurfaceCell = LocalPositionToVoxelCell(Center, PendingSettings);
-		// Top faces sit on the upper grid plane. Bias down slightly so they map
-		// to the solid road cell instead of the air cell immediately above.
-		SurfaceCell.Z = FMath::FloorToInt(
-			(Center.Z + PendingSettings.ChunkOriginCells.Z * RoadCellStep -
-				RoadCellStep * 0.01f) / RoadCellStep);
+		// Road tops can lie between voxel planes. Resolve them to the same
+		// integer layer used by the rasterized road cell (ceil(height / step) - 1).
+		SurfaceCell.Z = FMath::CeilToInt(
+			(Center.Z + PendingSettings.ChunkOriginCells.Z * RoadCellStep) /
+			RoadCellStep) - 1;
 		if (PendingSettings.MinedRoadBlocks.IsValid() &&
 			PendingSettings.MinedRoadBlocks->Contains(SurfaceCell))
 		{
@@ -1927,6 +1927,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 			CellsPerAxis,
 			EffectiveBaseVoxelSize,
 			VoxelSize);
+		Settings.RoadSurfaceHeights = RoadNetworkActor->GetRoadSurfaceHeightSnapshot();
 		Settings.RoadSampleBins = RoadNetworkActor->GetRoadSampleBinsSnapshot();
 	}
 	if (bFilterBlockEdits)
@@ -2062,6 +2063,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() cons
 	if (IsValid(RoadNetworkActor))
 	{
 		Settings.RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshot();
+		Settings.RoadSurfaceHeights = RoadNetworkActor->GetRoadSurfaceHeightSnapshot();
 		Settings.RoadSampleBins = RoadNetworkActor->GetRoadSampleBinsSnapshot();
 	}
 	// Interaction probes use the full shared road-removal set.
