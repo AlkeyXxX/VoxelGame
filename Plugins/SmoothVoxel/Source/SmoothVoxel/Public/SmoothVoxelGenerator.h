@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "SmoothVoxelTypes.h"
+#include "VoxelTypes.h"
 
 // Sparse block-cell edits: +1 adds smooth Dirt/Sand, negative values preserve legacy air cuts, and +2 reserves a separately rendered cube without changing terrain density. Ray mining uses FSVoxelMinedNodeSet.
 using FSVoxelBlockEditMap = TMap<FIntVector, int8>;
@@ -11,6 +12,9 @@ using FSVoxelBlockEditCenterMap = TMap<FIntVector, FVector>;
 // corners), so each cut is centred at (Cell + 0.5) * BaseVoxelSize and stays
 // aligned as the ray marches down through a shaft.
 using FSVoxelMinedNodeSet = TSet<FIntVector>;
+// Seed-generated road blocks are sampled directly by the terrain density field.
+// The shared immutable map avoids copying thousands of road cells into every chunk.
+using FSVoxelRoadBlockMap = TMap<FIntVector, EVoxelBlock>;
 
 struct FSVoxelGenerationSettings
 {
@@ -105,6 +109,8 @@ struct FSVoxelGenerationSettings
 	// Immutable mined-cell cuts are separate from placed-cell occupancy so mining
 	// progress can never collide with a block placement at the same integer key.
 	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodes;
+	// Road carriageways are part of the scalar terrain field, not separate cube actors.
+	TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlocks;
 };
 
 class FSVoxelGenerator
