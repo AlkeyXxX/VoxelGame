@@ -748,7 +748,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const FVector2D& End,
         double FullRoadWidth,
         bool bPreferStraight,
-        bool bRecordAsNetworkRoad)
+        bool bRecordAsNetworkRoad,
+        bool bForceGridLine)
     {
         const double SegmentHalfRoadWidth =
             FMath::Max(100.0, std::abs(FullRoadWidth) * 0.5);
@@ -761,7 +762,29 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
         TArray<FVector2D> RoutePoints;
         const bool bAllowRiverBankFollowing = FullRoadWidth <= DirtRoadWidth + 1.0;
-        if (!FindSafeRoute(
+        if (bForceGridLine)
+        {
+            // City streets and approaches stay exactly on world XY axes even if
+            // terrain grades would otherwise make A* bend them diagonally.
+            const int32 CheckSteps = FMath::Max(
+                1, FMath::CeilToInt(static_cast<float>(ChordLength / (RouteGridStep * 0.5))));
+            for (int32 CheckIndex = 0; CheckIndex <= CheckSteps; ++CheckIndex)
+            {
+                const double Alpha = static_cast<double>(CheckIndex) / CheckSteps;
+                const FVector2D CheckPoint = Start + Chord * static_cast<float>(Alpha);
+                const FIntPoint CheckCell(
+                    FMath::RoundToInt(CheckPoint.X / RouteGridStep),
+                    FMath::RoundToInt(CheckPoint.Y / RouteGridStep));
+                if (!GetRouteGridSample(CheckCell).bAllowed)
+                {
+                    ++SkippedRouteCount;
+                    return;
+                }
+            }
+            RoutePoints.Add(Start);
+            RoutePoints.Add(End);
+        }
+        else if (!FindSafeRoute(
             Start, End, RoutePoints, bPreferStraight, bAllowRiverBankFollowing))
         {
             ++SkippedRouteCount;
@@ -771,9 +794,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             return;
         }
 
-        // Round corners into shallow curves. Reject curves which cut a lake or
-        // create a grade beyond the road/river limits, keeping that original corner.
-        if (RoutePoints.Num() >= 3)
+        // Round corners into shallow curves. City-grid segments bypass this so
+        // terrain adaptation cannot introduce diagonal streets inside a city.
+        if (!bForceGridLine && RoutePoints.Num() >= 3)
         {
             TArray<FVector2D> RoundedRoute;
             RoundedRoute.Reserve(RoutePoints.Num() * 2);
@@ -1529,7 +1552,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     ReverseDirection * static_cast<float>(CityPortDistance);
                 BuildSegment(
                     BestFrom, BestTo, FromPort, ToPort,
-                    HighwayRoadWidth, true, true);
+                    HighwayRoadWidth, true, true, false);
             }
             ConnectedCities.Add(BestTo);
         }
@@ -1650,7 +1673,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 {
                     BuildSegment(
                         BestFrom, BestTo, RouteStart, RouteEnd,
-                        OrdinaryRoadWidth, true, true);
+                        OrdinaryRoadWidth, true, true, false);
                 }
             }
             ConnectedHubs.Add(BestTo);
@@ -1702,7 +1725,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     CityCell, CityCell, *City, ExtensionEnd,
-                    HighwayRoadWidth, true, true);
+                    HighwayRoadWidth, true, true, true);
             }
         }
 
@@ -1724,7 +1747,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     CityCell, CityCell, Start, End,
-                    OrdinaryRoadWidth, false, true);
+                    OrdinaryRoadWidth, false, true, true);
             }
         }
 
@@ -1741,7 +1764,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     CityCell, CityCell, Start, End,
-                    OrdinaryRoadWidth, false, true);
+                    OrdinaryRoadWidth, false, true, true);
             }
         }
     }
@@ -1835,7 +1858,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             BuildSegment(
                 FIntPoint::ZeroValue, FIntPoint::ZeroValue,
-                BestStart, BestEnd, DirtRoadWidth, false, false);
+                BestStart, BestEnd, DirtRoadWidth, false, false, false);
         }
     }
 
@@ -1887,7 +1910,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 BuildSegment(
                     POICell, POICell, *POI, BestRoadPoint,
-                    DirtRoadWidth, false, false);
+                    DirtRoadWidth, false, false, false);
             }
         }
     }
