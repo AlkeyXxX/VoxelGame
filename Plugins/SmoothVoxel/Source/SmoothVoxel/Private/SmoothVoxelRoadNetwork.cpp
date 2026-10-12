@@ -2172,12 +2172,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     {
                         continue;
                     }
-                    if (!CanTravelStraight(Start, End, 0.50, true) ||
-                        RuralLinkIntersectsExistingRoad(Start, End))
-                    {
-                        continue;
-                    }
-
                     const FVector2D LinkDirection = Link.GetSafeNormal();
                     const double AlignmentA = FMath::Abs(
                         FVector2D::DotProduct(LinkDirection, TangentA));
@@ -2213,6 +2207,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         AlignmentA * 0.35 + AlignmentB * 0.35 + ForestPenalty;
                     if (Score < BestScore)
                     {
+                        // Do expensive terrain and intersection checks only for candidates
+                        // that would improve the current best connector.
+                        if (!CanTravelStraight(Start, End, 0.50, true) ||
+                            RuralLinkIntersectsExistingRoad(Start, End))
+                        {
+                            continue;
+                        }
+
                         BestScore = Score;
                         BestStart = Start;
                         BestEnd = End;
