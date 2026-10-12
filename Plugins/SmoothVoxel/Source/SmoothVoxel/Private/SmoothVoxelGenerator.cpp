@@ -1170,10 +1170,9 @@ double FSVoxelGenerator::SampleSurfaceHeight(
             static_cast<double>(PlateauWeight));
     }
 
-    // Preserve a little smooth height variation even inside POI clearings, where
-    // the plateau blend would otherwise flatten all interior noise to one value.
-    // This is at least half a metre from crest to trough, with broad enough scale
-    // to stay smooth instead of looking like block-sized bumps.
+    // Fine relief enriches normal terrain, but its weight goes to zero inside a
+    // POI/city plateau so the built-up core remains exactly level. The broad scale
+    // avoids block-sized bumps and the weight fades smoothly at the plateau edge.
     const double MicroScale = FMath::Max(
         0.00000001, std::abs(static_cast<double>(S.DetailScale)));
     const double MicroNoise = FBM2D(
