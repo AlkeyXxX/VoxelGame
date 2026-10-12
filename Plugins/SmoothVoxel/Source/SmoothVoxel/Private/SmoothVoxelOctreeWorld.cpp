@@ -1623,7 +1623,12 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.FlatlandRegionScale = FlatlandRegionScale;
 	Settings.FlatlandCoverage = FlatlandCoverage;
 	Settings.FlatlandCoverageMultiplier = FlatlandCoverageMultiplier;
-	Settings.GentleReliefHeight = GentleReliefHeight;
+	const bool bUseFixedLevelRivers = bEnableRivers && bEnableWater;
+	const float MaximumGentleReliefForRiverLevel = FMath::Max(
+		0.0f, BaseHeight - RiverWaterLevel + 50.0f);
+	Settings.GentleReliefHeight = bUseFixedLevelRivers
+		? FMath::Min(FMath::Abs(GentleReliefHeight), MaximumGentleReliefForRiverLevel)
+		: GentleReliefHeight;
 	Settings.FlatlandNoiseAmplitude = FlatlandNoiseAmplitude;
 	Settings.HillScale = HillScale;
 	Settings.HillHeight = HillHeight;
