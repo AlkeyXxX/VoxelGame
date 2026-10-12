@@ -6,6 +6,7 @@
 #include "SmoothVoxelRoadNetwork.generated.h"
 
 class UProceduralMeshComponent;
+class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInterface;
 
 /**
@@ -51,4 +52,21 @@ private:
 
     UPROPERTY()
     UMaterialInterface* ActiveRoadMaterial = nullptr;
+
+    // Seed-stable landmarks are instanced so large worlds do not spawn hundreds
+    // of independent actors.
+    UPROPERTY()
+    UHierarchicalInstancedStaticMeshComponent* POIWoodCubes = nullptr;
+    UPROPERTY()
+    UHierarchicalInstancedStaticMeshComponent* POIStoneCubes = nullptr;
+    UPROPERTY()
+    UHierarchicalInstancedStaticMeshComponent* POIDarkCubes = nullptr;
+    UPROPERTY()
+    UHierarchicalInstancedStaticMeshComponent* POIRoofCones = nullptr;
+    UPROPERTY()
+    UHierarchicalInstancedStaticMeshComponent* POIWoodCylinders = nullptr;
+    UPROPERTY()
+    UHierarchicalInstancedStaticMeshComponent* POIStoneCylinders = nullptr;
+    UPROPERTY()
+    UHierarchicalInstancedStaticMeshComponent* POIStoneSpheres = nullptr;
 };

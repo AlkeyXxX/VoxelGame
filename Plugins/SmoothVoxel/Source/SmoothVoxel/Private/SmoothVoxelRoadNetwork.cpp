@@ -1,6 +1,7 @@
 #include "SmoothVoxelRoadNetwork.h"
 
 #include "ProceduralMeshComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
@@ -27,6 +28,63 @@ ASmoothVoxelRoadNetwork::ASmoothVoxelRoadNetwork()
     {
         FallbackRoadMaterial = RoadAsset.Object;
     }
+
+    // Engine primitive meshes + Starter Content materials keep POIs self-contained.
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeAsset(
+        TEXT("/Engine/BasicShapes/Cube.Cube"));
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderAsset(
+        TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeAsset(
+        TEXT("/Engine/BasicShapes/Cone.Cone"));
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereAsset(
+        TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> WoodAsset(
+        TEXT("/Game/StarterContent/Materials/M_Wood_Oak.M_Wood_Oak"));
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> PineAsset(
+        TEXT("/Game/StarterContent/Materials/M_Wood_Pine.M_Wood_Pine"));
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> DarkWoodAsset(
+        TEXT("/Game/StarterContent/Materials/M_Wood_Walnut_Worn.M_Wood_Walnut_Worn"));
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneAsset(
+        TEXT("/Game/StarterContent/Materials/M_Rock_Slate.M_Rock_Slate"));
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> SandstoneAsset(
+        TEXT("/Game/StarterContent/Materials/M_Rock_Sandstone.M_Rock_Sandstone"));
+
+    const auto CreatePOIInstances = [this](
+        UHierarchicalInstancedStaticMeshComponent*& Component,
+        const TCHAR* ComponentName,
+        UStaticMesh* StaticMesh,
+        UMaterialInterface* Material)
+    {
+        Component = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(ComponentName);
+        Component->SetupAttachment(Mesh);
+        if (StaticMesh) Component->SetStaticMesh(StaticMesh);
+        if (Material) Component->SetMaterial(0, Material);
+        Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Component->SetGenerateOverlapEvents(false);
+        Component->SetCanEverAffectNavigation(false);
+    };
+
+    CreatePOIInstances(POIWoodCubes, TEXT("POIWoodCubes"),
+        CubeAsset.Succeeded() ? CubeAsset.Object : nullptr,
+        WoodAsset.Succeeded() ? WoodAsset.Object : FallbackRoadMaterial);
+    CreatePOIInstances(POIStoneCubes, TEXT("POIStoneCubes"),
+        CubeAsset.Succeeded() ? CubeAsset.Object : nullptr,
+        StoneAsset.Succeeded() ? StoneAsset.Object : FallbackRoadMaterial);
+    CreatePOIInstances(POIDarkCubes, TEXT("POIDarkCubes"),
+        CubeAsset.Succeeded() ? CubeAsset.Object : nullptr,
+        DarkWoodAsset.Succeeded() ? DarkWoodAsset.Object : FallbackRoadMaterial);
+    CreatePOIInstances(POIRoofCones, TEXT("POIRoofCones"),
+        ConeAsset.Succeeded() ? ConeAsset.Object : nullptr,
+        PineAsset.Succeeded() ? PineAsset.Object : FallbackRoadMaterial);
+    CreatePOIInstances(POIWoodCylinders, TEXT("POIWoodCylinders"),
+        CylinderAsset.Succeeded() ? CylinderAsset.Object : nullptr,
+        PineAsset.Succeeded() ? PineAsset.Object : FallbackRoadMaterial);
+    CreatePOIInstances(POIStoneCylinders, TEXT("POIStoneCylinders"),
+        CylinderAsset.Succeeded() ? CylinderAsset.Object : nullptr,
+        SandstoneAsset.Succeeded() ? SandstoneAsset.Object : FallbackRoadMaterial);
+    CreatePOIInstances(POIStoneSpheres, TEXT("POIStoneSpheres"),
+        SphereAsset.Succeeded() ? SphereAsset.Object : nullptr,
+        StoneAsset.Succeeded() ? StoneAsset.Object : FallbackRoadMaterial);
 }
 
 void ASmoothVoxelRoadNetwork::ConfigureRoadNetwork(
@@ -81,6 +139,13 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     Mesh->ClearAllMeshSections();
+    if (POIWoodCubes) POIWoodCubes->ClearInstances();
+    if (POIStoneCubes) POIStoneCubes->ClearInstances();
+    if (POIDarkCubes) POIDarkCubes->ClearInstances();
+    if (POIRoofCones) POIRoofCones->ClearInstances();
+    if (POIWoodCylinders) POIWoodCylinders->ClearInstances();
+    if (POIStoneCylinders) POIStoneCylinders->ClearInstances();
+    if (POIStoneSpheres) POIStoneSpheres->ClearInstances();
 
     const double SafeWorldSize = FMath::Max(100.0, std::abs(static_cast<double>(WorldSize)));
     const double HalfExtent = SafeWorldSize * 0.5;
@@ -1659,6 +1724,133 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             : HashA < HashB;
     });
 
+    // Materialize visible POIs at the same deterministic sites used by the road
+    // planner. Each green-biome site gets one compact landmark; the road planner
+    // below adds direct dirt access spurs for non-hub sites.
+    int32 GreenPOICount = 0;
+    int32 CabinPOICount = 0;
+    int32 CampPOICount = 0;
+    int32 RuinPOICount = 0;
+    int32 LookoutPOICount = 0;
+    for (const FIntPoint& SiteCell : SortedSiteCells)
+    {
+        const FVector2D* Site = Sites.Find(SiteCell);
+        if (!Site) continue;
+
+        const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(
+            Site->X, Site->Y, GenerationSettings);
+        if (Biome != ESVoxelBiome::Forest && Biome != ESVoxelBiome::Plains)
+        {
+            continue;
+        }
+
+        const double GroundZ = FSVoxelGenerator::SampleSurfaceHeight(
+            Site->X, Site->Y, GenerationSettings);
+        const uint32 SiteHash = StableSiteHash(SiteCell);
+        const float Yaw = static_cast<float>((SiteHash >> 8) % 360u);
+        const FRotator SiteYaw(0.0f, Yaw, 0.0f);
+        const auto PlacePOIPart = [&](
+            UHierarchicalInstancedStaticMeshComponent* Component,
+            float OffsetX,
+            float OffsetY,
+            float OffsetZ,
+            const FVector& Scale,
+            float LocalYaw = 0.0f,
+            float Pitch = 0.0f)
+        {
+            if (!Component || !Component->GetStaticMesh()) return;
+            const FVector RotatedOffset = SiteYaw.RotateVector(FVector(OffsetX, OffsetY, 0.0f));
+            const FVector LocalLocation(
+                static_cast<float>(Site->X - WorldCenter.X) + RotatedOffset.X,
+                static_cast<float>(Site->Y - WorldCenter.Y) + RotatedOffset.Y,
+                static_cast<float>(GroundZ) + OffsetZ);
+            Component->AddInstance(FTransform(
+                FRotator(Pitch, Yaw + LocalYaw, 0.0f),
+                LocalLocation,
+                Scale));
+        };
+
+        const uint32 Roll = SiteHash % 100u;
+        const bool bForest = Biome == ESVoxelBiome::Forest;
+        const bool bBuildCabin = bForest ? Roll < 48u : Roll < 28u;
+        const bool bBuildCamp = bForest
+            ? (Roll >= 48u && Roll < 73u)
+            : (Roll >= 28u && Roll < 48u);
+        const bool bBuildRuins = bForest
+            ? (Roll >= 73u && Roll < 91u)
+            : (Roll >= 48u && Roll < 77u);
+
+        if (bBuildCabin)
+        {
+            // Timber waystation: foundation, cabin body, pitched roof, door,
+            // windows, chimney and a small porch.
+            PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(6.8f, 5.6f, 0.25f));
+            PlacePOIPart(POIWoodCubes, 0, 0, 150, FVector(4.4f, 3.6f, 2.9f));
+            PlacePOIPart(POIRoofCones, 0, 0, 335, FVector(5.4f, 4.8f, 2.25f));
+            PlacePOIPart(POIDarkCubes, 0, -184, 88, FVector(0.75f, 0.16f, 1.75f));
+            PlacePOIPart(POIDarkCubes, -124, -186, 190, FVector(0.62f, 0.14f, 0.56f));
+            PlacePOIPart(POIDarkCubes, 124, -186, 190, FVector(0.62f, 0.14f, 0.56f));
+            PlacePOIPart(POIStoneCylinders, 142, 92, 365, FVector(0.55f, 0.55f, 1.1f));
+            PlacePOIPart(POIWoodCubes, 0, -258, 24, FVector(3.8f, 1.5f, 0.24f));
+            ++CabinPOICount;
+        }
+        else if (bBuildCamp)
+        {
+            // Camps include a small tent, a ring of stones and crossed firewood.
+            PlacePOIPart(POIWoodCubes, 190, 125, 12, FVector(3.5f, 2.9f, 0.22f));
+            PlacePOIPart(POIRoofCones, 190, 125, 120, FVector(2.8f, 2.45f, 2.35f));
+            PlacePOIPart(POIWoodCylinders, 80, 125, 62, FVector(0.23f, 0.23f, 1.25f));
+            PlacePOIPart(POIWoodCylinders, 300, 125, 62, FVector(0.23f, 0.23f, 1.25f));
+            for (int32 StoneIndex = 0; StoneIndex < 8; ++StoneIndex)
+            {
+                const float Angle = static_cast<float>(StoneIndex) * 45.0f;
+                const FVector2D Offset(
+                    FMath::Cos(FMath::DegreesToRadians(Angle)) * 92.0f,
+                    FMath::Sin(FMath::DegreesToRadians(Angle)) * 92.0f);
+                PlacePOIPart(POIStoneSpheres, Offset.X, Offset.Y, 22,
+                    FVector(0.42f, 0.42f, 0.28f));
+            }
+            PlacePOIPart(POIWoodCylinders, -20, 0, 32,
+                FVector(1.65f, 0.17f, 0.17f), 0.0f, 90.0f);
+            PlacePOIPart(POIWoodCylinders, 0, -20, 42,
+                FVector(1.65f, 0.17f, 0.17f), 90.0f, 90.0f);
+            ++CampPOICount;
+        }
+        else if (bBuildRuins)
+        {
+            // Overgrown stone shrine with a broken lintel and fallen stones.
+            PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(6.8f, 6.2f, 0.25f));
+            PlacePOIPart(POIStoneCubes, -175, -145, 115, FVector(0.78f, 0.78f, 2.3f));
+            PlacePOIPart(POIStoneCubes, 175, -145, 115, FVector(0.78f, 0.78f, 2.3f));
+            PlacePOIPart(POIStoneCubes, -175, 145, 80, FVector(0.78f, 0.78f, 1.6f));
+            PlacePOIPart(POIStoneCubes, 175, 145, 80, FVector(0.78f, 0.78f, 1.6f));
+            PlacePOIPart(POIStoneCubes, 0, -145, 250, FVector(4.3f, 0.85f, 0.55f));
+            PlacePOIPart(POIStoneCubes, 0, 145, 210, FVector(4.3f, 0.85f, 0.45f));
+            PlacePOIPart(POIStoneCubes, 0, 0, 48, FVector(1.55f, 1.55f, 0.8f));
+            PlacePOIPart(POIStoneSpheres, -365, 260, 26, FVector(0.7f, 0.7f, 0.42f));
+            PlacePOIPart(POIStoneSpheres, 355, 285, 26, FVector(0.55f, 0.55f, 0.35f));
+            ++RuinPOICount;
+        }
+        else
+        {
+            // Timber lookout tower, elevated platform, guardrails and roof.
+            PlacePOIPart(POIStoneCubes, 0, 0, 12, FVector(4.6f, 4.6f, 0.25f));
+            PlacePOIPart(POIWoodCubes, -145, -145, 230, FVector(0.36f, 0.36f, 4.6f));
+            PlacePOIPart(POIWoodCubes, 145, -145, 230, FVector(0.36f, 0.36f, 4.6f));
+            PlacePOIPart(POIWoodCubes, -145, 145, 230, FVector(0.36f, 0.36f, 4.6f));
+            PlacePOIPart(POIWoodCubes, 145, 145, 230, FVector(0.36f, 0.36f, 4.6f));
+            PlacePOIPart(POIWoodCubes, 0, 0, 465, FVector(4.0f, 4.0f, 0.3f));
+            PlacePOIPart(POIWoodCubes, 0, -190, 505, FVector(3.8f, 0.18f, 0.48f));
+            PlacePOIPart(POIWoodCubes, 0, 190, 505, FVector(3.8f, 0.18f, 0.48f));
+            PlacePOIPart(POIWoodCubes, -190, 0, 505, FVector(0.18f, 3.8f, 0.48f));
+            PlacePOIPart(POIWoodCubes, 190, 0, 505, FVector(0.18f, 3.8f, 0.48f));
+            PlacePOIPart(POIWoodCubes, 0, 0, 580, FVector(2.5f, 2.5f, 1.5f));
+            PlacePOIPart(POIRoofCones, 0, 0, 720, FVector(3.5f, 3.5f, 1.25f));
+            ++LookoutPOICount;
+        }
+        ++GreenPOICount;
+    }
+
     const int32 TargetMajorCityCount = Sites.Num() <= 1
         ? Sites.Num()
         : FMath::Clamp(
@@ -1777,8 +1969,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // Small temperate settlements are deliberately more compact than outer-region
     // cities. They still join the ordinary-road tree, but do not become highway hubs.
     TArray<FIntPoint> SmallSettlementCells;
-    const int32 DesiredSmallSettlementCount = FMath::Clamp(Sites.Num() / 28, 0, 12);
-    const double SmallSettlementSeparationSquared = FMath::Square(Spacing * 2.0);
+    const int32 DesiredSmallSettlementCount = FMath::Clamp(Sites.Num() / 16, 0, 18);
+    const double SmallSettlementSeparationSquared = FMath::Square(Spacing * 1.60);
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
         if (SmallSettlementCells.Num() >= DesiredSmallSettlementCount)
@@ -2314,7 +2506,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // a ring around every POI or another rectangular network.
     // Aim for a substantial rural network without letting new dirt lanes cross
     // existing roads or overlap them for long stretches.
-    const int32 DesiredRuralConnectorCount = FMath::Max(1, Sites.Num() / 4);
+    const int32 DesiredRuralConnectorCount = FMath::Min(120, FMath::Max(1, Sites.Num() / 3));
     int32 RuralConnectorsBuilt = 0;
     const double RuralConnectorEndpointSpacing = Spacing * 0.65;
     const double RuralConnectorEndpointSpacingSquared =
@@ -2684,7 +2876,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads: %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges; skipped %d routes and %d unsafe bridges."),
+        TEXT("SmoothVoxel roads/POIs: %d green POIs (%d cabins, %d camps, %d ruins, %d lookouts); %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges; skipped %d routes and %d unsafe bridges."),
+        GreenPOICount, CabinPOICount, CampPOICount, RuinPOICount, LookoutPOICount,
         MajorCityCells.Num(), DesertMajorCityCount, SnowMajorCityCount,
         RoadHubCells.Num(), CoreTemperateHubCells.Num(),
         RoadSegmentCount, HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
