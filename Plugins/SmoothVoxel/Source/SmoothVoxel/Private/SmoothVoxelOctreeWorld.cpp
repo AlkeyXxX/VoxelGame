@@ -486,6 +486,13 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		SurfaceCell.Z = FMath::FloorToInt(
 			(Center.Z + PendingSettings.ChunkOriginCells.Z * RoadCellStep -
 				RoadCellStep * 0.01f) / RoadCellStep);
+		if (PendingSettings.MinedRoadBlocks.IsValid() &&
+			PendingSettings.MinedRoadBlocks->Contains(SurfaceCell))
+		{
+			// Natural terrain revealed underneath a removed road cell must keep
+			// the biome's terrain material instead of inheriting asphalt/gravel.
+			return false;
+		}
 		const EVoxelBlock* RoadType = PendingSettings.RoadBlocks->Find(SurfaceCell);
 		if (!RoadType || (*RoadType != EVoxelBlock::Asphalt &&
 			*RoadType != EVoxelBlock::DirtRoad))
