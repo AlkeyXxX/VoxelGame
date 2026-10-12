@@ -1173,6 +1173,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     TMap<FIntPoint, FVector2D> MajorCityAxis;
     TMap<FIntPoint, int32> MajorCityDegree;
+    TMap<FIntPoint, TArray<FVector2D>> MajorCityDirections;
     if (MajorCityCells.Num() >= 2)
     {
         // Prim-style minimum spanning tree: every major city belongs to one
@@ -1236,6 +1237,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 }
                 ++MajorCityDegree.FindOrAdd(BestFrom);
                 ++MajorCityDegree.FindOrAdd(BestTo);
+                MajorCityDirections.FindOrAdd(BestFrom).Add((*To - *From).GetSafeNormal());
+                MajorCityDirections.FindOrAdd(BestTo).Add((*From - *To).GetSafeNormal());
                 BuildSegment(
                     BestFrom, BestTo, *From, *To,
                     true, HighwayRoadWidth, true, true);
@@ -1365,13 +1368,31 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
         const FVector2D Perpendicular(-Axis.Y, Axis.X);
 
-        // A leaf city still has a main street continuing out the opposite side
-        // of the centre instead of a highway ending in the middle of town.
-        const int32* Degree = MajorCityDegree.Find(CityCell);
-        if (Degree && *Degree == 1)
+        // Ensure the central street continues across the urban grid. Extend the
+        // highway-width axis only on sides without an aligned incoming/outgoing
+        // highway, avoiding duplicate ribbons where the backbone already passes.
+        const TArray<FVector2D>* CityDirections = MajorCityDirections.Find(CityCell);
+        for (const double Sign : { -1.0, 1.0 })
         {
+            const FVector2D SideDirection = Axis * static_cast<float>(Sign);
+            bool bHasHighwayOnSide = false;
+            if (CityDirections)
+            {
+                for (const FVector2D& Direction : *CityDirections)
+                {
+                    if (FVector2D::DotProduct(Direction, SideDirection) > 0.65)
+                    {
+                        bHasHighwayOnSide = true;
+                        break;
+                    }
+                }
+            }
+            if (bHasHighwayOnSide)
+            {
+                continue;
+            }
             const FVector2D ExtensionEnd =
-                *City - Axis * static_cast<float>(CityBlockSize * 2.0);
+                *City + SideDirection * static_cast<float>(CityBlockSize * 2.0);
             if (IsRoadPointInBounds(*City, HighwayRoadWidth) &&
                 IsRoadPointInBounds(ExtensionEnd, HighwayRoadWidth))
             {
@@ -1591,8 +1612,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     Mesh->SetCollisionResponseToAllChannels(bEnableCollision ? ECR_Block : ECR_Ignore);
 
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads: %d major cities, %d hubs; %d highway, %d ordinary, %d dirt segments from %d sites (%d samples), %d bridges; skipped %d routes and %d unsafe bridges."),
-        MajorCityCells.Num(), RoadHubCells.Num(),
+        TEXT("SmoothVoxel roads: %d major cities, %d hubs; %d total segments (%d highway, %d ordinary, %d dirt) from %d sites (%d samples), %d bridges; skipped %d routes and %d unsafe bridges."),
+        MajorCityCells.Num(), RoadHubCells.Num(), RoadSegmentCount,
         HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
         Sites.Num(), TotalRoadSamples, BuiltBridgeCount,
         SkippedRouteCount, SkippedUnsafeBridgeCount);
