@@ -2671,8 +2671,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
 
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads: %d major cities (%d desert, %d snow), %d hubs; %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges; skipped %d routes and %d unsafe bridges."),
-        MajorCityCells.Num(), DesertMajorCityCount, SnowMajorCityCount, RoadHubCells.Num(),
+        TEXT("SmoothVoxel roads: %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges; skipped %d routes and %d unsafe bridges."),
+        MajorCityCells.Num(), DesertMajorCityCount, SnowMajorCityCount,
+        RoadHubCells.Num(), CoreTemperateHubCells.Num(),
         RoadSegmentCount, HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
         Sites.Num(), TemperateSiteCount, DesertSiteCount, SnowSiteCount,
         TemperateHubCount, DesertHubCount, SnowHubCount,
