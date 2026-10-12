@@ -904,7 +904,7 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     // the same signed field. The inner mask stays narrow enough for a riverbed;
     // the outer bank mask spans tens of metres and is faded at its outer edge.
     const double Threshold = FMath::Clamp(HalfWidth * Scale * 2.0, 0.0001, 0.20);
-    const double BankHalfWidth = FMath::Max(ConfiguredHalfWidth * 10.0, 5000.0);
+    const double BankHalfWidth = FMath::Max(HalfWidth * 10.0, 5000.0);
     const double BankThreshold = FMath::Max(
         Threshold,
         FMath::Min(BankHalfWidth * Scale * 2.0, 0.20));
@@ -1197,7 +1197,7 @@ double FSVoxelGenerator::SampleSurfaceHeight(
             const double ChannelThreshold = FMath::Clamp(
                 RiverHalfWidth * RiverScale * 2.0, 0.0001, 0.20);
             const double BankHalfWidth = FMath::Max(
-                ConfiguredRiverHalfWidth * 10.0, 5000.0);
+                RiverHalfWidth * 10.0, 5000.0);
             const double BankThreshold = FMath::Max(
                 ChannelThreshold,
                 FMath::Min(BankHalfWidth * RiverScale * 2.0, 0.20));
