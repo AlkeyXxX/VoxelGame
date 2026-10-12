@@ -1078,22 +1078,64 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     return;
                 }
 
-                // A dry endpoint close to the channel only needs the remaining
-                // distance; a wet endpoint is also pulled back until it is dry.
-                const double RequiredBacktrack = FMath::Max(
-                    0.0, RiverSetbackDistance - RiverDistance);
+                const bool bEndpointStartsWet = RiverInfluences[EndpointIndex] > 0.02f;
+                // For a wet endpoint, reach dry terrain first, then measure the
+                // full setback from that bank. A dry endpoint only needs the
+                // remaining distance to make a roughly 4.5-block gap.
+                const double RequiredBacktrack = bEndpointStartsWet
+                    ? RiverSetbackDistance
+                    : FMath::Max(0.0, RiverSetbackDistance - RiverDistance);
+                bool bReachedDryTerrain = !bEndpointStartsWet;
                 double RemovedDistance = 0.0;
+
                 while (Path.Num() > 2)
                 {
                     EndpointIndex = bTrimStart ? 0 : Path.Num() - 1;
-                    if (RemovedDistance >= RequiredBacktrack &&
+                    if (bEndpointStartsWet && !bReachedDryTerrain &&
                         RiverInfluences[EndpointIndex] <= 0.02f)
+                    {
+                        bReachedDryTerrain = true;
+                        RemovedDistance = 0.0;
+                    }
+                    if (bReachedDryTerrain && RemovedDistance >= RequiredBacktrack)
                     {
                         break;
                     }
+
                     const int32 AdjacentIndex = bTrimStart ? 1 : Path.Num() - 2;
-                    RemovedDistance += FVector2D::Distance(
+                    const double SegmentLength = FVector2D::Distance(
                         Path[EndpointIndex], Path[AdjacentIndex]);
+                    const double RemainingDistance = FMath::Max(
+                        0.0, RequiredBacktrack - RemovedDistance);
+
+                    // Interpolate the endpoint when the mesh sampling step is
+                    // larger than the setback, instead of cutting off a full extra block row.
+                    if (!bEndpointStartsWet && SegmentLength > RemainingDistance + 1.0)
+                    {
+                        const FVector2D TowardRoad =
+                            (Path[AdjacentIndex] - Path[EndpointIndex]).GetSafeNormal();
+                        const FVector2D NewEndpoint = Path[EndpointIndex] +
+                            TowardRoad * static_cast<float>(RemainingDistance);
+                        Path[EndpointIndex] = NewEndpoint;
+                        GroundHeights[EndpointIndex] = FSVoxelGenerator::SampleSurfaceHeight(
+                            NewEndpoint.X, NewEndpoint.Y, GenerationSettings);
+                        RoadLifts[EndpointIndex] = 0.0;
+                        float NewRiverInfluence = 0.0f;
+                        float NewRiverField = 0.0f;
+                        float NewRiverBankInfluence = 0.0f;
+                        FSVoxelGenerator::SampleRiverMaskAndField(
+                            NewEndpoint.X, NewEndpoint.Y, GenerationSettings,
+                            NewRiverInfluence, NewRiverField, &NewRiverBankInfluence);
+                        RiverInfluences[EndpointIndex] = NewRiverInfluence;
+                        RiverBankInfluences[EndpointIndex] = NewRiverBankInfluence;
+                        bBridgeCrossing[EndpointIndex] = 0;
+                        break;
+                    }
+
+                    if (bReachedDryTerrain)
+                    {
+                        RemovedDistance += SegmentLength;
+                    }
                     if (bTrimStart)
                     {
                         Path.RemoveAt(0, 1, false);
