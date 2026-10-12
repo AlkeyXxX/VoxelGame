@@ -2467,9 +2467,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     if (RoadHubCells.Num() >= 2)
     {
+        // Start from one root even when the highway circuit is expected to be
+        // complete. This ordinary-road tree also repairs connectivity if one
+        // difficult mainline edge is rejected by lake/terrain validation.
         if (MajorCityCells.Num() > 0)
         {
-            for (const FIntPoint& CityCell : MajorCityCells) ConnectedHubs.Add(CityCell);
+            ConnectedHubs.Add(MajorCityCells[0]);
         }
         else
         {
