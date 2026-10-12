@@ -114,6 +114,9 @@ struct FSVoxelGenerationSettings
 	// Immutable mined-cell cuts are separate from placed-cell occupancy so mining
 	// progress can never collide with a block placement at the same integer key.
 	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodes;
+	// Road block removals only suppress the generated road SDF; they must not
+	// carve natural terrain underneath the carriageway.
+	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedRoadBlocks;
 	// Road carriageways are part of the scalar terrain field, not separate cube actors.
 	TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlocks;
 	// Coarse 3D occupancy bins let density queries reject samples far from any
