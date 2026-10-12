@@ -616,6 +616,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     float TemperateBlend = 1.0f;
     SampleBiomeRegionWeights(
         X, Y, S, DesertBlend, WinterBlend, TemperateBlend);
+    (void)TemperateBlend;
     (void)WinterBlend;
 
     const float EffectiveFlatlandCoverage = FMath::Clamp(
@@ -672,18 +673,6 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         (1.0 - static_cast<double>(HillBlend)) *
         (1.0 - static_cast<double>(MountainBlend));
 
-    // Add a second, slightly shorter rolling layer in the central temperate
-    // region. It breaks up broad, nearly level fields without creating hills
-    // large enough to dominate roads, settlements or the river valleys.
-    const double TemperateRollingNoise = FBM2D(
-        X * RegionScale * 1.25,
-        Y * RegionScale * 1.25,
-        S.Seed + 6397);
-    const double TemperateRollingRelief = TemperateRollingNoise * 250.0 *
-        static_cast<double>(TemperateBlend) *
-        (1.0 - static_cast<double>(HillBlend)) *
-        (1.0 - static_cast<double>(MountainBlend));
-
     // Even where the configured desert hill mask is sparse, keep broad,
     // drivable rolling terrain rather than kilometre-wide perfectly flat plains.
     // The relief fades out where real hills begin and is applied before POI
@@ -720,8 +709,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         1.5 * static_cast<double>(DesertBlend);
 
     return static_cast<double>(S.BaseHeight) + MicroRelief + HillRelief +
-        GentleRelief + TemperateRollingRelief + DesertRollingRelief +
-        MountainLift + DuneLift;
+        GentleRelief + DesertRollingRelief + MountainLift + DuneLift;
 }
 
 
@@ -1034,16 +1022,17 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
         return;
     }
 
-    // The terrain mesh can be much coarser than the water grid at far LODs.
-    // Make the basin large enough to be sampled inside its footprint, otherwise
-    // the water can appear as a ring around an uncut central terrain island.
-    const double LODSafeLakeRadius = FMath::Max(
-        std::abs(static_cast<double>(S.LakeRadius)),
-        std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 3.5);
-    const double Radius = FMath::Clamp(LODSafeLakeRadius, 500.0, Spacing * 0.25);
+    const double Radius = FMath::Clamp(
+        std::abs(static_cast<double>(S.LakeRadius)), 500.0, Spacing * 0.25);
     const double Blend = FMath::Clamp(
         std::abs(static_cast<double>(S.LakeShoreBlendDistance)), 0.0,
         Spacing * 0.25 - Radius);
+    // Resolve level before radial mask testing. Boundary samples outside the
+    // lake keep the same elevation, so clipping never interpolates a sloped ramp.
+    OutWaterLevel = Flatness >= 0.5f
+        ? S.RiverWaterLevel
+        : static_cast<float>(SampleUnflattenedSurfaceHeight(SiteX, SiteY, S) - 50.0);
+
     const double DX = X - SiteX;
     const double DY = Y - SiteY;
     const uint32 ShapeHash = HashLattice2D(GridX, GridY, S.Seed + 7477);
@@ -1070,58 +1059,6 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
     {
         return;
     }
-
-    // A lake is allowed only where the complete shore footprint is nearly level.
-    // This rejects hilltops and side slopes instead of cutting a flat basin that
-    // can leave water suspended above the downhill terrain.
-    const double CenterTerrainHeight = SampleUnflattenedSurfaceHeight(SiteX, SiteY, S);
-    double MinimumTerrainHeight = CenterTerrainHeight;
-    double MaximumTerrainHeight = CenterTerrainHeight;
-    double MinimumOuterRimHeight = TNumericLimits<double>::Max();
-    const double ShoreRadius = (Radius + Blend) * 1.12;
-    const double RingRadii[2] = { Radius * 0.65, ShoreRadius };
-    const int32 RingSamples[2] = { 8, 16 };
-    constexpr double MaxLakeTerrainRelief = 450.0; // 4.5 m across the LOD-safe lake footprint.
-
-    for (int32 RingIndex = 0; RingIndex < 2; ++RingIndex)
-    {
-        const double RingRadius = RingRadii[RingIndex];
-        for (int32 SampleIndex = 0; SampleIndex < RingSamples[RingIndex]; ++SampleIndex)
-        {
-            const double SampleAngle = 6.283185307179586 * static_cast<double>(SampleIndex) /
-                static_cast<double>(RingSamples[RingIndex]);
-            const double EllipseX = RingRadius * std::cos(SampleAngle) * AxisX;
-            const double EllipseY = RingRadius * std::sin(SampleAngle) * AxisY;
-            const double OffsetX = EllipseX * CosAngle - EllipseY * SinAngle;
-            const double OffsetY = EllipseX * SinAngle + EllipseY * CosAngle;
-            const double RimHeight = SampleUnflattenedSurfaceHeight(
-                SiteX + OffsetX, SiteY + OffsetY, S);
-
-            MinimumTerrainHeight = FMath::Min(MinimumTerrainHeight, RimHeight);
-            MaximumTerrainHeight = FMath::Max(MaximumTerrainHeight, RimHeight);
-            if (RingIndex == 1)
-            {
-                MinimumOuterRimHeight = FMath::Min(MinimumOuterRimHeight, RimHeight);
-            }
-
-            // Stop immediately when this site is clearly on uneven terrain.
-            if (MaximumTerrainHeight - MinimumTerrainHeight > MaxLakeTerrainRelief)
-            {
-                return;
-            }
-        }
-    }
-
-    // Keep the water plane below every sampled shore point by a safety margin.
-    // The rim is sampled beyond the mask's maximum radial warp, so the lake is
-    // enclosed by terrain on all sides even when shore noise is at its extreme.
-    const double DesiredLakeLevel = Flatness >= 0.5f
-        ? static_cast<double>(S.RiverWaterLevel)
-        : CenterTerrainHeight - 50.0;
-    constexpr double LakeShoreSafetyMargin = 100.0;
-    OutWaterLevel = static_cast<float>(FMath::Min(
-        DesiredLakeLevel,
-        MinimumOuterRimHeight - LakeShoreSafetyMargin));
 
     if (Distance <= Radius || Blend <= SMALL_NUMBER)
     {
