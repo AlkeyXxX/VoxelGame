@@ -217,6 +217,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         float LakeInfluence = 0.0f;
         ESVoxelBiome Biome = ESVoxelBiome::Plains;
         bool bAllowed = true;
+        bool bWideRoadAllowed = true;
     };
 
     TMap<FIntPoint, FRoadGridSample> RouteGridCache;
@@ -264,7 +265,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     { 0.70710678, 0.70710678 }, { 0.70710678, -0.70710678 },
                     { -0.70710678, 0.70710678 }, { -0.70710678, -0.70710678 }
                 };
-                const double ClearanceDistance = RoadBlockSize * 3.0;
+                const double ClearanceDistance =
+                    RoadBlockSize * 3.0 + OrdinaryRoadWidth * 0.5;
                 for (const auto& Direction : LakeDirections)
                 {
                     float NearbyLakeInfluence = 0.0f;
@@ -285,8 +287,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
         // Lake safety includes the shoreline mask and a three-block clearance.
         // River channels are handled separately so deliberate bridges remain possible.
-        Sample.bAllowed = !GenerationSettings.bEnableLakes ||
-            (Sample.LakeInfluence < 0.10f && bLakeClearanceAllowed);
+        Sample.bAllowed = !GenerationSettings.bEnableLakes || Sample.LakeInfluence < 0.10f;
+        Sample.bWideRoadAllowed = Sample.bAllowed && bLakeClearanceAllowed;
         return RouteGridCache.Add(GridCell, Sample);
     };
 
@@ -391,10 +393,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             1, FMath::CeilToInt(static_cast<float>(Length / (RouteGridStep * 0.5))));
         const FVector2D Direction = Chord / static_cast<float>(Length);
         FVector2D PreviousPoint = A;
-        FRoadGridSample Previous = GetRouteGridSample(FIntPoint(
+        FIntPoint PreviousCell(
             FMath::RoundToInt(A.X / RouteGridStep),
-            FMath::RoundToInt(A.Y / RouteGridStep)));
-        if (!Previous.bAllowed)
+            FMath::RoundToInt(A.Y / RouteGridStep));
+        FRoadGridSample Previous = GetRouteGridSample(PreviousCell);
+        if (bAllowRiverBankFollowing ? !Previous.bAllowed : !Previous.bWideRoadAllowed)
         {
             return false;
         }
@@ -407,14 +410,19 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 FMath::RoundToInt(Point.X / RouteGridStep),
                 FMath::RoundToInt(Point.Y / RouteGridStep));
             const FRoadGridSample Current = GetRouteGridSample(Cell);
-            if (!Current.bAllowed)
+            if (bAllowRiverBankFollowing ? !Current.bAllowed : !Current.bWideRoadAllowed)
             {
                 return false;
             }
 
-            const double SegmentLength = FVector2D::Distance(PreviousPoint, Point);
+            // Height samples come from grid-cell centres. Divide by the actual
+            // distance between those centres rather than the finer probe step,
+            // otherwise each cell transition looks like an artificial cliff.
+            const double CellDX = static_cast<double>(Cell.X - PreviousCell.X) * RouteGridStep;
+            const double CellDY = static_cast<double>(Cell.Y - PreviousCell.Y) * RouteGridStep;
+            const double SampleDistance = FMath::Sqrt(CellDX * CellDX + CellDY * CellDY);
             const double Grade = FMath::Abs(Current.Height - Previous.Height) /
-                FMath::Max(1.0, SegmentLength);
+                FMath::Max(1.0, SampleDistance);
             const float RiverInfluence = 0.5f *
                 (Previous.RiverInfluence + Current.RiverInfluence);
             const float RiverBank = 0.5f *
@@ -451,6 +459,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             }
 
             PreviousPoint = Point;
+            PreviousCell = Cell;
             Previous = Current;
         }
         return true;
@@ -489,7 +498,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         if (StartCell == GoalCell)
         {
             const FRoadGridSample& SiteSample = GetRouteGridSample(StartCell);
-            if (!SiteSample.bAllowed)
+            if (bAllowRiverBankFollowing ? !SiteSample.bAllowed : !SiteSample.bWideRoadAllowed)
             {
                 return false;
             }
@@ -499,8 +508,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
 
         // Never let a road terminate inside a lake or its shoreline mask.
-        if (!GetRouteGridSample(StartCell).bAllowed ||
-            !GetRouteGridSample(GoalCell).bAllowed)
+        if ((bAllowRiverBankFollowing
+                ? !GetRouteGridSample(StartCell).bAllowed
+                : !GetRouteGridSample(StartCell).bWideRoadAllowed) ||
+            (bAllowRiverBankFollowing
+                ? !GetRouteGridSample(GoalCell).bAllowed
+                : !GetRouteGridSample(GoalCell).bWideRoadAllowed))
         {
             return false;
         }
@@ -588,7 +601,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 // Copy cached values before requesting neighbouring samples: TMap
                 // insertions may rehash and invalidate references to its elements.
                 const FRoadGridSample Current = GetRouteGridSample(CurrentCell);
-                if (!Current.bAllowed && CurrentIndex != StartIndex && CurrentIndex != GoalIndex)
+                if ((bAllowRiverBankFollowing ? !Current.bAllowed : !Current.bWideRoadAllowed) &&
+                    CurrentIndex != StartIndex && CurrentIndex != GoalIndex)
                 {
                     continue;
                 }
@@ -611,7 +625,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     }
 
                     const FRoadGridSample Next = GetRouteGridSample(NextCell);
-                    if (!Next.bAllowed && NextIndex != GoalIndex)
+                    if ((bAllowRiverBankFollowing ? !Next.bAllowed : !Next.bWideRoadAllowed) &&
+                        NextIndex != GoalIndex)
                     {
                         continue;
                     }
@@ -624,7 +639,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                             GetRouteGridSample(CurrentCell + FIntPoint(Direction[0], 0));
                         const FRoadGridSample SideY =
                             GetRouteGridSample(CurrentCell + FIntPoint(0, Direction[1]));
-                        if (!SideX.bAllowed || !SideY.bAllowed)
+                        if ((bAllowRiverBankFollowing
+                                ? (!SideX.bAllowed || !SideY.bAllowed)
+                                : (!SideX.bWideRoadAllowed || !SideY.bWideRoadAllowed)))
                         {
                             continue;
                         }
