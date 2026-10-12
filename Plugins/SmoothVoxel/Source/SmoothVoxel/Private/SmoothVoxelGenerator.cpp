@@ -617,7 +617,6 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     SampleBiomeRegionWeights(
         X, Y, S, DesertBlend, WinterBlend, TemperateBlend);
     (void)WinterBlend;
-    (void)TemperateBlend;
 
     const float EffectiveFlatlandCoverage = FMath::Clamp(
         FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f) *
@@ -673,6 +672,18 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         (1.0 - static_cast<double>(HillBlend)) *
         (1.0 - static_cast<double>(MountainBlend));
 
+    // Add a second, slightly shorter rolling layer in the central temperate
+    // region. It breaks up broad, nearly level fields without creating hills
+    // large enough to dominate roads, settlements or the river valleys.
+    const double TemperateRollingNoise = FBM2D(
+        X * RegionScale * 1.25,
+        Y * RegionScale * 1.25,
+        S.Seed + 6397);
+    const double TemperateRollingRelief = TemperateRollingNoise * 250.0 *
+        static_cast<double>(TemperateBlend) *
+        (1.0 - static_cast<double>(HillBlend)) *
+        (1.0 - static_cast<double>(MountainBlend));
+
     // Even where the configured desert hill mask is sparse, keep broad,
     // drivable rolling terrain rather than kilometre-wide perfectly flat plains.
     // The relief fades out where real hills begin and is applied before POI
@@ -709,7 +720,8 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         1.5 * static_cast<double>(DesertBlend);
 
     return static_cast<double>(S.BaseHeight) + MicroRelief + HillRelief +
-        GentleRelief + DesertRollingRelief + MountainLift + DuneLift;
+        GentleRelief + TemperateRollingRelief + DesertRollingRelief +
+        MountainLift + DuneLift;
 }
 
 
@@ -1022,8 +1034,13 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
         return;
     }
 
-    const double Radius = FMath::Clamp(
-        std::abs(static_cast<double>(S.LakeRadius)), 500.0, Spacing * 0.25);
+    // The terrain mesh can be much coarser than the water grid at far LODs.
+    // Make the basin large enough to be sampled inside its footprint, otherwise
+    // the water can appear as a ring around an uncut central terrain island.
+    const double LODSafeLakeRadius = FMath::Max(
+        std::abs(static_cast<double>(S.LakeRadius)),
+        std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 3.5);
+    const double Radius = FMath::Clamp(LODSafeLakeRadius, 500.0, Spacing * 0.25);
     const double Blend = FMath::Clamp(
         std::abs(static_cast<double>(S.LakeShoreBlendDistance)), 0.0,
         Spacing * 0.25 - Radius);
@@ -1192,8 +1209,12 @@ double FSVoxelGenerator::SampleSurfaceHeight(
                 (3.0 - 2.0 * BankProgress);
             const double BankRise = FMath::Clamp(
                 std::abs(static_cast<double>(S.HillHeight)) * 1.15, 1500.0, 7000.0);
-            const double BankProfileHeight = static_cast<double>(S.RiverWaterLevel) +
-                150.0 + BankRise * SmoothBankProgress;
+            // Let the inner bank profile sit slightly below the water plane.
+            // A narrow sub-water shoulder ensures that coarse terrain LODs still
+            // capture the river gorge instead of interpolating a bridge-like land
+            // surface above the separately sampled fixed-level water mesh.
+            const double BankProfileHeight = static_cast<double>(S.RiverWaterLevel) -
+                400.0 + BankRise * SmoothBankProgress;
             const double CarvedBankHeight = FMath::Min(SurfaceHeight, BankProfileHeight);
             SurfaceHeight = FMath::Lerp(
                 SurfaceHeight, CarvedBankHeight, static_cast<double>(RiverBankInfluence));
