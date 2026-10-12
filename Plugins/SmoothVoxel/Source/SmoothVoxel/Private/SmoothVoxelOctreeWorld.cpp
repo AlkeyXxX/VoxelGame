@@ -579,107 +579,113 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		}
 	}
 
+	// Compact every material section to only the vertices it references. Passing
+	// the whole terrain vertex buffer to tiny road sections would duplicate
+	// thousands of unused vertices per chunk and waste memory.
+	const TArray<FVector2D> EmptyUV1;
+	const TArray<FVector2D> EmptyUV2;
+	const TArray<FVector2D> EmptyUV3;
+	const auto CreateCompactSection = [&](
+		int32 SectionIndex,
+		const FSVoxelMeshData& Source,
+		const TArray<int32>& SourceTriangles,
+		UMaterialInterface* SectionMaterial,
+		bool bSectionCollision)
+	{
+		if (SourceTriangles.Num() < 3)
+		{
+			return;
+		}
+
+		FSVoxelMeshData Compact;
+		TMap<int32, int32> VertexRemap;
+		VertexRemap.Reserve(SourceTriangles.Num());
+		Compact.Vertices.Reserve(SourceTriangles.Num());
+		Compact.Normals.Reserve(SourceTriangles.Num());
+		Compact.UV0.Reserve(SourceTriangles.Num());
+		Compact.VertexColors.Reserve(SourceTriangles.Num());
+		Compact.Tangents.Reserve(SourceTriangles.Num());
+		Compact.Triangles.Reserve(SourceTriangles.Num());
+
+		for (int32 Index = 0; Index + 2 < SourceTriangles.Num(); Index += 3)
+		{
+			const int32 OldIndices[3] = {
+				SourceTriangles[Index],
+				SourceTriangles[Index + 1],
+				SourceTriangles[Index + 2]};
+			if (!Source.Vertices.IsValidIndex(OldIndices[0]) ||
+				!Source.Vertices.IsValidIndex(OldIndices[1]) ||
+				!Source.Vertices.IsValidIndex(OldIndices[2]))
+			{
+				continue;
+			}
+
+			for (int32 Corner = 0; Corner < 3; ++Corner)
+			{
+				int32* ExistingIndex = VertexRemap.Find(OldIndices[Corner]);
+				if (ExistingIndex)
+				{
+					Compact.Triangles.Add(*ExistingIndex);
+					continue;
+				}
+
+				const int32 NewIndex = Compact.Vertices.Num();
+				VertexRemap.Add(OldIndices[Corner], NewIndex);
+				const int32 OldIndex = OldIndices[Corner];
+				Compact.Vertices.Add(Source.Vertices[OldIndex]);
+				Compact.Normals.Add(Source.Normals.IsValidIndex(OldIndex)
+					? Source.Normals[OldIndex] : FVector::UpVector);
+				Compact.UV0.Add(Source.UV0.IsValidIndex(OldIndex)
+					? Source.UV0[OldIndex] : FVector2D::ZeroVector);
+				Compact.VertexColors.Add(Source.VertexColors.IsValidIndex(OldIndex)
+					? Source.VertexColors[OldIndex] : FLinearColor::White);
+				Compact.Tangents.Add(Source.Tangents.IsValidIndex(OldIndex)
+					? Source.Tangents[OldIndex] : FProcMeshTangent());
+				Compact.Triangles.Add(NewIndex);
+			}
+		}
+
+		if (Compact.Triangles.Num() > 0)
+		{
+			Mesh->CreateMeshSection_LinearColor(
+				SectionIndex,
+				Compact.Vertices,
+				Compact.Triangles,
+				Compact.Normals,
+				Compact.UV0,
+				EmptyUV1,
+				EmptyUV2,
+				EmptyUV3,
+				Compact.VertexColors,
+				Compact.Tangents,
+				bSectionCollision);
+			Mesh->SetMaterial(
+				SectionIndex,
+				SectionMaterial ? SectionMaterial : Material);
+		}
+	};
+
 	// Drop the previous render sections and collision bodies before applying the
 	// new snapshot, preventing stale triangles after road or terrain mining.
 	Mesh->ClearAllMeshSections();
-	if (TerrainTriangles.Num() > 0)
-	{
-		Mesh->CreateMeshSection_LinearColor(
-			0,
-			Data.Vertices,
-			TerrainTriangles,
-			Data.Normals,
-			Data.UV0,
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			Data.VertexColors,
-			Data.Tangents,
-			bCreateCollision);
-	}
-
-	if (EditedBackfaceTerrainTriangles.Num() > 0)
-	{
-		Mesh->CreateMeshSection_LinearColor(
-			1,
-			EditedBackfaceData.Vertices,
-			EditedBackfaceTerrainTriangles,
-			EditedBackfaceData.Normals,
-			EditedBackfaceData.UV0,
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			EditedBackfaceData.VertexColors,
-			EditedBackfaceData.Tangents,
-			false);
-		Mesh->SetMaterial(1, Material);
-	}
-	if (EditedBackfaceAsphaltTriangles.Num() > 0)
-	{
-		Mesh->CreateMeshSection_LinearColor(
-			4,
-			EditedBackfaceData.Vertices,
-			EditedBackfaceAsphaltTriangles,
-			EditedBackfaceData.Normals,
-			EditedBackfaceData.UV0,
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			EditedBackfaceData.VertexColors,
-			EditedBackfaceData.Tangents,
-			false);
-		Mesh->SetMaterial(4, AsphaltRoadSectionMaterial ? AsphaltRoadSectionMaterial : Material);
-	}
-	if (EditedBackfaceDirtTriangles.Num() > 0)
-	{
-		Mesh->CreateMeshSection_LinearColor(
-			5,
-			EditedBackfaceData.Vertices,
-			EditedBackfaceDirtTriangles,
-			EditedBackfaceData.Normals,
-			EditedBackfaceData.UV0,
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			EditedBackfaceData.VertexColors,
-			EditedBackfaceData.Tangents,
-			false);
-		Mesh->SetMaterial(5, DirtRoadSectionMaterial ? DirtRoadSectionMaterial : Material);
-	}
-
-	if (AsphaltRoadTriangles.Num() > 0)
-	{
-		Mesh->CreateMeshSection_LinearColor(
-			2,
-			Data.Vertices,
-			AsphaltRoadTriangles,
-			Data.Normals,
-			Data.UV0,
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			Data.VertexColors,
-			Data.Tangents,
-			bCreateCollision);
-		Mesh->SetMaterial(2, AsphaltRoadSectionMaterial ? AsphaltRoadSectionMaterial : Material);
-	}
-
-	if (DirtRoadTriangles.Num() > 0)
-	{
-		Mesh->CreateMeshSection_LinearColor(
-			3,
-			Data.Vertices,
-			DirtRoadTriangles,
-			Data.Normals,
-			Data.UV0,
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			TArray<FVector2D>(),
-			Data.VertexColors,
-			Data.Tangents,
-			bCreateCollision);
-		Mesh->SetMaterial(3, DirtRoadSectionMaterial ? DirtRoadSectionMaterial : Material);
-	}
+	CreateCompactSection(0, Data, TerrainTriangles, Material, bCreateCollision);
+	CreateCompactSection(1, EditedBackfaceData, EditedBackfaceTerrainTriangles, Material, false);
+	CreateCompactSection(
+		2, Data, AsphaltRoadTriangles,
+		AsphaltRoadSectionMaterial ? AsphaltRoadSectionMaterial : Material,
+		bCreateCollision);
+	CreateCompactSection(
+		3, Data, DirtRoadTriangles,
+		DirtRoadSectionMaterial ? DirtRoadSectionMaterial : Material,
+		bCreateCollision);
+	CreateCompactSection(
+		4, EditedBackfaceData, EditedBackfaceAsphaltTriangles,
+		AsphaltRoadSectionMaterial ? AsphaltRoadSectionMaterial : Material,
+		false);
+	CreateCompactSection(
+		5, EditedBackfaceData, EditedBackfaceDirtTriangles,
+		DirtRoadSectionMaterial ? DirtRoadSectionMaterial : Material,
+		false);
 
 	// Only fine terrain casts shadows; distant coarse chunks otherwise multiply
 	// draw calls in every dynamic shadow pass without meaningful visual gain.
