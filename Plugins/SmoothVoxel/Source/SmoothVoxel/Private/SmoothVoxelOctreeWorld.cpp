@@ -673,7 +673,11 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	struct FWaterClipVertex
 	{
 		FVector2D XY;
-		float Wetness = -1.0f;
+		// Keep body-mask and terrain-intersection clipping separate. Taking Min()
+		// of the two fields before clipping can move shoreline intersections when
+		// the controlling field changes between adjacent grid samples.
+		float BodyWetness = -1.0f;
+		float TerrainWetness = -1.0f;
 		float WaterLevel = 0.0f;
 	};
 
@@ -696,10 +700,14 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	LakeTriangles.Reserve(FMath::Min(Resolution * Resolution / 8, 1000000));
 
 	TArray<float> RiverWetness;
+	TArray<float> RiverSurfaceHead;
 	TArray<float> LakeWetness;
+	TArray<float> LakeSurfaceHead;
 	TArray<float> LakeLevels;
 	RiverWetness.SetNumUninitialized(VertexCount);
+	RiverSurfaceHead.SetNumUninitialized(VertexCount);
 	LakeWetness.SetNumUninitialized(VertexCount);
+	LakeSurfaceHead.SetNumUninitialized(VertexCount);
 	LakeLevels.SetNumUninitialized(VertexCount);
 
 	const double RiverLevel = static_cast<double>(GenerationSettings.RiverWaterLevel);
@@ -707,6 +715,10 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 		100.0, std::abs(static_cast<double>(GenerationSettings.RiverDepth)));
 	const double LakeDepthForMask = FMath::Max(
 		100.0, std::abs(static_cast<double>(GenerationSettings.LakeDepth)));
+	// Leave a small clearance below analytically sampled ground. This absorbs
+	// sub-voxel differences between the smooth terrain triangles and water grid.
+	const double SurfaceIntersectionMargin = FMath::Max(
+		10.0, std::abs(static_cast<double>(GenerationSettings.BaseVoxelSize)) * 0.25);
 
 	for (int32 Y = 0; Y <= Resolution; ++Y)
 	{
@@ -746,15 +758,18 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 					WorldX, WorldY, GenerationSettings);
 			}
 
-			const double RiverHead = (RiverLevel - Ground) / RiverDepthForMask;
-			RiverWetness[Index] = FMath::Min(
-				RiverInfluence - 0.0001f,
-				static_cast<float>(FMath::Clamp(RiverHead, -1.0, 1.0)));
+			const double RiverHead =
+				(RiverLevel - Ground - SurfaceIntersectionMargin) / RiverDepthForMask;
+			RiverWetness[Index] = RiverInfluence - 0.0001f;
+			RiverSurfaceHead[Index] = static_cast<float>(
+				FMath::Clamp(RiverHead, -1.0, 1.0));
 
-			const double LakeHead = (static_cast<double>(LakeLevel) - Ground) / LakeDepthForMask;
-			LakeWetness[Index] = FMath::Min(
-				LakeInfluence - 0.0001f,
-				static_cast<float>(FMath::Clamp(LakeHead, -1.0, 1.0)));
+			const double LakeHead =
+				(static_cast<double>(LakeLevel) - Ground - SurfaceIntersectionMargin) /
+				LakeDepthForMask;
+			LakeWetness[Index] = LakeInfluence - 0.0001f;
+			LakeSurfaceHead[Index] = static_cast<float>(
+				FMath::Clamp(LakeHead, -1.0, 1.0));
 		}
 	}
 
@@ -769,49 +784,83 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 		TArray<FLinearColor>& OutColors,
 		TArray<FProcMeshTangent>& OutTangents)
 	{
-		const FWaterClipVertex Input[3] = { A, B, C };
-		// Clipping one triangle against one scalar half-space yields at most
-		// a convex quad, so fixed stack storage avoids per-triangle allocations.
-		FWaterClipVertex Polygon[4];
-		int32 PolygonCount = 0;
-		FWaterClipVertex Previous = Input[2];
-		bool bPreviousInside = Previous.Wetness > 0.0f;
-
-		for (int32 Corner = 0; Corner < 3; ++Corner)
+		const auto ClipPolygon = [](
+			const FWaterClipVertex* InputPolygon,
+			int32 InputCount,
+			FWaterClipVertex* OutputPolygon,
+			bool bClipBodyMask) -> int32
 		{
-			const FWaterClipVertex Current = Input[Corner];
-			const bool bCurrentInside = Current.Wetness > 0.0f;
-			if (bCurrentInside != bPreviousInside)
+			if (InputCount < 3)
 			{
-				const float Denominator = Previous.Wetness - Current.Wetness;
-				const float T = FMath::Abs(Denominator) > SMALL_NUMBER
-					? FMath::Clamp(Previous.Wetness / Denominator, 0.0f, 1.0f)
-					: 0.5f;
-				FWaterClipVertex Crossing;
-				Crossing.XY = Previous.XY + (Current.XY - Previous.XY) * T;
-				Crossing.WaterLevel = bPreviousInside
-					? Previous.WaterLevel
-					: Current.WaterLevel;
-				Crossing.Wetness = 0.0f;
-				Polygon[PolygonCount++] = Crossing;
+				return 0;
 			}
-			if (bCurrentInside)
-			{
-				Polygon[PolygonCount++] = Current;
-			}
-			Previous = Current;
-			bPreviousInside = bCurrentInside;
-		}
 
+			int32 OutputCount = 0;
+			FWaterClipVertex Previous = InputPolygon[InputCount - 1];
+			float PreviousValue = bClipBodyMask
+				? Previous.BodyWetness : Previous.TerrainWetness;
+			bool bPreviousInside = PreviousValue > 0.0f;
+
+			for (int32 Corner = 0; Corner < InputCount; ++Corner)
+			{
+				const FWaterClipVertex Current = InputPolygon[Corner];
+				const float CurrentValue = bClipBodyMask
+					? Current.BodyWetness : Current.TerrainWetness;
+				const bool bCurrentInside = CurrentValue > 0.0f;
+				if (bCurrentInside != bPreviousInside)
+				{
+					const float Denominator = PreviousValue - CurrentValue;
+					const float T = FMath::Abs(Denominator) > SMALL_NUMBER
+						? FMath::Clamp(PreviousValue / Denominator, 0.0f, 1.0f)
+						: 0.5f;
+					FWaterClipVertex Crossing;
+					Crossing.XY = Previous.XY + (Current.XY - Previous.XY) * T;
+					Crossing.BodyWetness = FMath::Lerp(
+						Previous.BodyWetness, Current.BodyWetness, T);
+					Crossing.TerrainWetness = FMath::Lerp(
+						Previous.TerrainWetness, Current.TerrainWetness, T);
+					Crossing.WaterLevel = FMath::Lerp(
+						Previous.WaterLevel, Current.WaterLevel, T);
+					if (bClipBodyMask)
+					{
+						Crossing.BodyWetness = 0.0f;
+					}
+					else
+					{
+						Crossing.TerrainWetness = 0.0f;
+					}
+					OutputPolygon[OutputCount++] = Crossing;
+				}
+				if (bCurrentInside)
+				{
+					OutputPolygon[OutputCount++] = Current;
+				}
+				Previous = Current;
+				PreviousValue = CurrentValue;
+				bPreviousInside = bCurrentInside;
+			}
+			return OutputCount;
+		};
+
+		const FWaterClipVertex Input[3] = { A, B, C };
+		// First clip to the deterministic river/lake body, then independently
+		// clip that polygon against the actual terrain/water intersection.
+		FWaterClipVertex MaskClippedPolygon[6];
+		FWaterClipVertex FinalPolygon[6];
+		const int32 MaskClippedCount = ClipPolygon(
+			Input, 3, MaskClippedPolygon, true);
+		const int32 PolygonCount = ClipPolygon(
+			MaskClippedPolygon, MaskClippedCount, FinalPolygon, false);
 		if (PolygonCount < 3)
 		{
 			return;
 		}
+
 		for (int32 FanIndex = 1; FanIndex + 1 < PolygonCount; ++FanIndex)
 		{
 			const FWaterClipVertex TriangleVertices[3] =
 			{
-				Polygon[0], Polygon[FanIndex], Polygon[FanIndex + 1]
+				FinalPolygon[0], FinalPolygon[FanIndex], FinalPolygon[FanIndex + 1]
 			};
 			const int32 FirstVertex = OutVertices.Num();
 			for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
@@ -833,16 +882,19 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 			OutTriangles.Add(FirstVertex + 2);
 		}
 	};
-
 	const auto MakeClipVertex = [HalfExtent, Step, Side](
-		int32 X, int32 Y, const TArray<float>& Wetness, const TArray<float>& Levels)
+		int32 X, int32 Y,
+		const TArray<float>& BodyWetness,
+		const TArray<float>& TerrainWetness,
+		const TArray<float>& Levels)
 	{
 		const int32 Index = Y * Side + X;
 		FWaterClipVertex V;
 		V.XY = FVector2D(
 			-HalfExtent + static_cast<float>(X) * Step,
 			-HalfExtent + static_cast<float>(Y) * Step);
-		V.Wetness = Wetness[Index];
+		V.BodyWetness = BodyWetness[Index];
+		V.TerrainWetness = TerrainWetness[Index];
 		V.WaterLevel = Levels[Index];
 		return V;
 	};
@@ -853,10 +905,10 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 	{
 		for (int32 X = 0; X < Resolution; ++X)
 		{
-			const FWaterClipVertex A_R = MakeClipVertex(X, Y, RiverWetness, RiverLevels);
-			const FWaterClipVertex B_R = MakeClipVertex(X + 1, Y, RiverWetness, RiverLevels);
-			const FWaterClipVertex C_R = MakeClipVertex(X + 1, Y + 1, RiverWetness, RiverLevels);
-			const FWaterClipVertex D_R = MakeClipVertex(X, Y + 1, RiverWetness, RiverLevels);
+			const FWaterClipVertex A_R = MakeClipVertex(X, Y, RiverWetness, RiverSurfaceHead, RiverLevels);
+			const FWaterClipVertex B_R = MakeClipVertex(X + 1, Y, RiverWetness, RiverSurfaceHead, RiverLevels);
+			const FWaterClipVertex C_R = MakeClipVertex(X + 1, Y + 1, RiverWetness, RiverSurfaceHead, RiverLevels);
+			const FWaterClipVertex D_R = MakeClipVertex(X, Y + 1, RiverWetness, RiverSurfaceHead, RiverLevels);
 
 			if (GenerationSettings.bEnableRivers)
 			{
@@ -868,10 +920,10 @@ void ASmoothVoxelWaterSurface::BuildSurfaceMesh(
 
 			if (GenerationSettings.bEnableLakes)
 			{
-				const FWaterClipVertex A_L = MakeClipVertex(X, Y, LakeWetness, LakeLevels);
-				const FWaterClipVertex B_L = MakeClipVertex(X + 1, Y, LakeWetness, LakeLevels);
-				const FWaterClipVertex C_L = MakeClipVertex(X + 1, Y + 1, LakeWetness, LakeLevels);
-				const FWaterClipVertex D_L = MakeClipVertex(X, Y + 1, LakeWetness, LakeLevels);
+				const FWaterClipVertex A_L = MakeClipVertex(X, Y, LakeWetness, LakeSurfaceHead, LakeLevels);
+				const FWaterClipVertex B_L = MakeClipVertex(X + 1, Y, LakeWetness, LakeSurfaceHead, LakeLevels);
+				const FWaterClipVertex C_L = MakeClipVertex(X + 1, Y + 1, LakeWetness, LakeSurfaceHead, LakeLevels);
+				const FWaterClipVertex D_L = MakeClipVertex(X, Y + 1, LakeWetness, LakeSurfaceHead, LakeLevels);
 				EmitClippedTriangle(A_L, C_L, B_L,
 					LakeVertices, LakeTriangles, LakeNormals, LakeUVs, LakeColors, LakeTangents);
 				EmitClippedTriangle(A_L, D_L, C_L,
