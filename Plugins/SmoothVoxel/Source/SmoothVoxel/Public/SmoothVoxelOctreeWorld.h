@@ -43,6 +43,9 @@ public:
 	UMaterialInterface* Material = nullptr;
 
 	void SetTerrainMaterial(UMaterialInterface* InMaterial);
+	void SetRoadMaterials(
+		UMaterialInterface* InDirtRoadMaterial,
+		UMaterialInterface* InAsphaltRoadMaterial);
 
 	void QueueBuild(
 		const FSVoxelOctreeNode& Node,
@@ -90,6 +93,10 @@ private:
 		bool bCreateCollision);
 
 	TSharedPtr<FSVoxelMeshData, ESPMode::ThreadSafe> PendingCompletedData;
+	UPROPERTY()
+	UMaterialInterface* DirtRoadSectionMaterial = nullptr;
+	UPROPERTY()
+	UMaterialInterface* AsphaltRoadSectionMaterial = nullptr;
 	int32 PendingCompletedRevision = -1;
 	bool bPendingCompletedCollision = false;
 	bool bHasPendingBuildApply = false;
