@@ -2101,9 +2101,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     const double Alpha = static_cast<double>(ProbeIndex) / 10.0;
                     const FVector2D Probe = LinkStart + Link *
                         static_cast<float>(Alpha);
+                    const double RoadSegmentLengthSquared =
+                        static_cast<double>(RoadSegment.SizeSquared());
                     const double Projection = FMath::Clamp(
-                        FVector2D::DotProduct(Probe - RoadA, RoadSegment) /
-                            FMath::Max(1.0, RoadSegment.SizeSquared()),
+                        static_cast<double>(FVector2D::DotProduct(
+                            Probe - RoadA, RoadSegment)) /
+                            FMath::Max(1.0, RoadSegmentLengthSquared),
                         0.0, 1.0);
                     const FVector2D Closest = RoadA + RoadSegment *
                         static_cast<float>(Projection);
