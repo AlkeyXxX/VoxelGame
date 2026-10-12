@@ -32,7 +32,8 @@ public:
         float RoadWidth,
         float SampleSpacing,
         float SurfaceOffset,
-        UMaterialInterface* InRoadMaterial,
+        UMaterialInterface* InDirtRoadMaterial,
+        UMaterialInterface* InAsphaltRoadMaterial,
         const FSVoxelGenerationSettings& GenerationSettings,
         bool bEnableCollision);
 
@@ -51,7 +52,13 @@ private:
     UMaterialInterface* FallbackRoadMaterial = nullptr;
 
     UPROPERTY()
-    UMaterialInterface* ActiveRoadMaterial = nullptr;
+    UMaterialInterface* FallbackAsphaltRoadMaterial = nullptr;
+
+    UPROPERTY()
+    UMaterialInterface* ActiveDirtRoadMaterial = nullptr;
+
+    UPROPERTY()
+    UMaterialInterface* ActiveAsphaltRoadMaterial = nullptr;
 
     // Seed-stable landmarks are instanced so large worlds do not spawn hundreds
     // of independent actors.
