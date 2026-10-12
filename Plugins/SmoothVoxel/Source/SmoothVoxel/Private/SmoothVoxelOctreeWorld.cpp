@@ -2702,6 +2702,15 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		}
 	}
 
+	EVoxelBlock ExistingRoadBlock = EVoxelBlock::Air;
+	if (IsValid(RoadNetworkActor) &&
+		RoadNetworkActor->GetRoadBlockTypeAtCell(Cell, ExistingRoadBlock))
+	{
+		// Generated road cells are already occupied; a manual block cannot stack
+		// into the carriageway cell itself (placing on its top face is allowed).
+		return false;
+	}
+
 	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
 	if (ExistingEdit && *ExistingEdit > 0)
 	{
