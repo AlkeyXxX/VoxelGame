@@ -531,10 +531,13 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // First search locally; if a river valley or ridge blocks the corridor,
         // retry with a wider detour. Both searches are bounded by the map window.
         const double PaddingBase = FMath::Clamp(ChordLength * 0.35, 8000.0, 60000.0);
-        for (int32 Attempt = 0; Attempt < 2; ++Attempt)
+        for (int32 Attempt = 0; Attempt < 3; ++Attempt)
         {
-            const double AttemptMaxGrade = Attempt == 0 ? MaxRouteGrade : 0.70;
-            const double Padding = PaddingBase * (Attempt == 0 ? 1.0 : 2.0);
+            const double AttemptMaxGrade = Attempt == 0
+                ? MaxRouteGrade
+                : (Attempt == 1 ? 0.55 : 0.70);
+            const double Padding = PaddingBase *
+                (Attempt == 0 ? 1.0 : (Attempt == 1 ? 2.0 : 3.0));
             const int32 MinGridX = FMath::Max(
                 WorldGridMinX, FMath::FloorToInt((FMath::Min(Start.X, End.X) - Padding) / RouteGridStep));
             const int32 MaxGridX = FMath::Min(
@@ -1220,8 +1223,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const double SpanLength = (Path[DeckEnd] - Path[DeckStart]).Size();
             const double BankHeightDifference = FMath::Abs(
                 GroundHeights[DeckEnd] - GroundHeights[DeckStart]);
+            const double BridgeApproachGrade = BankHeightDifference /
+                FMath::Max(1.0, SpanLength);
             const bool bSpanIsBuildable =
-                SpanLength <= 18000.0 && BankHeightDifference <= 6000.0;
+                SpanLength <= 30000.0 &&
+                BankHeightDifference <= 9000.0 &&
+                BridgeApproachGrade <= 0.45;
 
             if (bSpanIsBuildable)
             {
@@ -1611,13 +1618,15 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             2,
             FMath::Min(12, Sites.Num()));
 
-    // Prefer at least one viable forest POI as a major city when the map contains
-    // one, so a main highway is guaranteed to reach a green exploration region.
+    // Reserve several major POIs for the central temperate region, while keeping
+    // the remaining cities available to deserts and snowy regions.
     TArray<FIntPoint> CityCandidateCells;
     CityCandidateCells.Reserve(SortedSiteCells.Num());
-    FIntPoint PreferredForestCity = FIntPoint::ZeroValue;
-    bool bFoundForestCity = false;
+    TSet<FIntPoint> PreferredTemperateCitySet;
     const double CityMargin = CityPortDistance + HighwayRoadWidth * 0.5;
+    const double PreferredCitySeparationSquared = FMath::Square(Spacing * 1.25);
+    const int32 DesiredTemperateCityCount =
+        FMath::Min(5, FMath::Max(3, TargetMajorCityCount / 2));
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
         const FVector2D* Position = Sites.Find(Candidate);
@@ -1627,21 +1636,47 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             continue;
         }
-        if (!bFoundForestCity &&
-            FSVoxelGenerator::SampleBiome(
-                Position->X, Position->Y, GenerationSettings) == ESVoxelBiome::Forest)
+
+        const ESVoxelBiome Biome = FSVoxelGenerator::SampleBiome(
+            Position->X, Position->Y, GenerationSettings);
+        if (Biome != ESVoxelBiome::Forest && Biome != ESVoxelBiome::Plains)
         {
-            PreferredForestCity = Candidate;
-            bFoundForestCity = true;
+            continue;
+        }
+
+        bool bFarEnough = true;
+        for (const FIntPoint& ExistingCell : PreferredTemperateCitySet)
+        {
+            const FVector2D* ExistingPosition = Sites.Find(ExistingCell);
+            if (ExistingPosition &&
+                FVector2D::DistSquared(*Position, *ExistingPosition) <
+                    PreferredCitySeparationSquared)
+            {
+                bFarEnough = false;
+                break;
+            }
+        }
+        if (bFarEnough)
+        {
+            PreferredTemperateCitySet.Add(Candidate);
+            if (PreferredTemperateCitySet.Num() >= DesiredTemperateCityCount)
+            {
+                break;
+            }
         }
     }
-    if (bFoundForestCity)
+
+    // Preserve deterministic ordering and put the selected green-biome cities first.
+    for (const FIntPoint& Candidate : SortedSiteCells)
     {
-        CityCandidateCells.Add(PreferredForestCity);
+        if (PreferredTemperateCitySet.Contains(Candidate))
+        {
+            CityCandidateCells.Add(Candidate);
+        }
     }
     for (const FIntPoint& Candidate : SortedSiteCells)
     {
-        if (!bFoundForestCity || Candidate != PreferredForestCity)
+        if (!PreferredTemperateCitySet.Contains(Candidate))
         {
             CityCandidateCells.Add(Candidate);
         }
@@ -1823,12 +1858,17 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
         const uint32 HubRoll = StableSiteHash(Candidate) % 1000u;
         const FVector2D* SitePosition = Sites.Find(Candidate);
-        const bool bForestSite = SitePosition &&
-            FSVoxelGenerator::SampleBiome(
-                SitePosition->X, SitePosition->Y, GenerationSettings) == ESVoxelBiome::Forest;
-        // Keep the existing random hub density elsewhere, but select roughly
-        // 65% of forest sites so roads reach the middle of the green biome too.
-        if (HubRoll < 240u || (bForestSite && HubRoll < 650u))
+        const ESVoxelBiome SiteBiome = SitePosition
+            ? FSVoxelGenerator::SampleBiome(
+                SitePosition->X, SitePosition->Y, GenerationSettings)
+            : ESVoxelBiome::Desert;
+        const bool bTemperateSite =
+            SiteBiome == ESVoxelBiome::Forest || SiteBiome == ESVoxelBiome::Plains;
+
+        // Select fewer hubs overall to make inter-hub ordinary roads longer;
+        // strongly favour the larger central green region for a connected rural network.
+        if ((bTemperateSite && HubRoll < 420u) ||
+            (!bTemperateSite && HubRoll < 80u))
         {
             RoadHubCells.Add(Candidate);
             RoadHubSet.Add(Candidate);
@@ -2018,8 +2058,66 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     // Rare country lanes connect ordinary roads crosswise, rather than forming
     // a ring around every POI or another rectangular network.
-    // Aim for roughly 60-80 country links on an 8 km map instead of only ~20.
+    // Aim for a substantial rural network without letting new dirt lanes cross
+    // existing roads or overlap them for long stretches.
     const int32 DesiredRuralConnectorCount = FMath::Max(1, Sites.Num() / 4);
+    const auto RuralLinkIntersectsExistingRoad = [&](const FVector2D& LinkStart,
+        const FVector2D& LinkEnd) -> bool
+    {
+        const FVector2D Link = LinkEnd - LinkStart;
+        const double LinkLengthSquared = Link.SizeSquared();
+        if (LinkLengthSquared < 1.0)
+        {
+            return true;
+        }
+
+        for (const TArray<FVector2D>& ExistingPath : AccessRoadPaths)
+        {
+            for (int32 SegmentIndex = 1; SegmentIndex < ExistingPath.Num(); ++SegmentIndex)
+            {
+                const FVector2D RoadA = ExistingPath[SegmentIndex - 1];
+                const FVector2D RoadB = ExistingPath[SegmentIndex];
+                const FVector2D RoadSegment = RoadB - RoadA;
+                const FVector2D Offset = RoadA - LinkStart;
+                const double Denominator =
+                    Link.X * RoadSegment.Y - Link.Y * RoadSegment.X;
+                if (FMath::Abs(Denominator) > 1.0)
+                {
+                    const double LinkT =
+                        (Offset.X * RoadSegment.Y - Offset.Y * RoadSegment.X) / Denominator;
+                    const double RoadT =
+                        (Offset.X * Link.Y - Offset.Y * Link.X) / Denominator;
+                    // The chosen connector must meet its target roads only at its ends.
+                    if (LinkT > 0.06 && LinkT < 0.94 &&
+                        RoadT >= 0.0 && RoadT <= 1.0)
+                    {
+                        return true;
+                    }
+                }
+
+                // Also reject long near-parallel duplicates that do not intersect exactly.
+                for (int32 ProbeIndex = 2; ProbeIndex <= 8; ++ProbeIndex)
+                {
+                    const double Alpha = static_cast<double>(ProbeIndex) / 10.0;
+                    const FVector2D Probe = LinkStart + Link *
+                        static_cast<float>(Alpha);
+                    const double Projection = FMath::Clamp(
+                        FVector2D::DotProduct(Probe - RoadA, RoadSegment) /
+                            FMath::Max(1.0, RoadSegment.SizeSquared()),
+                        0.0, 1.0);
+                    const FVector2D Closest = RoadA + RoadSegment *
+                        static_cast<float>(Projection);
+                    if (FVector2D::DistSquared(Probe, Closest) <
+                        FMath::Square(OrdinaryRoadWidth * 0.60))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
     for (int32 ConnectorIndex = 0;
         ConnectorIndex < DesiredRuralConnectorCount && OrdinaryRoadPaths.Num() >= 2;
         ++ConnectorIndex)
@@ -2037,7 +2135,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const int32 PathAIndex =
                 static_cast<int32>(PickHash % static_cast<uint32>(OrdinaryRoadPaths.Num()));
             const TArray<FVector2D>& PathA = OrdinaryRoadPaths[PathAIndex];
-            if (PathA.Num() < 4)
+            if (PathA.Num() < 4 ||
+                FVector2D::Distance(PathA[0], PathA.Last()) < Spacing * 0.55)
             {
                 continue;
             }
@@ -2058,7 +2157,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     continue;
                 }
                 const TArray<FVector2D>& PathB = OrdinaryRoadPaths[PathBIndex];
-                if (PathB.Num() < 4)
+                if (PathB.Num() < 4 ||
+                    FVector2D::Distance(PathB[0], PathB.Last()) < Spacing * 0.55)
                 {
                     continue;
                 }
@@ -2072,6 +2172,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     {
                         continue;
                     }
+                    if (!CanTravelStraight(Start, End, 0.50, true) ||
+                        RuralLinkIntersectsExistingRoad(Start, End))
+                    {
+                        continue;
+                    }
+
                     const FVector2D LinkDirection = Link.GetSafeNormal();
                     const double AlignmentA = FMath::Abs(
                         FVector2D::DotProduct(LinkDirection, TangentA));
@@ -2093,8 +2199,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     {
                         const FVector2D ProbePoint = Start + Link *
                             static_cast<float>(static_cast<double>(ForestProbe) * 0.25);
-                        if (FSVoxelGenerator::SampleBiome(
-                            ProbePoint.X, ProbePoint.Y, GenerationSettings) == ESVoxelBiome::Forest)
+                        const ESVoxelBiome ProbeBiome = FSVoxelGenerator::SampleBiome(
+                            ProbePoint.X, ProbePoint.Y, GenerationSettings);
+                        if (ProbeBiome == ESVoxelBiome::Forest ||
+                            ProbeBiome == ESVoxelBiome::Plains)
                         {
                             ForestSamples += 1.0;
                         }
@@ -2118,7 +2226,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             BuildSegment(
                 FIntPoint::ZeroValue, FIntPoint::ZeroValue,
-                BestStart, BestEnd, DirtRoadWidth, false, false, false);
+                BestStart, BestEnd, DirtRoadWidth, true, true, false);
         }
     }
 
