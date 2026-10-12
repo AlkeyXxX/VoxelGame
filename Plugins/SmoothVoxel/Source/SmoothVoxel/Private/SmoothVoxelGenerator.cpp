@@ -1044,13 +1044,15 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
         return;
     }
 
-    // The terrain mesh can be much coarser than the water grid at far LODs.
-    // Make the basin large enough to be sampled inside its footprint, otherwise
-    // the water can appear as a ring around an uncut central terrain island.
-    const double LODSafeLakeRadius = FMath::Max(
+    // LakeRadius is an artist-facing world-space radius and must remain the
+    // actual lake radius. Expanding it to several times the coarsest world LOD
+    // made a 20 m lake grow into a 100+ m basin. Coarse LODs may simplify small
+    // lakes while distant, but close-range terrain uses finer samples and must
+    // reproduce the configured size rather than silently changing it.
+    const double Radius = FMath::Clamp(
         std::abs(static_cast<double>(S.LakeRadius)),
-        std::abs(static_cast<double>(S.CoarsestSurfaceSampleStep)) * 3.5);
-    const double Radius = FMath::Clamp(LODSafeLakeRadius, 500.0, Spacing * 0.25);
+        500.0,
+        Spacing * 0.25);
     const double Blend = FMath::Clamp(
         std::abs(static_cast<double>(S.LakeShoreBlendDistance)), 0.0,
         Spacing * 0.25 - Radius);
