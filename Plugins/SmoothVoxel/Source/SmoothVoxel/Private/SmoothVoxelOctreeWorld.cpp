@@ -2664,7 +2664,8 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 					{
 						const FIntVector Candidate =
 							SearchOrigin + FIntVector(DX, DY, DZ);
-						if (MinedTerrainNodes.Contains(Candidate))
+						if (MinedTerrainNodes.Contains(Candidate) ||
+							MinedRoadNodes.Contains(Candidate))
 						{
 							continue;
 						}
