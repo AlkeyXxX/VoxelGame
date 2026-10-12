@@ -456,11 +456,11 @@ public:
 	bool bRoadCollision = true;
 
 	/** Asphalt surface used by ordinary roads and highways. If unset, the Asphalt block material is used, then a concrete fallback. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(DisplayName="Asphalt Road Material"))
 	UMaterialInterface* RoadMaterial = nullptr;
 
 	/** Optional surface override for dirt/country roads and rural access lanes. If unset, the DirtRoad block material is used, then a gravel fallback. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(DisplayName="Dirt Road Material"))
 	UMaterialInterface* DirtRoadMaterial = nullptr;
 
 	/** Optional overrides. Unassigned entries fall back to TerrainMaterial. */
