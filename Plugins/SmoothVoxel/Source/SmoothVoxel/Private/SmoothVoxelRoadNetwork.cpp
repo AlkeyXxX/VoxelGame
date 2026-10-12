@@ -2042,22 +2042,26 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
             if (LeftToeRuns[SampleIndex - 1] > 0.0 || LeftToeRuns[SampleIndex] > 0.0)
             {
+                // Procedural road sections use the engine's established front-face
+                // winding (verified by the visible carriageway). Reverse the shoulder
+                // triangles to match that convention; the previous order was back-face
+                // culled, making the generated embankments appear inverted/invisible.
                 DirtRoadTriangles.Add(PreviousLeft);
-                DirtRoadTriangles.Add(CurrentLeft);
-                DirtRoadTriangles.Add(LeftToeIndices[SampleIndex - 1]);
                 DirtRoadTriangles.Add(LeftToeIndices[SampleIndex - 1]);
                 DirtRoadTriangles.Add(CurrentLeft);
+                DirtRoadTriangles.Add(LeftToeIndices[SampleIndex - 1]);
                 DirtRoadTriangles.Add(LeftToeIndices[SampleIndex]);
+                DirtRoadTriangles.Add(CurrentLeft);
                 ++EmbankmentSideQuadCount;
             }
             if (RightToeRuns[SampleIndex - 1] > 0.0 || RightToeRuns[SampleIndex] > 0.0)
             {
                 DirtRoadTriangles.Add(PreviousRight);
-                DirtRoadTriangles.Add(RightToeIndices[SampleIndex - 1]);
                 DirtRoadTriangles.Add(CurrentRight);
                 DirtRoadTriangles.Add(RightToeIndices[SampleIndex - 1]);
+                DirtRoadTriangles.Add(RightToeIndices[SampleIndex - 1]);
+                DirtRoadTriangles.Add(CurrentRight);
                 DirtRoadTriangles.Add(RightToeIndices[SampleIndex]);
-                DirtRoadTriangles.Add(CurrentRight);
                 ++EmbankmentSideQuadCount;
             }
         }
