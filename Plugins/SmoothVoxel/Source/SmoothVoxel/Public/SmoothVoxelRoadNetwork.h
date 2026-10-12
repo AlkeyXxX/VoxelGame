@@ -38,11 +38,12 @@ public:
         const FSVoxelGenerationSettings& GenerationSettings,
         bool bEnableCollision);
 
-    /** Road cells are shared with terrain chunk workers and remain stable until roads regenerate. */
-    TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> GetRoadBlockSnapshot() const
-    {
-        return RoadBlockSnapshot;
-    }
+    /** Return only road cells that overlap a chunk plus a small LOD/transition border. */
+    TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> GetRoadBlockSnapshotForChunk(
+        const FIntVector& ChunkOriginCells,
+        int32 CellsPerAxis,
+        float BaseVoxelSize,
+        float VoxelSize) const;
 
     UMaterialInterface* GetActiveDirtRoadMaterial() const { return ActiveDirtRoadMaterial; }
     UMaterialInterface* GetActiveAsphaltRoadMaterial() const { return ActiveAsphaltRoadMaterial; }
@@ -73,7 +74,9 @@ private:
     UMaterialInterface* ActiveAsphaltRoadMaterial = nullptr;
 
     TMap<FIntVector, EVoxelBlock> RoadBlockTypes;
-    TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlockSnapshot;
+    // 32x32-cell XY buckets make per-chunk road snapshot extraction independent
+    // of the total number of roads in the full world.
+    TMap<FIntPoint, TArray<FIntVector>> RoadBlockBins;
 
     // Seed-stable landmarks are instanced so large worlds do not spawn hundreds
     // of independent actors.
