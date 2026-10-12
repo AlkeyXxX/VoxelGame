@@ -623,7 +623,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         TArray<FVector2D> RoutePoints;
         const bool bAllowRiverBankFollowing = FullRoadWidth <= DirtRoadWidth + 1.0;
         if (!FindSafeRoute(
-            RouteStart, RouteEnd, RoutePoints, bPreferStraight, bAllowRiverBankFollowing))
+            Start, End, RoutePoints, bPreferStraight, bAllowRiverBankFollowing))
         {
             ++SkippedRouteCount;
             UE_LOG(LogTemp, Verbose,
