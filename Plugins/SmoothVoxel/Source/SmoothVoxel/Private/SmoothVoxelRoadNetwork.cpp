@@ -3917,19 +3917,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         (DirtRoadTriangles.Num() == 0 && AsphaltRoadTriangles.Num() == 0))
     {
         // Flat routes need no embankment side mesh. The block instances above
-        // are the complete carriageway in that case.
-        Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        if (DirtRoadBlocks)
-        {
-            DirtRoadBlocks->SetCollisionEnabled(
-                bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-        }
-        if (AsphaltRoadBlocks)
-        {
-            AsphaltRoadBlocks->SetCollisionEnabled(
-                bEnableCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-        }
-        return;
+        // are the complete carriageway in that case; continue to diagnostics.
     }
 
     const TArray<FVector2D> EmptyUV1;
