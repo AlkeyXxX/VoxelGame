@@ -250,6 +250,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const double MinimumBridgeApproachLength = RoadBlockSize * 5.0;
     // Limit urban river crossings to a couple of deliberate bridge locations per city.
     TMap<FIntPoint, int32> CityBridgeCrossingCounts;
+    // Only settlements/cities consume the per-city two-bridge budget.
+    TSet<FIntPoint> BridgeLimitedCityCells;
     const int32 SamplesPerRoad = FMath::Max(
         2, FMath::CeilToInt(static_cast<float>(Spacing / SafeSampleSpacing)));
     // Reserve room for the hierarchy, urban blocks, POI driveways, and rural links.
@@ -299,6 +301,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // Retain wide-road paths in XY for short POI driveways and rural cross-links.
     TArray<TArray<FVector2D>> AccessRoadPaths;
     TArray<TArray<FVector2D>> OrdinaryRoadPaths;
+    TArray<TArray<FVector2D>> HighwayRoadPaths;
+    TMap<FIntPoint, TArray<FVector2D>> HighwayRouteSamplesByCell;
+    const double HighwayOverlapClearance =
+        (HighwayRoadWidth + OrdinaryRoadWidth) * 0.5 + RoadBlockSize;
     AccessRoadPaths.Reserve(Sites.Num() * 2);
     OrdinaryRoadPaths.Reserve(Sites.Num());
 
@@ -562,7 +568,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
     auto FindSafeRoute = [&](const FVector2D& Start, const FVector2D& End,
         TArray<FVector2D>& OutRoute, bool bPreferStraight,
-        bool bAllowRiverBankFollowing, bool bAllowFutureEmbankment) -> bool
+        bool bAllowRiverBankFollowing, bool bAllowFutureEmbankment,
+        bool bAvoidHighwayOverlap) -> bool
     {
         OutRoute.Reset();
         const double ChordLength = static_cast<double>((End - Start).Size());
@@ -832,6 +839,48 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     double StepCost = TravelDistance *
                         (1.0 + CostGrade * CostGrade * 8.0) + RiverPenalty + TurnPenalty;
 
+                    if (bAvoidHighwayOverlap && !HighwayRouteSamplesByCell.IsEmpty())
+                    {
+                        const int32 CellRadius = FMath::Clamp(
+                            FMath::CeilToInt(HighwayOverlapClearance / RouteGridStep) + 1,
+                            1, 4);
+                        const FVector2D CandidatePoint(
+                            static_cast<double>(NextCell.X) * RouteGridStep,
+                            static_cast<double>(NextCell.Y) * RouteGridStep);
+                        double NearestHighwayDistanceSquared = TNumericLimits<double>::Max();
+                        for (int32 OffsetY = -CellRadius; OffsetY <= CellRadius; ++OffsetY)
+                        {
+                            for (int32 OffsetX = -CellRadius; OffsetX <= CellRadius; ++OffsetX)
+                            {
+                                const FIntPoint SampleCell(
+                                    NextCell.X + OffsetX, NextCell.Y + OffsetY);
+                                const TArray<FVector2D>* HighwaySamples =
+                                    HighwayRouteSamplesByCell.Find(SampleCell);
+                                if (!HighwaySamples)
+                                {
+                                    continue;
+                                }
+                                for (const FVector2D& HighwayPoint : *HighwaySamples)
+                                {
+                                    NearestHighwayDistanceSquared = FMath::Min(
+                                        NearestHighwayDistanceSquared,
+                                        FVector2D::DistSquared(CandidatePoint, HighwayPoint));
+                                }
+                            }
+                        }
+
+                        const double ClearanceSquared = FMath::Square(HighwayOverlapClearance);
+                        if (NearestHighwayDistanceSquared < ClearanceSquared)
+                        {
+                            const double Proximity = 1.0 -
+                                FMath::Sqrt(NearestHighwayDistanceSquared) /
+                                    FMath::Max(1.0, HighwayOverlapClearance);
+                            // A short cross at the highway is fine; following it for
+                            // many samples is expensive, so the ordinary route peels away.
+                            StepCost += TravelDistance * 18.0 * Proximity * Proximity;
+                        }
+                    }
+
                     // Highways favour a direct corridor, but terrain and river
                     // costs can still bend the path around an obstacle.
                     if (bPreferStraight)
@@ -956,6 +1005,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const double SegmentHalfRoadWidth =
             FMath::Max(100.0, std::abs(FullRoadWidth) * 0.5);
         const bool bAllowFutureEmbankment = FullRoadWidth > DirtRoadWidth + 1.0;
+        const bool bAvoidHighwayOverlap =
+            FMath::IsNearlyEqual(FullRoadWidth, OrdinaryRoadWidth, 1.0);
         const FVector2D Chord = End - Start;
         const double ChordLength = static_cast<double>(Chord.Size());
         if (ChordLength < 1000.0)
@@ -993,7 +1044,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
         else if (!FindSafeRoute(
             Start, End, RoutePoints, bPreferStraight, bAllowRiverBankFollowing,
-            bAllowFutureEmbankment))
+            bAllowFutureEmbankment, bAvoidHighwayOverlap))
         {
             ++SkippedRouteCount;
             UE_LOG(LogTemp, Verbose,
@@ -1006,6 +1057,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         // terrain adaptation cannot introduce diagonal streets inside a city.
         if (!bForceGridLine && RoutePoints.Num() >= 3)
         {
+            const double CornerGradeLimit = bAllowFutureEmbankment ? 6.0 : 0.70;
             TArray<FVector2D> RoundedRoute;
             RoundedRoute.Reserve(RoutePoints.Num() * 2);
             RoundedRoute.Add(RoutePoints[0]);
@@ -1026,8 +1078,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 }
 
                 const double Radius = FMath::Min(
-                    FMath::Max(FullRoadWidth * 2.0, RouteGridStep * 1.25),
-                    FMath::Min(InLength, OutLength) * 0.45);
+                    FMath::Max(FullRoadWidth * 3.0, RouteGridStep * 1.75),
+                    FMath::Min(InLength, OutLength) * 0.62);
                 if (Radius < 50.0)
                 {
                     RoundedRoute.Add(Corner);
@@ -1036,11 +1088,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const FVector2D Entry = Corner - Incoming * static_cast<float>(Radius);
                 const FVector2D Exit = Corner + Outgoing * static_cast<float>(Radius);
                 TArray<FVector2D> Arc;
-                Arc.Reserve(9);
+                Arc.Reserve(17);
                 Arc.Add(Entry);
-                for (int32 CurveStep = 1; CurveStep <= 8; ++CurveStep)
+                for (int32 CurveStep = 1; CurveStep <= 16; ++CurveStep)
                 {
-                    const double T = static_cast<double>(CurveStep) / 8.0;
+                    const double T = static_cast<double>(CurveStep) / 16.0;
                     const double U = 1.0 - T;
                     Arc.Add(Entry * static_cast<float>(U * U) +
                         Corner * static_cast<float>(2.0 * U * T) +
@@ -1048,11 +1100,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 }
 
                 bool bSafe = CanTravelStraight(
-                    RoundedRoute.Last(), Arc[0], 0.70, bAllowRiverBankFollowing);
+                    RoundedRoute.Last(), Arc[0], CornerGradeLimit, bAllowRiverBankFollowing);
                 for (int32 ArcIndex = 1; bSafe && ArcIndex < Arc.Num(); ++ArcIndex)
                 {
                     bSafe = CanTravelStraight(
-                        Arc[ArcIndex - 1], Arc[ArcIndex], 0.70, bAllowRiverBankFollowing);
+                        Arc[ArcIndex - 1], Arc[ArcIndex], CornerGradeLimit, bAllowRiverBankFollowing);
                 }
                 if (bSafe)
                 {
@@ -1069,7 +1121,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 if (!CanTravelStraight(
                     RoundedRoute[Index - 1], RoundedRoute[Index],
-                    0.70, bAllowRiverBankFollowing))
+                    CornerGradeLimit, bAllowRiverBankFollowing))
                 {
                     bRoundedPathSafe = false;
                     break;
@@ -1559,7 +1611,31 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 ++SkippedRouteCount;
                 return;
             }
-            CityBridgeCrossingCounts.FindOrAdd(GridCell) += PendingCityBridgeCrossings;
+        }
+
+        TArray<FIntPoint> BridgeBudgetCities;
+        if (BridgeLimitedCityCells.Contains(GridCell))
+        {
+            BridgeBudgetCities.Add(GridCell);
+        }
+        if (OtherGridCell != GridCell && BridgeLimitedCityCells.Contains(OtherGridCell))
+        {
+            BridgeBudgetCities.Add(OtherGridCell);
+        }
+        for (const FIntPoint& CityCell : BridgeBudgetCities)
+        {
+            if (CityBridgeCrossingCounts.FindRef(CityCell) + BridgesInThisSegment > 2)
+            {
+                ++SkippedRouteCount;
+                UE_LOG(LogTemp, Verbose,
+                    TEXT("SmoothVoxel roads: rejected %d bridge(s) for city/town (%d,%d); limit is two."),
+                    BridgesInThisSegment, CityCell.X, CityCell.Y);
+                return;
+            }
+        }
+        for (const FIntPoint& CityCell : BridgeBudgetCities)
+        {
+            CityBridgeCrossingCounts.FindOrAdd(CityCell) += BridgesInThisSegment;
         }
 
         BuiltBridgeCount += BridgesInThisSegment;
@@ -1568,6 +1644,17 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         if (bRecordAsNetworkRoad)
         {
             AccessRoadPaths.Add(Path);
+            if (FMath::IsNearlyEqual(FullRoadWidth, HighwayRoadWidth, 1.0))
+            {
+                HighwayRoadPaths.Add(Path);
+                for (const FVector2D& HighwayPoint : Path)
+                {
+                    const FIntPoint SampleCell(
+                        FMath::RoundToInt(HighwayPoint.X / RouteGridStep),
+                        FMath::RoundToInt(HighwayPoint.Y / RouteGridStep));
+                    HighwayRouteSamplesByCell.FindOrAdd(SampleCell).Add(HighwayPoint);
+                }
+            }
             if (!bForceGridLine &&
                 FMath::IsNearlyEqual(FullRoadWidth, OrdinaryRoadWidth, 1.0))
             {
@@ -2142,6 +2229,15 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
+    for (const FIntPoint& CityCell : MajorCityCells)
+    {
+        BridgeLimitedCityCells.Add(CityCell);
+    }
+    for (const FIntPoint& TownCell : SmallSettlementCells)
+    {
+        BridgeLimitedCityCells.Add(TownCell);
+    }
+
     TMap<FIntPoint, FVector2D> MajorCityAxis;
     TMap<FIntPoint, TArray<FVector2D>> MajorCityDirections;
     TMap<FIntPoint, TArray<FVector2D>> MajorCityOrdinaryDirections;
@@ -2297,8 +2393,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const FVector2D& EndPoint) -> bool
     {
         TArray<FVector2D> TestRoute;
-        return FindSafeRoute(StartPoint, EndPoint, TestRoute, true, false, true) ||
-            FindSafeRoute(StartPoint, EndPoint, TestRoute, false, false, true);
+        return FindSafeRoute(StartPoint, EndPoint, TestRoute, true, false, true, false) ||
+            FindSafeRoute(StartPoint, EndPoint, TestRoute, false, false, true, false);
     };
 
     const auto BuildMainlineLeg = [&](
