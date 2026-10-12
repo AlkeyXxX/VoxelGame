@@ -944,26 +944,23 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     SampleBiomeRegionWeights(
         X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
 
-    // Use one consistent biome decision for river masks, terrain carving and
-    // visible water. A soft regional blend alone can leave weak river fragments
-    // inside cells already classified as desert, where fixed-level water appears
-    // as isolated floating patches.
-    if (S.bEnableBiomes && SampleBiome(X, Y, S) == ESVoxelBiome::Desert)
-    {
-        // Stop the actual water channel at the discrete desert biome edge, but
-        // keep the broad bank profile. Its influence was already multiplied by
-        // the continuous non-desert biome weight above, so it can fade to zero
-        // without truncating the river valley into a vertical terrain wall.
-        OutInfluence = 0.0f;
-        return;
-    }
-
-    // Fade the river as it approaches the desert biome boundary.
+    // Fade both the narrow channel and broad banks using the continuous
+    // biome weight before making the water-only discrete biome decision.
+    // Applying this after the early return would hard-cut the terrain bank
+    // profile at the material boundary and create a vertical wall.
     const float NonDesertWeight = 1.0f - DesertWeight;
     OutInfluence *= NonDesertWeight;
     if (OutBankInfluence)
     {
         *OutBankInfluence *= NonDesertWeight;
+    }
+
+    // Keep visible river water out of the desert to avoid isolated floating
+    // patches, while the already-faded bank influence remains continuous.
+    if (S.bEnableBiomes && SampleBiome(X, Y, S) == ESVoxelBiome::Desert)
+    {
+        OutInfluence = 0.0f;
+        return;
     }
 
     // Do not gate the channel by flatland coverage: at high hill coverage that
