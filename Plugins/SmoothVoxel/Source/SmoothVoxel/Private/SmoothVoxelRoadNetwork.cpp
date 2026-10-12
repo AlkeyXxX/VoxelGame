@@ -982,7 +982,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 PendingCityBridgeCrossings = CountRiverCrossingsOnLine(Start, End);
                 const int32* ExistingCountPtr = CityBridgeCrossingCounts.Find(GridCell);
                 const int32 ExistingCount = ExistingCountPtr ? *ExistingCountPtr : 0;
-                if (ExistingCount + PendingCityBridgeCrossings > 2)
+                if (ExistingCount + PendingCityBridgeCrossings > 2 && !bAllowFutureEmbankment)
                 {
                     ++SkippedRouteCount;
                     return;
@@ -2293,6 +2293,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
+    const auto CanRouteMainlineLeg = [&](const FVector2D& StartPoint,
+        const FVector2D& EndPoint) -> bool
+    {
+        TArray<FVector2D> TestRoute;
+        return FindSafeRoute(StartPoint, EndPoint, TestRoute, true, false, true) ||
+            FindSafeRoute(StartPoint, EndPoint, TestRoute, false, false, true);
+    };
+
     const auto BuildMainlineLeg = [&](
         const FIntPoint& FromCell, const FIntPoint& ToCell,
         const FVector2D& StartPoint, const FVector2D& EndPoint)
@@ -2331,25 +2339,35 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const FVector2D FromPort = From + FromDirection * static_cast<float>(CityPortDistance);
             const FVector2D ToPort = To + ToDirection * static_cast<float>(CityPortDistance);
 
-            if (!MajorCityAxis.Contains(FromCell)) MajorCityAxis.Add(FromCell, FromDirection);
-            if (!MajorCityAxis.Contains(ToCell)) MajorCityAxis.Add(ToCell, ToDirection);
-            MajorCityDirections.FindOrAdd(FromCell).AddUnique(FromDirection);
-            MajorCityDirections.FindOrAdd(ToCell).AddUnique(ToDirection);
-
-            if (bRouteViaGreen)
+            bool bMainlineEdgeBuilt = false;
+            if (bRouteViaGreen &&
+                CanRouteMainlineLeg(FromPort, GreenCorridorWaypoint) &&
+                CanRouteMainlineLeg(GreenCorridorWaypoint, ToPort))
             {
                 const bool bFirstLegBuilt = BuildMainlineLeg(
                     FromCell, ToCell, FromPort, GreenCorridorWaypoint);
-                const bool bSecondLegBuilt = BuildMainlineLeg(
+                const bool bSecondLegBuilt = bFirstLegBuilt && BuildMainlineLeg(
                     FromCell, ToCell, GreenCorridorWaypoint, ToPort);
-                if (!bFirstLegBuilt || !bSecondLegBuilt)
-                {
-                    BuildMainlineLeg(FromCell, ToCell, FromPort, ToPort);
-                }
+                bMainlineEdgeBuilt = bFirstLegBuilt && bSecondLegBuilt;
+            }
+
+            if (!bMainlineEdgeBuilt)
+            {
+                bMainlineEdgeBuilt = BuildMainlineLeg(
+                    FromCell, ToCell, FromPort, ToPort);
+            }
+            if (bMainlineEdgeBuilt)
+            {
+                if (!MajorCityAxis.Contains(FromCell)) MajorCityAxis.Add(FromCell, FromDirection);
+                if (!MajorCityAxis.Contains(ToCell)) MajorCityAxis.Add(ToCell, ToDirection);
+                MajorCityDirections.FindOrAdd(FromCell).AddUnique(FromDirection);
+                MajorCityDirections.FindOrAdd(ToCell).AddUnique(ToDirection);
             }
             else
             {
-                BuildMainlineLeg(FromCell, ToCell, FromPort, ToPort);
+                UE_LOG(LogTemp, Warning,
+                    TEXT("SmoothVoxel roads: failed highway link between major cities (%d,%d) and (%d,%d)."),
+                    FromCell.X, FromCell.Y, ToCell.X, ToCell.Y);
             }
         }
     }
