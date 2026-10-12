@@ -385,14 +385,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const double Length = Chord.Size();
         if (Length < 1.0)
         {
-            return GetRouteGridSample(FIntPoint(
+            const FRoadGridSample Sample = GetRouteGridSample(FIntPoint(
                 FMath::RoundToInt(A.X / RouteGridStep),
-                FMath::RoundToInt(A.Y / RouteGridStep))).bAllowed;
+                FMath::RoundToInt(A.Y / RouteGridStep)));
+            return bAllowRiverBankFollowing ? Sample.bAllowed : Sample.bWideRoadAllowed;
         }
         const int32 Steps = FMath::Max(
             1, FMath::CeilToInt(static_cast<float>(Length / (RouteGridStep * 0.5))));
         const FVector2D Direction = Chord / static_cast<float>(Length);
-        FVector2D PreviousPoint = A;
         FIntPoint PreviousCell(
             FMath::RoundToInt(A.X / RouteGridStep),
             FMath::RoundToInt(A.Y / RouteGridStep));
@@ -458,7 +458,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 return false;
             }
 
-            PreviousPoint = Point;
             PreviousCell = Cell;
             Previous = Current;
         }
@@ -1008,6 +1007,63 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             return;
         }
+
+        // The A* navigation grid is intentionally coarse for large worlds. Verify
+        // the final centreline at finer intervals so an interpolated road cannot
+        // slip between grid nodes and graze a lake. The clearance includes the
+        // road half-width, leaving at least three blocks between road edge and shore.
+        if (GenerationSettings.bEnableLakes &&
+            FullRoadWidth > DirtRoadWidth + 1.0)
+        {
+            const double LakeClearanceRadius =
+                RoadBlockSize * 3.0 + SegmentHalfRoadWidth;
+            const double LakeCheckStep = FMath::Max(50.0, RoadBlockSize * 2.0);
+            const double LakeDirections[8][2] =
+            {
+                { 1.0, 0.0 }, { -1.0, 0.0 }, { 0.0, 1.0 }, { 0.0, -1.0 },
+                { 0.70710678, 0.70710678 }, { 0.70710678, -0.70710678 },
+                { -0.70710678, 0.70710678 }, { -0.70710678, -0.70710678 }
+            };
+            for (int32 SegmentIndex = 1; SegmentIndex < Path.Num(); ++SegmentIndex)
+            {
+                const FVector2D A = Path[SegmentIndex - 1];
+                const FVector2D B = Path[SegmentIndex];
+                const FVector2D Chord = B - A;
+                const int32 CheckSteps = FMath::Max(
+                    1, FMath::CeilToInt(static_cast<float>(Chord.Size() / LakeCheckStep)));
+                for (int32 CheckIndex = 0; CheckIndex <= CheckSteps; ++CheckIndex)
+                {
+                    const FVector2D Point = A + Chord *
+                        static_cast<float>(static_cast<double>(CheckIndex) / CheckSteps);
+                    float CentreLakeInfluence = 0.0f;
+                    float CentreLakeLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
+                    FSVoxelGenerator::SampleLakeMaskAndLevel(
+                        Point.X, Point.Y, GenerationSettings,
+                        CentreLakeInfluence, CentreLakeLevel);
+                    if (CentreLakeInfluence >= 0.10f)
+                    {
+                        ++SkippedRouteCount;
+                        return;
+                    }
+
+                    for (const auto& Direction : LakeDirections)
+                    {
+                        float NearbyLakeInfluence = 0.0f;
+                        float NearbyLakeLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
+                        FSVoxelGenerator::SampleLakeMaskAndLevel(
+                            Point.X + Direction[0] * LakeClearanceRadius,
+                            Point.Y + Direction[1] * LakeClearanceRadius,
+                            GenerationSettings, NearbyLakeInfluence, NearbyLakeLevel);
+                        if (NearbyLakeInfluence >= 0.10f)
+                        {
+                            ++SkippedRouteCount;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         int32 SampleCount = Path.Num() - 1;
         GroundHeights.Reserve(Path.Num());
         RoadLifts.SetNumZeroed(Path.Num());
