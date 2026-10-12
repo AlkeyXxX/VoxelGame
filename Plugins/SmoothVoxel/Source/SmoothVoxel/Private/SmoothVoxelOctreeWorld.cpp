@@ -1563,12 +1563,14 @@ void ASmoothVoxelOctreeWorld::StartNewGame()
 	PrePlacedBlockEditCenters.Reset();
 	PrePlacedBlockEditTypes.Reset();
 	MinedTerrainNodes.Reset();
+	MinedRoadNodes.Reset();
 
 	// Workers only receive immutable snapshots. Resetting these pointers ensures
 	// all new builds use the untouched deterministic terrain for this seed.
 	BlockEditSnapshot.Reset();
 	BlockEditCenterSnapshot.Reset();
 	MinedNodeSnapshot.Reset();
+	MinedRoadNodeSnapshot.Reset();
 
 	UpdateWaterSurface();
 	UpdateRoadNetwork();
@@ -1920,6 +1922,12 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 			VoxelSize);
 		Settings.RoadSampleBins = RoadNetworkActor->GetRoadSampleBinsSnapshot();
 	}
+	if (bFilterBlockEdits)
+	{
+		// The immutable removal set is shared; each chunk only queries it for
+		// road cells in its local road snapshot, so no per-chunk copy is needed.
+		Settings.MinedRoadBlocks = MinedRoadNodeSnapshot;
+	}
 
 	const bool bHasBlockEdits =
 		BlockEditSnapshot.IsValid() && BlockEditSnapshot->Num() > 0;
@@ -2049,6 +2057,8 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() cons
 		Settings.RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshot();
 		Settings.RoadSampleBins = RoadNetworkActor->GetRoadSampleBinsSnapshot();
 	}
+	// Interaction probes use the full shared road-removal set.
+	Settings.MinedRoadBlocks = MinedRoadNodeSnapshot;
 	// Interaction probes need the complete immutable world snapshots.
 	Settings.BlockEdits = BlockEditSnapshot;
 	Settings.BlockEditCenters = BlockEditCenterSnapshot;
@@ -2082,8 +2092,15 @@ EVoxelBlock ASmoothVoxelOctreeWorld::GetBlockTypeForCell(const FIntVector& Cell)
 		}
 	}
 
-	// A mined road cell stays empty even though the deterministic road layout
-	// remains immutable and is shared with streaming chunks.
+	// The layout stays immutable; a separate voxel-cell set suppresses broken
+	// road blocks without removing any natural terrain inside the same cell.
+	EVoxelBlock RoadBlock = EVoxelBlock::Air;
+	const bool bIsRoadCell = IsValid(RoadNetworkActor) &&
+		RoadNetworkActor->GetRoadBlockTypeAtCell(Cell, RoadBlock);
+	if (bIsRoadCell && MinedRoadNodes.Contains(Cell))
+	{
+		return EVoxelBlock::Air;
+	}
 	if (MinedTerrainNodes.Contains(Cell))
 	{
 		return EVoxelBlock::Air;
@@ -2091,9 +2108,7 @@ EVoxelBlock ASmoothVoxelOctreeWorld::GetBlockTypeForCell(const FIntVector& Cell)
 
 	// Carriageway cells are reported through the same logical voxel grid as
 	// terrain, but are rendered/collided by the streamed Transvoxel chunks.
-	EVoxelBlock RoadBlock = EVoxelBlock::Air;
-	if (IsValid(RoadNetworkActor) &&
-		RoadNetworkActor->GetRoadBlockTypeAtCell(Cell, RoadBlock))
+	if (bIsRoadCell)
 	{
 		return RoadBlock;
 	}
@@ -2732,6 +2747,22 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		return false;
 	}
 
+	if (HitBlock == EVoxelBlock::Asphalt || HitBlock == EVoxelBlock::DirtRoad)
+	{
+		// Road faces share terrain collision, but destroying the road removes
+		// only its implicit box. Do not cut the terrain density in this cell.
+		MinedRoadNodes.Add(MinedCell);
+		MinedRoadNodeSnapshot =
+			MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedRoadNodes);
+		RebuildChunksNearEditedCell(MinedCell, false);
+		SchedulePostMiningMeshRepair(MinedCell);
+		if (Inventory && DropBlock != EVoxelBlock::Air)
+		{
+			Inventory->AddBlock(DropBlock, 1);
+		}
+		return true;
+	}
+
 	MinedTerrainNodes.Add(MinedCell);
 	MinedNodeSnapshot =
 		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
@@ -2970,19 +3001,13 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	}
 
 	EVoxelBlock ExistingRoadBlock = EVoxelBlock::Air;
-	if (IsValid(RoadNetworkActor) &&
+	if (!MinedRoadNodes.Contains(Cell) &&
+		!MinedTerrainNodes.Contains(Cell) &&
+		IsValid(RoadNetworkActor) &&
 		RoadNetworkActor->GetRoadBlockTypeAtCell(Cell, ExistingRoadBlock))
 	{
-		// Generated road cells are already occupied; a manual block cannot stack
-		// into the carriageway cell itself (placing on its top face is allowed).
-		return false;
-	}
-
-	EVoxelBlock ExistingRoadBlock = EVoxelBlock::Air;
-	if (!MinedTerrainNodes.Contains(Cell) && IsValid(RoadNetworkActor) &&
-		RoadNetworkActor->GetRoadBlockTypeAtCell(Cell, ExistingRoadBlock))
-	{
-		// A generated road cell is already solid in the terrain density field.
+		// A generated road cell is already occupied. Once its road block is
+		// mined, placement into that voxel cell is allowed.
 		return false;
 	}
 
