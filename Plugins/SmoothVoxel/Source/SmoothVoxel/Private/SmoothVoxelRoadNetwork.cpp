@@ -1028,12 +1028,12 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             {
                 const FVector2D A = Path[SegmentIndex - 1];
                 const FVector2D B = Path[SegmentIndex];
-                const FVector2D Chord = B - A;
+                const FVector2D LakeCheckChord = B - A;
                 const int32 CheckSteps = FMath::Max(
-                    1, FMath::CeilToInt(static_cast<float>(Chord.Size() / LakeCheckStep)));
+                    1, FMath::CeilToInt(static_cast<float>(LakeCheckChord.Size() / LakeCheckStep)));
                 for (int32 CheckIndex = 0; CheckIndex <= CheckSteps; ++CheckIndex)
                 {
-                    const FVector2D Point = A + Chord *
+                    const FVector2D Point = A + LakeCheckChord *
                         static_cast<float>(static_cast<double>(CheckIndex) / CheckSteps);
                     float CentreLakeInfluence = 0.0f;
                     float CentreLakeLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
