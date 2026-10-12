@@ -1853,6 +1853,16 @@ EVoxelBlock ASmoothVoxelOctreeWorld::GetBlockTypeForCell(const FIntVector& Cell)
 		}
 	}
 
+	// Generated carriageways participate in the same logical block queries as
+	// hand-placed cubes. The road network owns their HISM instances, but the
+	// world reports their true type to debug and interaction callers.
+	EVoxelBlock RoadBlock = EVoxelBlock::Air;
+	if (IsValid(RoadNetworkActor) &&
+		RoadNetworkActor->GetRoadBlockTypeAtCell(Cell, RoadBlock))
+	{
+		return RoadBlock;
+	}
+
 	const FVector Center = BlockCellCenter(Cell);
 	if (SampleCurrentDensityAt(Center) <= 0.0f)
 	{
@@ -2322,11 +2332,20 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	EVoxelBlock HitBlock = EVoxelBlock::Air;
 	FVector InsidePoint = Hit.ImpactPoint;
 	ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor());
+	ASmoothVoxelRoadNetwork* HitRoadNetwork = Cast<ASmoothVoxelRoadNetwork>(Hit.GetActor());
+	bool bHitRoadBlock = false;
 	if (IsValid(HitCube) && HitCube->GetOwner() == this)
 	{
 		// Cube collision already identifies the exact logical cell.
 		Cell = HitCube->BlockCell;
 		HitBlock = HitCube->BlockType;
+	}
+	else if (IsValid(HitRoadNetwork) && HitRoadNetwork->GetOwner() == this &&
+		HitRoadNetwork->GetRoadBlockForHit(
+			Hit.GetComponent(), Hit.Item, Cell, HitBlock))
+	{
+		// HISM instance indices are mapped back to the generated absolute cell.
+		bHitRoadBlock = true;
 	}
 	else
 	{
@@ -2395,6 +2414,20 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		!Inventory->CanAddBlock(DropBlock, 1))
 	{
 		return false;
+	}
+
+	if (bHitRoadBlock)
+	{
+		if (!IsValid(HitRoadNetwork) ||
+			!HitRoadNetwork->RemoveRoadBlockForHit(Hit.GetComponent(), Hit.Item))
+		{
+			return false;
+		}
+		if (Inventory && DropBlock != EVoxelBlock::Air)
+		{
+			Inventory->AddBlock(DropBlock, 1);
+		}
+		return true;
 	}
 
 	if (IsValid(HitCube))
