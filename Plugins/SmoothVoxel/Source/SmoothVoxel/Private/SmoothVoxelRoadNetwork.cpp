@@ -809,7 +809,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     }
 
                     const double CostGrade = bCrossRiver ? FMath::Min(Grade, 0.12)
-                        : (bAllowFutureEmbankment ? FMath::Min(Grade, 0.18) : Grade);
+                        : (bAllowFutureEmbankment ? FMath::Min(Grade, 0.45) : Grade);
 
                     // Penalize sharp heading changes so mild hills are crossed with a
                     // steady curve instead of a left-right switchback.
@@ -1554,7 +1554,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         {
             // Do not emit an unbridged road ribbon over a river. Every classified
             // crossing must have yielded a safe deck in the bridge pass above.
-            if (BridgesInThisSegment < PendingCityBridgeCrossings)
+            if (BridgesInThisSegment < PendingCityBridgeCrossings && !bAllowFutureEmbankment)
             {
                 ++SkippedRouteCount;
                 return;
@@ -2174,7 +2174,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     bool bHasGreenCorridorWaypoint = false;
     double BestGreenWaypointScore = TNumericLimits<double>::Max();
     const double GreenSearchRadius = FMath::Min(HalfExtent * 0.45, Spacing * 4.0);
-    const double GreenSearchStep = FMath::Max(RouteGridStep, Spacing * 0.20);
+    const double GreenSearchStep = FMath::Max(500.0, FMath::Min(RouteGridStep, Spacing * 0.10));
     const double GreenWaypointSiteClearanceSquared = FMath::Square(Spacing * 0.22);
     const auto ConsiderGreenWaypoint = [&](const FVector2D& Candidate)
     {
@@ -2373,10 +2373,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     }
     else if (MainlineCityOrder.Num() == 1)
     {
-        const FIntPoint CityCell = MainlineCityOrder[0];
-        MajorCityAxis.Add(CityCell, FVector2D(1.0f, 0.0f));
-        MajorCityDirections.FindOrAdd(CityCell).AddUnique(FVector2D(1.0f, 0.0f));
-        MajorCityDirections.FindOrAdd(CityCell).AddUnique(FVector2D(-1.0f, 0.0f));
+        // A single major city does not get two dead-end highway stubs. Its
+        // ordinary-road connections still reach the city through cardinal gates.
+        MajorCityAxis.Add(MainlineCityOrder[0], FVector2D(1.0f, 0.0f));
     }
 
     const auto GetRoadNodePosition = [&](const FIntPoint& Cell) -> FVector2D
@@ -2827,11 +2826,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 CityStreetDirections.AddUnique(SnapToCardinal(Direction));
             }
         }
-        if (CityStreetDirections.Num() == 0)
-        {
-            CityStreetDirections.AddUnique(Axis);
-            CityStreetDirections.AddUnique(Axis * -1.0f);
-        }
+        // Only successfully built mainline links create highway gates here.
+        // Never synthesize dangling highway stubs for a city whose links failed.
         for (const FVector2D& SideDirection : CityStreetDirections)
         {
             const FVector2D ExtensionEnd =
