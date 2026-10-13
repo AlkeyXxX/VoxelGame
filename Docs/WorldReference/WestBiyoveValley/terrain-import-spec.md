@@ -1,48 +1,63 @@
 # Terrain import specification — West Biyove Valley
 
-## Source raster
+## Source data and transformation
 
-Primary source: dtm.raw from the supplied world. File length is 134,217,728 bytes, exactly 8192 × 8192 × 2. Treat it initially as row-major unsigned 16-bit little-endian samples. The second file dtm_processed.raw has the same size and resolution, but is **not interchangeable by assumption**: 96.7202% of its pixels match the primary file, while a small portion contains large changes. Keep both source hashes and test each in game before choosing one.
+Primary source: `dtm.raw`, 8192 × 8192 little-endian uint16; bytes = 8192 × 8192 × 2. Height conversion empirically verified:
 
-## Empirically supported mapping
+```text
+height_metres = uint16_sample / 256.0
+height_unreal_cm = uint16_sample * (100.0 / 256.0)
+raster_column ~= round(world_x_metres + 4096)
+raster_row    ~= round(world_z_metres + 4096)
+```
 
-Cross-checking the 4175 prefab positions against the terrain samples supports:
+For Unreal coordinates (X/Y horizontal, Z vertical), using the configured `RootWorldCenter`:
 
-    column = round(world_x + 4096)
-    row = round(world_z + 4096)
-    height_metres = sample_uint16 / 256.0
+```text
+worldX_cm = (column - 4096) * 100 + RootWorldCenter.X
+worldY_cm = (row    - 4096) * 100 + RootWorldCenter.Y
+worldZ_cm = sample * (100 / 256)
+```
 
-The resulting height range is approximately 1.004–198.375 m. At those locations, the median absolute difference between sampled height and prefab Y is 0.855 m; mean is 2.339 m and p90 is 6.145 m. This validates broad axis/scale, not a guarantee that every prefab origin sits on its contact surface.
+The column/row hypothesis was cross-checked with 4175 prefab Y positions (median absolute height error 0.855 m; mean 2.339 m). Still verify orientation and sample/cell centering against visible landmarks in Unreal before calling placement one-to-one.
 
-For the current Unreal Engine world using centimetres:
+`dtm_processed.raw` has the same dimensions but differs at ~3.28% of pixels. Do not replace the primary DTM with the processed version without a visual comparison.
 
-    WorldX_cm = (column - 4096) * 100
-    WorldY_cm = (row - 4096) * 100
-    WorldZ_cm = (sample / 256.0) * 100
+## Runtime rasters used by the new reference mode
 
-Do not assume image row order, horizontal axes, half-cell offsets, or boundary handling are correct until sampled landmarks are verified in a small in-engine test. Use the original 8192² samples, not only the 1024² image preview.
+- `dtm.raw`: 8192² uint16 little-endian, exact primary DTM.
+- `biomes.raw`: 1024² bytes. IDs from exact source RGBA values are 1 Forest `(0,64,0,255)`, 2 Desert `(255,168,0,255)`, 3 Snow `(255,255,255,255)`, 4 BurntForest `(255,228,119,255)`, 5 Wasteland `(186,0,255,255)`.
+- `roadmask_2bit.raw`: each source pixel in `splat3.png` stored in two bits, four pixels per byte, row-major, least-significant two-bit code first. 0 transparent/no road; 1 opaque red (959472 px) interpreted asphalt; 2 opaque green (480670 px) interpreted dirt road; 3 unused.
 
-## Recommended architecture in VoxelGame
+The C++ loader validates exact dimensions/lengths. It reads the DTM, maps masks into a single immutable shared structure, and passes it to terrain chunks and interactions; no per-chunk 128 MiB map copy. The road faces are triangle material sections on the terrain mesh, so they share chunk collision and do not spawn per-block actors.
 
-1. Add an immutable shared reference-heightfield asset loaded once by the world; avoid loading/parsing it separately for every chunk.
-2. Define one deterministic world-space sampling function that bilinearly samples the DTM. Use that same function for base surface height, terrain density, normal calculations, block queries, river validation, and road planning.
-3. For voxel mesh generation, sample the heightfield into the existing chunk density field so it remains compatible with octree LOD and shared terrain collision. Do not generate 8192² independent mesh objects.
-4. Preserve the exact height raster at runtime, but allow configured surface detail/noise only as a separate displacement layer with a default amplitude of zero until the baseline matches.
-5. Rebuild road logic **after** fixed heightfield sampling works. Use the DTM-based surface as road input; maintain road block destruction/collision inside the terrain chunk system.
-6. Load biomes.png as a separate raster. Its resolution is 1024², i.e. about 8 map metres per pixel under the scale assumption. Verify orientation, filtering, and edge alignment against the website screenshot before choosing nearest or bilinear sampling.
-7. Use the original prefab entries for POI/building/road-tile positions; prefab placement must not be re-randomized if matching this source world is the goal.
+## Runtime path
 
-## Definition of identical
+Default paths on `ASmoothVoxelOctreeWorld`:
+- `Content/WorldReference/WestBiyoveValley/dtm.raw`
+- `Content/WorldReference/WestBiyoveValley/biomes.raw`
+- `Content/WorldReference/WestBiyoveValley/roadmask_2bit.raw`
 
-- **Exact macro-heightfield**: possible only when the full-resolution DTM source is present and mapped correctly.
-- **Exact road and POI layout**: requires original prefab placements and correct rotation/coordinate conventions; prefab source data is preserved in compressed form in this folder.
-- **Exact appearance**: additionally depends on biome/texture/splat masks, water/rivers, game version, materials and prefab definitions. DTM alone does not reproduce those.
-- **Same seed** is not sufficient. This source records map seed -1058264646 and separate nested generation seed 123, plus already-generated output files.
+Fallback read paths:
+- `Docs/WorldReference/WestBiyoveValley/`
+- `Saved/WorldReference/WestBiyoveValley/`
 
-## Open questions to answer during implementation
+The ready runtime ZIP has the exact three RAW files under `Docs/WorldReference/WestBiyoveValley/`; extracting it at the project root is sufficient for editor loading. To retain the binary data in GitHub, the folder's RAW files must be pushed through Git LFS using the pattern in `.gitattributes`. The available GitHub editor cannot upload local binary files to LFS by itself.
 
-- Should dtm.raw or dtm_processed.raw be the final source in game version V.3.1.4?
-- Is sample index zero the exact world edge or a cell centre? The current transform is empirically supported by prefab elevations but still needs landmark verification.
-- What bilinear/normal sampling and chunk-edge seam policy preserves a continuous terrain surface across Transvoxel LOD transitions?
-- Which splat3* channel encodes road/terrain visualization, and how should it map to runtime road/biome materials?
-- Does water need to reproduce source river shapes from terrain/splat assets or can it be re-derived from terrain lows? FixedWaterLevel=false argues against forcing one global plane.
+## Expected behavior and limitations
+
+- Source DTM mode replaces macro procedural height, micro-detail and POI plateau flattening with the source heightfield.
+- Source biome material classification is performed per terrain triangle (not just selected from the chunk centre), so large LOD chunks can cross biome boundaries.
+- The source road mask classifies the asphalt/dirt surfaces within the terrain chunk. Query and mining logic recognizes that road layer separately, allowing the top material to be removed without excavating the underlying DTM.
+- The old synthetic water actor/river/lake masks and unrelated seeded road actor are suppressed in reference mode.
+- Current map metadata says `FixedWaterLevel=false`; exact water-body geometry/materials have not yet been extracted from the source files, so source rivers/water are not yet an exact reproduction.
+- The archive has 4175 prefab placement entries, but it does not include the actual meshes/models for every 7DTD prefab. Their original positions can be imported separately, but exact buildings require compatible prefab geometry.
+- Same seeds are not a substitute for using the already-generated source DTM and overlays.
+
+## Future validation
+
+1. Place the three RAW runtime files in the configured paths, run UE4.27 and verify the loader's status log.
+2. Verify four landmarks near the corners plus the map centre to confirm X/Y orientation and half-cell alignment.
+3. Compare a height-profile transect and 2D DTM difference against the source.
+4. Check biome material boundaries and red/green road alignment at low and high LOD.
+5. Implement prefab geometry/markers and water reconstruction from the remaining source information.
