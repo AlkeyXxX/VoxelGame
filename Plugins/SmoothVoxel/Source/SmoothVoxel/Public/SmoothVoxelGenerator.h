@@ -77,6 +77,9 @@ struct FSVoxelGenerationSettings
 	// collision independently from ordinary terrain chunk collision.
 	bool bEnableRoadCollision = true;
 
+    // Vertex material weights for a shared layered terrain/road material.
+    bool bEnableSurfaceMaterialBlending = false;
+
 	// When loaded, the source DTM replaces procedural height noise entirely.
 	bool bUseReferenceWorldData = false;
 	FSVoxelReferenceWorldDataPtr ReferenceWorldData;
@@ -292,6 +295,12 @@ public:
 	static void ClampNoiseScalesForMaxSampleStep(
 		FSVoxelGenerationSettings& Settings,
 		float CoarsestVoxelStep);
+
+    /** Smooth material weights: VertexColor RGBA = desert/forest/snow/asphalt; UV1.R = soil. */
+    static void GetSurfaceMaterialBlendData(
+        double WorldX, double WorldY, double WorldZ,
+        const FSVoxelGenerationSettings& Settings,
+        FLinearColor& OutVertexColor, FVector2D& OutUV1);
 
 	static void Generate(
 		const FSVoxelGenerationSettings& Settings,
