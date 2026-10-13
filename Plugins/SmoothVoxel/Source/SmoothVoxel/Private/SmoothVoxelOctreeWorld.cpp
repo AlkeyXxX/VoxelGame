@@ -2265,6 +2265,9 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 			EffectiveBaseVoxelSize,
 			VoxelSize);
 		Settings.RoadSurfaceHeights = RoadNetworkActor->GetRoadSurfaceHeightSnapshot();
+		Settings.RoadEmbankmentFillHeights =
+			RoadNetworkActor->GetRoadEmbankmentFillSnapshotForChunk(
+				ChunkOriginCells, CellsPerAxis, EffectiveBaseVoxelSize, VoxelSize);
 		Settings.RoadSampleBins = RoadNetworkActor->GetRoadSampleBinsSnapshot();
 	}
 	if (bFilterBlockEdits)
@@ -2401,6 +2404,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeBlockQuerySettings() cons
 	{
 		Settings.RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshot();
 		Settings.RoadSurfaceHeights = RoadNetworkActor->GetRoadSurfaceHeightSnapshot();
+		Settings.RoadEmbankmentFillHeights = RoadNetworkActor->GetRoadEmbankmentFillSnapshot();
 		Settings.RoadSampleBins = RoadNetworkActor->GetRoadSampleBinsSnapshot();
 	}
 	// Interaction probes use the full shared road-removal set.
