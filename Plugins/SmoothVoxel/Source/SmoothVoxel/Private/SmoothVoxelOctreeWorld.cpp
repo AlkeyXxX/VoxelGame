@@ -1440,6 +1440,10 @@ void ASmoothVoxelOctreeWorld::BeginPlay()
 		{
 			MountainHeight = 16000.0f;
 		}
+		if (FMath::IsNearlyEqual(RiverWaterLevel, 850.0f))
+		{
+			RiverWaterLevel = 2500.0f;
+		}
 		if (FMath::IsNearlyEqual(FlatlandCoverageMultiplier, 0.6f))
 		{
 			FlatlandCoverageMultiplier = 1.0f;
