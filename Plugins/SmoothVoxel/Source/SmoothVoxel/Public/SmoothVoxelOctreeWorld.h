@@ -637,7 +637,7 @@ private:
 	void ApplyOneCompletedBuild(const FVector& CameraLocation);
 	bool AreDesiredChunksReady() const;
 	void RetireUndesiredChunks(int32 MaxChunksToRetire);
-	int32 GetRootLodForWorldSize() const { return GetRootLodForWorldSizePreset(WorldSize); }
+	int32 GetRootLodForWorldSize() const { return bUseReferenceWorldData ? 8 : GetRootLodForWorldSizePreset(WorldSize); }
 
 	bool TraceInteractionRay(FHitResult& OutHit) const;
 	float GetEffectiveBlockSize() const;
