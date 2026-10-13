@@ -50,6 +50,19 @@ public:
         return RoadSurfaceHeightSnapshot;
     }
 
+    /** Full terrain-native fill heights for interaction density samples. */
+    TSharedPtr<const FSVoxelRoadEmbankmentHeightMap, ESPMode::ThreadSafe> GetRoadEmbankmentFillSnapshot() const
+    {
+        return RoadEmbankmentFillHeightSnapshot;
+    }
+
+    /** Return only natural-landscape fill columns near a chunk plus an LOD border. */
+    TSharedPtr<const FSVoxelRoadEmbankmentHeightMap, ESPMode::ThreadSafe> GetRoadEmbankmentFillSnapshotForChunk(
+        const FIntVector& ChunkOriginCells,
+        int32 CellsPerAxis,
+        float BaseVoxelSize,
+        float VoxelSize) const;
+
     TSharedPtr<const FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe> GetRoadSampleBinsSnapshot() const
     {
         return RoadSampleBinsSnapshot;
@@ -92,12 +105,15 @@ private:
 
     TMap<FIntVector, EVoxelBlock> RoadBlockTypes;
     TMap<FIntVector, double> RoadSurfaceHeights;
+    TMap<FIntPoint, double> RoadEmbankmentFillHeights;
     TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlockSnapshot;
     TSharedPtr<const FSVoxelRoadSurfaceHeightMap, ESPMode::ThreadSafe> RoadSurfaceHeightSnapshot;
+    TSharedPtr<const FSVoxelRoadEmbankmentHeightMap, ESPMode::ThreadSafe> RoadEmbankmentFillHeightSnapshot;
     TSharedPtr<const FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe> RoadSampleBinsSnapshot;
-    // 32x32-cell XY buckets make per-chunk road snapshot extraction independent
-    // of the total number of roads in the full world.
+    // 32x32-cell XY buckets make per-chunk snapshot extraction independent
+    // of the total number of road and fill columns in the full world.
     TMap<FIntPoint, TArray<FIntVector>> RoadBlockBins;
+    TMap<FIntPoint, TArray<FIntPoint>> RoadEmbankmentFillBins;
 
     // Seed-stable landmarks are instanced so large worlds do not spawn hundreds
     // of independent actors.
