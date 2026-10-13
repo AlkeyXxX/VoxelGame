@@ -3741,7 +3741,9 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 			Chunk->SetRoadMaterials(EffectiveDirtRoadMaterial, EffectiveAsphaltRoadMaterial);
             Chunk->SetReferenceBiomeMaterials(
                 PlainsBiomeMaterial, ForestBiomeMaterial, DesertBiomeMaterial,
-                SnowBiomeMaterial, BurntForestBiomeMaterial, WastelandBiomeMaterial);
+                SnowBiomeMaterial,
+                BurntForestBiomeMaterial ? BurntForestBiomeMaterial : PlainsBiomeMaterial,
+                WastelandBiomeMaterial ? WastelandBiomeMaterial : MountainBiomeMaterial);
 			Chunk->QueueBuild(
 				Node,
 				DesiredCellsPerAxis,
