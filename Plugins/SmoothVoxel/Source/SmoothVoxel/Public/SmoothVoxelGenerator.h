@@ -17,6 +17,9 @@ using FSVoxelMinedNodeSet = TSet<FIntVector>;
 using FSVoxelRoadBlockMap = TMap<FIntVector, EVoxelBlock>;
 // Continuous top elevation for each generated road cell, keyed by the same cell.
 using FSVoxelRoadSurfaceHeightMap = TMap<FIntVector, double>;
+// Natural-landscape fill tops keyed by XY base-voxel column. These raise only
+// the terrain surface in low spots beside roads; they are not road-material cells.
+using FSVoxelRoadEmbankmentHeightMap = TMap<FIntPoint, double>;
 using FSVoxelRoadSampleBinSet = TSet<FIntVector>;
 
 // Runtime copy of the immutable 7 Days to Die source rasters. The DTM stores
@@ -164,8 +167,11 @@ struct FSVoxelGenerationSettings
 	TSharedPtr<const FSVoxelRoadBlockMap, ESPMode::ThreadSafe> RoadBlocks;
 	// Continuous deck elevations prevent the road's top from snapping to voxel planes.
 	TSharedPtr<const FSVoxelRoadSurfaceHeightMap, ESPMode::ThreadSafe> RoadSurfaceHeights;
-	// Coarse 3D occupancy bins let density queries reject samples far from any
-	// road with one set lookup instead of 27 TMap searches.
+	// Optional terrain-native embankment fill, sampled only in bins touched by
+	// roads. Filled surfaces keep the original biome/terrain material.
+	TSharedPtr<const FSVoxelRoadEmbankmentHeightMap, ESPMode::ThreadSafe> RoadEmbankmentFillHeights;
+	// Coarse 3D occupancy bins let density queries reject samples far from roads
+	// and their earth fill with one set lookup instead of repeated map searches.
 	TSharedPtr<const FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe> RoadSampleBins;
 };
 
