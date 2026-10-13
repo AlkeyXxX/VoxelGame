@@ -942,16 +942,18 @@ float FSVoxelGenerator::SampleFlatlandInfluence(
     const float SmoothHillBlend = FMath::Lerp(
         NonDesertHillBlend, DesertHillBlend, DesertWeight);
 
-    // Use the same broad mountain mask as height generation, but only in the
-    // snowy region. Mountain climate noise no longer punches random holes in
-    // central plains or river surfaces.
-    const float MountainThreshold = FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f);
+    // Mountain landforms use their own seed-driven macro mask across the whole
+    // map, rather than being confined to the fixed snowy biome on one side.
+    // The threshold is calibrated for smooth value noise so 0.20 gives roughly
+    // one fifth mountainous terrain rather than a few isolated peaks.
+    const float MountainCoverage = FMath::Clamp(S.MountainCoverage, 0.05f, 0.45f);
+    const float MountainSignal01 = FMath::Clamp(MountainSignal * 0.5f + 0.5f, 0.0f, 1.0f);
+    const float MountainStart = 0.5f + (0.5f - MountainCoverage) * 0.30f;
     const float MountainT = FMath::Clamp(
-        (MountainSignal - MountainThreshold) / 0.20f, 0.0f, 1.0f);
+        (MountainSignal01 - MountainStart) / 0.20f, 0.0f, 1.0f);
     const float MountainSignalBlend = MountainT * MountainT * (3.0f - 2.0f * MountainT);
-    const float MountainBlend = S.bEnableBiomes
-        ? MountainSignalBlend * WinterWeight
-        : 0.0f;
+    const float MountainBlend = MountainSignalBlend;
+    (void)WinterWeight;
     return (1.0f - SmoothHillBlend) * (1.0f - MountainBlend);
 }
 
@@ -1010,14 +1012,14 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     const float HillBlend = FMath::Lerp(
         NonDesertHillBlend, DesertHillBlend, DesertBlend);
 
-    const float MountainThreshold = FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f);
-    float MountainBlend = S.bEnableBiomes
-        ? SmoothStep(MountainThreshold, MountainThreshold + 0.20f, MountainSignal)
-        : 0.0f;
-    // Keep high-relief mountain forms in the difficult snowy region only.
-    // WinterBlend is continuous, so the mountain range fades into the centre
-    // instead of forming a crater or abrupt wall at its boundary.
-    MountainBlend *= WinterBlend;
+    // Landforms are independent of climate/biome layout: every biome can
+    // contain plains, rolling hills, or a mountain range. Soften the target
+    // coverage boundary to keep the terrain continuous at region edges.
+    const float MountainCoverage = FMath::Clamp(S.MountainCoverage, 0.05f, 0.45f);
+    const float MountainSignal01 = FMath::Clamp(MountainSignal * 0.5f + 0.5f, 0.0f, 1.0f);
+    const float MountainStart = 0.5f + (0.5f - MountainCoverage) * 0.30f;
+    float MountainBlend = SmoothStep(MountainStart, MountainStart + 0.20f, MountainSignal01);
+    (void)WinterBlend;
 
     const double HillNoise = FBM2D(
         X * static_cast<double>(S.HillScale),
