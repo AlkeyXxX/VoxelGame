@@ -399,6 +399,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Rendering")
 	UMaterialInterface* TerrainMaterial = nullptr;
 
+    /** VertexColor RGBA = desert/forest/snow/asphalt; UV1.R = soil. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Materials")
+    bool bEnableSurfaceMaterialBlending = false;
+
 	/** Enables the single sea-level water sheet for this finite Octree world. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
 	bool bEnableWater = true;
@@ -493,7 +497,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
 	bool bEnableRoads = true;
 
-	/** Legacy compatibility setting; road classes now scale to BaseVoxelSize (3, 10, and 20 blocks). */
+	/** Core road widths are 4, 8 and 16 base blocks, with intermittent one-cell soil shoulders. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="200.0", ClampMax="2000.0", Units="cm"))
 	float RoadWidth = 600.0f;
 
@@ -501,9 +505,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="250.0", ClampMax="5000.0", Units="cm"))
 	float RoadSampleSpacing = 500.0f;
 
-	/** Lifts the road surface slightly above terrain to prevent z-fighting, in centimetres. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="2.0", ClampMax="100.0", Units="cm"))
-	float RoadSurfaceOffset = 15.0f;
+	/** Optional offset from the sampled terrain height, in centimetres. Zero embeds the full road block flush with the surface. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="0.0", ClampMax="100.0", Units="cm"))
+	float RoadSurfaceOffset = 0.0f;
 
 	/** Enable collision so the player can walk/drive over generated roads. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
