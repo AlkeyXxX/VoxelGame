@@ -208,6 +208,38 @@ void ASmoothVoxelTransvoxelChunk::SetRoadMaterials(
 	}
 }
 
+void ASmoothVoxelTransvoxelChunk::SetReferenceBiomeMaterials(
+    UMaterialInterface* InPlains,
+    UMaterialInterface* InForest,
+    UMaterialInterface* InDesert,
+    UMaterialInterface* InSnow,
+    UMaterialInterface* InBurntForest,
+    UMaterialInterface* InWasteland)
+{
+    ReferencePlainsSectionMaterial = InPlains ? InPlains : Material;
+    ReferenceForestSectionMaterial = InForest ? InForest : Material;
+    ReferenceDesertSectionMaterial = InDesert ? InDesert : Material;
+    ReferenceSnowSectionMaterial = InSnow ? InSnow : Material;
+    ReferenceBurntForestSectionMaterial = InBurntForest ? InBurntForest : Material;
+    ReferenceWastelandSectionMaterial = InWasteland ? InWasteland : Material;
+
+    if (Mesh)
+    {
+        UMaterialInterface* Materials[6] = {
+            ReferencePlainsSectionMaterial,
+            ReferenceForestSectionMaterial,
+            ReferenceDesertSectionMaterial,
+            ReferenceSnowSectionMaterial,
+            ReferenceBurntForestSectionMaterial,
+            ReferenceWastelandSectionMaterial};
+        for (int32 Index = 0; Index < 6; ++Index)
+        {
+            Mesh->SetMaterial(6 + Index, Materials[Index]);
+            Mesh->SetMaterial(12 + Index, Materials[Index]);
+        }
+    }
+}
+
 void ASmoothVoxelTransvoxelChunk::QueueBuild(
 	const FSVoxelOctreeNode& Node,
 	int32 InCellsPerAxis,
@@ -527,6 +559,37 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		return true;
 	};
 
+    const bool bHasReferenceBiomeMask = PendingSettings.bUseReferenceWorldData &&
+        PendingSettings.ReferenceWorldData.IsValid() &&
+        PendingSettings.ReferenceWorldData->HasBiomeMask();
+    TArray<TArray<int32>> ReferenceBiomeTriangles;
+    ReferenceBiomeTriangles.SetNum(6);
+    const auto ClassifyReferenceBiome = [&](const FVector& Center) -> int32
+    {
+        if (!bHasReferenceBiomeMask)
+        {
+            return INDEX_NONE;
+        }
+        const double WorldX = Center.X +
+            static_cast<double>(PendingSettings.ChunkOriginCells.X) * RoadCellStep;
+        const double WorldY = Center.Y +
+            static_cast<double>(PendingSettings.ChunkOriginCells.Y) * RoadCellStep;
+        switch (PendingSettings.ReferenceWorldData->SampleBiome(
+            WorldX, WorldY,
+            PendingSettings.BiomeWorldCenter.X,
+            PendingSettings.BiomeWorldCenter.Y))
+        {
+        case ESVoxelBiome::Forest: return 1;
+        case ESVoxelBiome::Desert: return 2;
+        case ESVoxelBiome::Snow: return 3;
+        case ESVoxelBiome::BurntForest: return 4;
+        case ESVoxelBiome::Wasteland: return 5;
+        case ESVoxelBiome::Mountain: return 3;
+        case ESVoxelBiome::Plains:
+        default: return 0;
+        }
+    };
+
 	for (int32 TriangleIndex = 0;
 		TriangleIndex + 2 < Data.Triangles.Num();
 		TriangleIndex += 3)
@@ -560,6 +623,15 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			continue;
 		}
 
+        const int32 ReferenceBiomeIndex = ClassifyReferenceBiome(Center);
+        if (ReferenceBiomeIndex != INDEX_NONE)
+        {
+            ReferenceBiomeTriangles[ReferenceBiomeIndex].Add(A);
+            ReferenceBiomeTriangles[ReferenceBiomeIndex].Add(B);
+            ReferenceBiomeTriangles[ReferenceBiomeIndex].Add(C);
+            continue;
+        }
+
 		TerrainTriangles.Add(A);
 		TerrainTriangles.Add(B);
 		TerrainTriangles.Add(C);
@@ -571,6 +643,8 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	TArray<int32> EditedBackfaceTerrainTriangles;
 	TArray<int32> EditedBackfaceAsphaltTriangles;
 	TArray<int32> EditedBackfaceDirtTriangles;
+    TArray<TArray<int32>> EditedBackfaceReferenceBiomeTriangles;
+    EditedBackfaceReferenceBiomeTriangles.SetNum(6);
 	for (int32 TriangleIndex = 0;
 		TriangleIndex + 2 < EditedBackfaceData.Triangles.Num();
 		TriangleIndex += 3)
@@ -602,6 +676,13 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			EditedBackfaceDirtTriangles.Add(B);
 			EditedBackfaceDirtTriangles.Add(C);
 		}
+        else if (ClassifyReferenceBiome(Center) != INDEX_NONE)
+        {
+            const int32 BiomeIndex = ClassifyReferenceBiome(Center);
+            EditedBackfaceReferenceBiomeTriangles[BiomeIndex].Add(A);
+            EditedBackfaceReferenceBiomeTriangles[BiomeIndex].Add(B);
+            EditedBackfaceReferenceBiomeTriangles[BiomeIndex].Add(C);
+        }
 		else
 		{
 			EditedBackfaceTerrainTriangles.Add(A);
@@ -719,6 +800,26 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		5, EditedBackfaceData, EditedBackfaceDirtTriangles,
 		DirtRoadSectionMaterial ? DirtRoadSectionMaterial : Material,
 		false);
+
+    if (bHasReferenceBiomeMask)
+    {
+        UMaterialInterface* ReferenceBiomeMaterials[6] = {
+            ReferencePlainsSectionMaterial ? ReferencePlainsSectionMaterial : Material,
+            ReferenceForestSectionMaterial ? ReferenceForestSectionMaterial : Material,
+            ReferenceDesertSectionMaterial ? ReferenceDesertSectionMaterial : Material,
+            ReferenceSnowSectionMaterial ? ReferenceSnowSectionMaterial : Material,
+            ReferenceBurntForestSectionMaterial ? ReferenceBurntForestSectionMaterial : Material,
+            ReferenceWastelandSectionMaterial ? ReferenceWastelandSectionMaterial : Material};
+        for (int32 BiomeIndex = 0; BiomeIndex < 6; ++BiomeIndex)
+        {
+            CreateCompactSection(6 + BiomeIndex, Data,
+                ReferenceBiomeTriangles[BiomeIndex],
+                ReferenceBiomeMaterials[BiomeIndex], bCreateCollision);
+            CreateCompactSection(12 + BiomeIndex, EditedBackfaceData,
+                EditedBackfaceReferenceBiomeTriangles[BiomeIndex],
+                ReferenceBiomeMaterials[BiomeIndex], false);
+        }
+    }
 
 	// Only fine terrain casts shadows; distant coarse chunks otherwise multiply
 	// draw calls in every dynamic shadow pass without meaningful visual gain.
@@ -2249,18 +2350,36 @@ EVoxelBlock ASmoothVoxelOctreeWorld::GetBlockTypeForCell(const FIntVector& Cell)
 	}
 
 	const FVector Center = BlockCellCenter(Cell);
+    const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
+    const float Step = GetEffectiveBlockSize();
+    if (Settings.bUseReferenceWorldData && Settings.ReferenceWorldData.IsValid() &&
+        Settings.ReferenceWorldData->HasRoadMask())
+    {
+        const EVoxelBlock SourceRoad = Settings.ReferenceWorldData->SampleRoadType(
+            Center.X, Center.Y, RootWorldCenter.X, RootWorldCenter.Y);
+        if (SourceRoad == EVoxelBlock::Asphalt || SourceRoad == EVoxelBlock::DirtRoad)
+        {
+            const double SourceSurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
+                Center.X, Center.Y, Settings);
+            const int32 RoadSurfaceCellZ = FMath::FloorToInt(
+                (SourceSurfaceHeight - static_cast<double>(Step) * 0.001) /
+                static_cast<double>(Step));
+            if (Cell.Z == RoadSurfaceCellZ)
+            {
+                return MinedRoadNodes.Contains(Cell) ? EVoxelBlock::Air : SourceRoad;
+            }
+        }
+    }
 	if (SampleCurrentDensityAt(Center) <= 0.0f)
 	{
 		return EVoxelBlock::Air;
 	}
 
-	const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
 	const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
 		static_cast<double>(Center.X),
 		static_cast<double>(Center.Y),
 		Settings);
 	const double Depth = SurfaceHeight - static_cast<double>(Center.Z);
-	const float Step = GetEffectiveBlockSize();
 	if (Depth <= Step * 1.25)
 	{
 		return EVoxelBlock::Grass;
@@ -3146,6 +3265,27 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		// mined, placement into that voxel cell is allowed.
 		return false;
 	}
+    if (!MinedRoadNodes.Contains(Cell) && !MinedTerrainNodes.Contains(Cell) &&
+        bUseReferenceWorldData && ReferenceWorldDataSnapshot.IsValid() &&
+        ReferenceWorldDataSnapshot->HasRoadMask())
+    {
+        const FVector TargetCenter = BlockCellCenter(Cell);
+        const EVoxelBlock SourceRoad = ReferenceWorldDataSnapshot->SampleRoadType(
+            TargetCenter.X, TargetCenter.Y, RootWorldCenter.X, RootWorldCenter.Y);
+        if (SourceRoad == EVoxelBlock::Asphalt || SourceRoad == EVoxelBlock::DirtRoad)
+        {
+            const FSVoxelGenerationSettings SourceSettings = MakeBlockQuerySettings();
+            const double SourceSurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
+                TargetCenter.X, TargetCenter.Y, SourceSettings);
+            const int32 RoadSurfaceCellZ = FMath::FloorToInt(
+                (SourceSurfaceHeight - static_cast<double>(Step) * 0.001) /
+                static_cast<double>(Step));
+            if (Cell.Z == RoadSurfaceCellZ)
+            {
+                return false;
+            }
+        }
+    }
 
 	const int8* ExistingEdit = EditedBlockCells.Find(Cell);
 	if (ExistingEdit && *ExistingEdit > 0)
@@ -3585,6 +3725,9 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 			Chunk->SetRoadMaterials(
 				IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveDirtRoadMaterial() : DirtRoadMaterial,
 				IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveAsphaltRoadMaterial() : RoadMaterial);
+            Chunk->SetReferenceBiomeMaterials(
+                PlainsBiomeMaterial, ForestBiomeMaterial, DesertBiomeMaterial,
+                SnowBiomeMaterial, BurntForestBiomeMaterial, WastelandBiomeMaterial);
 			Chunk->QueueBuild(
 				Node,
 				DesiredCellsPerAxis,
