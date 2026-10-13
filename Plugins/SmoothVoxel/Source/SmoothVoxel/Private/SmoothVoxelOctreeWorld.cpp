@@ -20,6 +20,8 @@
 #include "UObject/ConstructorHelpers.h"
 #include "CollisionShape.h"
 #include "CollisionQueryParams.h"
+#include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 
 namespace
 {
@@ -470,27 +472,49 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	DirtRoadTriangles.Reserve(Data.Triangles.Num() / 8);
 	const bool bHasRoadMap = PendingSettings.RoadBlocks.IsValid() &&
 		PendingSettings.RoadBlocks->Num() > 0;
+	const bool bHasReferenceRoadMask = PendingSettings.bUseReferenceWorldData &&
+		PendingSettings.ReferenceWorldData.IsValid() &&
+		PendingSettings.ReferenceWorldData->HasRoadMask();
 	const float RoadCellStep = FMath::Max(1.0f, PendingSettings.BaseVoxelSize);
 	const auto ClassifyRoadSurface = [&](
 		const FVector& Center,
 		EVoxelBlock& OutRoadType) -> bool
 	{
 		OutRoadType = EVoxelBlock::Air;
-		if (!bHasRoadMap)
+		if (!bHasRoadMap && !bHasReferenceRoadMask)
 		{
 			return false;
 		}
 		FIntVector SurfaceCell = LocalPositionToVoxelCell(Center, PendingSettings);
-		// Road tops can lie between voxel planes. Resolve them to the same
-		// integer layer used by the rasterized road cell (ceil(height / step) - 1).
+		// Both reference roads and generated roads use the terrain chunk's material sections.
 		SurfaceCell.Z = FMath::CeilToInt(
 			(Center.Z + PendingSettings.ChunkOriginCells.Z * RoadCellStep) /
 			RoadCellStep) - 1;
 		if (PendingSettings.MinedRoadBlocks.IsValid() &&
 			PendingSettings.MinedRoadBlocks->Contains(SurfaceCell))
 		{
-			// Natural terrain revealed underneath a removed road cell must keep
-			// the biome's terrain material instead of inheriting asphalt/gravel.
+			return false;
+		}
+
+		if (bHasReferenceRoadMask)
+		{
+			const double WorldX = Center.X +
+				static_cast<double>(PendingSettings.ChunkOriginCells.X) * RoadCellStep;
+			const double WorldY = Center.Y +
+				static_cast<double>(PendingSettings.ChunkOriginCells.Y) * RoadCellStep;
+			const EVoxelBlock SourceRoadType = PendingSettings.ReferenceWorldData->SampleRoadType(
+				WorldX, WorldY,
+				PendingSettings.BiomeWorldCenter.X,
+				PendingSettings.BiomeWorldCenter.Y);
+			if (SourceRoadType == EVoxelBlock::Asphalt ||
+				SourceRoadType == EVoxelBlock::DirtRoad)
+			{
+				OutRoadType = SourceRoadType;
+				return true;
+			}
+		}
+		if (!bHasRoadMap)
+		{
 			return false;
 		}
 		const EVoxelBlock* RoadType = PendingSettings.RoadBlocks->Find(SurfaceCell);
@@ -1292,9 +1316,72 @@ ASmoothVoxelOctreeWorld::ASmoothVoxelOctreeWorld()
 void ASmoothVoxelOctreeWorld::BeginPlay()
 {
 	Super::BeginPlay();
+	LoadReferenceWorldData();
 	TryBindPlayerInteractionInput();
 	UpdateWaterSurface();
 	UpdateRoadNetwork();
+}
+
+void ASmoothVoxelOctreeWorld::LoadReferenceWorldData()
+{
+	check(IsInGameThread());
+	if (!bUseReferenceWorldData)
+	{
+		ReferenceWorldDataSnapshot.Reset();
+		return;
+	}
+
+	const FString ProjectRoot = FPaths::ProjectDir();
+	const auto ResolveSourcePath = [&ProjectRoot](const FString& ConfiguredPath,
+		const TCHAR* FallbackFileName) -> FString
+	{
+		const FString Configured = FPaths::IsRelative(ConfiguredPath)
+			? FPaths::Combine(ProjectRoot, ConfiguredPath)
+			: ConfiguredPath;
+		if (FPaths::FileExists(Configured))
+		{
+			return Configured;
+		}
+
+		const FString DocsFallback = FPaths::Combine(
+			ProjectRoot, TEXT("Docs/WorldReference/WestBiyoveValley"), FallbackFileName);
+		if (FPaths::FileExists(DocsFallback))
+		{
+			return DocsFallback;
+		}
+		const FString SavedFallback = FPaths::Combine(
+			ProjectRoot, TEXT("Saved/WorldReference/WestBiyoveValley"), FallbackFileName);
+		if (FPaths::FileExists(SavedFallback))
+		{
+			return SavedFallback;
+		}
+		return Configured;
+	};
+
+	const FString HeightPath = ResolveSourcePath(ReferenceHeightmapPath, TEXT("dtm.raw"));
+	const FString BiomePath = ResolveSourcePath(ReferenceBiomeMaskPath, TEXT("biomes.raw"));
+	const FString RoadPath = ResolveSourcePath(ReferenceRoadMaskPath, TEXT("roadmask_2bit.raw"));
+	FString Status;
+	FSVoxelReferenceWorldDataPtr Loaded = FSVoxelGenerator::LoadReferenceWorldData(
+		HeightPath, BiomePath, RoadPath, Status);
+	if (!Loaded.IsValid() || !Loaded->HasHeightField())
+	{
+		ReferenceWorldDataSnapshot.Reset();
+		UE_LOG(LogTemp, Warning,
+			TEXT("SmoothVoxelOctreeWorld: source DTM unavailable (%s); falling back to procedural terrain. Copy dtm.raw from the West Biyove Valley archive."),
+			*Status);
+		return;
+	}
+
+	ReferenceWorldDataSnapshot = Loaded;
+	UE_LOG(LogTemp, Display,
+		TEXT("SmoothVoxelOctreeWorld: reference-world data enabled. %s"),
+		*Status);
+	if (!Loaded->HasBiomeMask() || !Loaded->HasRoadMask())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("SmoothVoxelOctreeWorld: DTM loaded, but source biome and/or road masks are missing; rendering will be incomplete."));
+	}
 }
 
 void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
@@ -1302,6 +1389,18 @@ void ASmoothVoxelOctreeWorld::UpdateWaterSurface()
 	check(IsInGameThread());
 	if (!GetWorld())
 	{
+		return;
+	}
+
+	if (bUseReferenceWorldData && ReferenceWorldDataSnapshot.IsValid())
+	{
+		// The captured map has a non-fixed water model. Never overlay the old
+		// synthetic sea plane/river network on its authoritative height field.
+		if (IsValid(WaterSurfaceActor))
+		{
+			WaterSurfaceActor->SetActorHiddenInGame(true);
+			WaterSurfaceActor->SetActorEnableCollision(false);
+		}
 		return;
 	}
 
@@ -1362,6 +1461,18 @@ void ASmoothVoxelOctreeWorld::UpdateRoadNetwork()
 	check(IsInGameThread());
 	if (!GetWorld())
 	{
+		return;
+	}
+
+	if (bUseReferenceWorldData && ReferenceWorldDataSnapshot.IsValid())
+	{
+		// Source red/green road pixels are rendered in terrain sections. Suppress
+		// the unrelated seed-generated road actor in reference-world mode.
+		if (IsValid(RoadNetworkActor))
+		{
+			RoadNetworkActor->Destroy();
+		}
+		RoadNetworkActor = nullptr;
 		return;
 	}
 
@@ -1544,6 +1655,10 @@ void ASmoothVoxelOctreeWorld::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ASmoothVoxelOctreeWorld::RegenerateWorld()
 {
+	if (bUseReferenceWorldData && !ReferenceWorldDataSnapshot.IsValid())
+	{
+		LoadReferenceWorldData();
+	}
 	// Terrain parameters also drive the river/lake masks. Rebuild the water
 	// mesh from the same fresh settings before regenerating terrain chunks;
 	// otherwise the old water surface can be buried by the new terrain.
@@ -1586,7 +1701,9 @@ void ASmoothVoxelOctreeWorld::StartNewGame()
 
 float ASmoothVoxelOctreeWorld::GetWorldSizeCentimeters() const
 {
-	return GetWorldSizeCentimetersForPreset(WorldSize);
+	// 8192 DTM samples are spaced at 1 m; use exact source extent so base voxels are 100 cm.
+	return bUseReferenceWorldData ? 819200.0f :
+		GetWorldSizeCentimetersForPreset(WorldSize);
 }
 
 ESVoxelBiome ASmoothVoxelOctreeWorld::GetBiomeAtWorldPosition(const FVector& WorldPosition) const
@@ -1769,6 +1886,12 @@ void ASmoothVoxelOctreeWorld::GetTerrainDebugInfoAtWorldPosition(
 	case ESVoxelBiome::Snow:
 		OutBiomeName = TEXT("Snow");
 		break;
+	case ESVoxelBiome::BurntForest:
+		OutBiomeName = TEXT("Burnt Forest");
+		break;
+	case ESVoxelBiome::Wasteland:
+		OutBiomeName = TEXT("Wasteland");
+		break;
 	case ESVoxelBiome::Plains:
 	default:
 		OutBiomeName = TEXT("Plains");
@@ -1850,6 +1973,9 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.IsoLevel = 0.0f;
 	Settings.bEnableRoadCollision = bRoadCollision;
 	Settings.Seed = Seed;
+	Settings.bUseReferenceWorldData = bUseReferenceWorldData &&
+		ReferenceWorldDataSnapshot.IsValid();
+	Settings.ReferenceWorldData = ReferenceWorldDataSnapshot;
 	Settings.bEnableBiomes = bEnableBiomes;
 	Settings.BiomeScale = BiomeScale;
 	Settings.BiomeWorldCenter = RootWorldCenter;
@@ -3408,6 +3534,9 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 
 		FSVoxelGenerationSettings BiomeSettings;
 		BiomeSettings.Seed = Seed;
+		BiomeSettings.bUseReferenceWorldData = bUseReferenceWorldData &&
+			ReferenceWorldDataSnapshot.IsValid();
+		BiomeSettings.ReferenceWorldData = ReferenceWorldDataSnapshot;
 		BiomeSettings.bEnableBiomes = bEnableBiomes;
 		BiomeSettings.BiomeScale = BiomeScale;
 		BiomeSettings.BiomeWorldCenter = RootWorldCenter;
@@ -3430,6 +3559,12 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 			break;
 		case ESVoxelBiome::Snow:
 			SelectedBiomeMaterial = SnowBiomeMaterial ? SnowBiomeMaterial : TerrainMaterial;
+			break;
+		case ESVoxelBiome::BurntForest:
+			SelectedBiomeMaterial = BurntForestBiomeMaterial ? BurntForestBiomeMaterial : TerrainMaterial;
+			break;
+		case ESVoxelBiome::Wasteland:
+			SelectedBiomeMaterial = WastelandBiomeMaterial ? WastelandBiomeMaterial : TerrainMaterial;
 			break;
 		case ESVoxelBiome::Plains:
 		default:
