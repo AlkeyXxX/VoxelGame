@@ -558,7 +558,12 @@ namespace
 		OutMesh.Vertices.Add(LocalPosition);
 		OutMesh.Normals.Add(Normal);
 		OutMesh.UV0.Add(UV);
-		OutMesh.VertexColors.Add(FSVoxelGenerator::GetBiomeTint(WorldX, WorldY, Settings));
+        FLinearColor VertexColor=FSVoxelGenerator::GetBiomeTint(WorldX,WorldY,Settings);
+        FVector2D BlendUV1=FVector2D::ZeroVector;
+        if (Settings.bEnableSurfaceMaterialBlending)
+            FSVoxelGenerator::GetSurfaceMaterialBlendData(WorldX,WorldY,WorldZ,Settings,VertexColor,BlendUV1);
+		OutMesh.VertexColors.Add(VertexColor);
+        OutMesh.UV1.Add(BlendUV1);
 		OutMesh.Tangents.Add(FProcMeshTangent(Tangent, bFlipTangentY));
 		return NewIndex;
 	}
@@ -755,6 +760,7 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 	// for callers that intentionally omit one of the optional vertex streams.
 	const bool bHasNormals = Mesh.Normals.Num() == OriginalVertexCount;
 	const bool bHasUV0 = Mesh.UV0.Num() == OriginalVertexCount;
+    const bool bHasUV1 = Mesh.UV1.Num() == OriginalVertexCount;
 	const bool bHasTangents = Mesh.Tangents.Num() == OriginalVertexCount;
 	const bool bHasVertexColors = Mesh.VertexColors.Num() == OriginalVertexCount;
 
@@ -818,6 +824,7 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 		const FVector Position = Mesh.Vertices[SourceIndex];
 		const FVector Normal = bHasNormals ? Mesh.Normals[SourceIndex] : FVector::UpVector;
 		const FVector2D UV = bHasUV0 ? Mesh.UV0[SourceIndex] : FVector2D::ZeroVector;
+        const FVector2D UV1 = bHasUV1 ? Mesh.UV1[SourceIndex] : FVector2D::ZeroVector;
 		const FProcMeshTangent Tangent = bHasTangents
 			? Mesh.Tangents[SourceIndex]
 			: FProcMeshTangent();
@@ -838,6 +845,7 @@ int32 FSVoxelTransvoxelMesher::AddTwoSidedEditedSurfaceTriangles(
 		{
 			Mesh.UV0.Add(UV);
 		}
+        if (bHasUV1) { Mesh.UV1.Add(UV1); }
 		if (bHasTangents)
 		{
 			Mesh.Tangents.Add(Tangent);
