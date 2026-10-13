@@ -3887,7 +3887,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const double WX=(static_cast<double>(Spill.X)+0.5)*RoadBlockSize;
                 const double WY=(static_cast<double>(Spill.Y)+0.5)*RoadBlockSize;
                 const double Ground=FSVoxelGenerator::SampleSurfaceHeight(WX,WY,GenerationSettings);
-                if (std::abs(Ground-*Deck)>RoadBlockSize*0.75) continue;
+                // The intended road deck is recessed one base voxel below natural ground.
+                if (std::abs((Ground - *Deck) - RoadBlockSize)>RoadBlockSize*0.75) continue;
                 uint32 H=static_cast<uint32>(Group)*196314165u ^ static_cast<uint32>(Spill.X)*907633515u ^
                     static_cast<uint32>(Spill.Y)*604171u ^ static_cast<uint32>(GenerationSettings.Seed)*1376312589u;
                 H^=H>>16; H*=0x7feb352du; H^=H>>15;
