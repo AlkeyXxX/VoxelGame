@@ -1925,11 +1925,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const double CenterGround = GroundHeights[SampleIndex];
             const double TerrainClearance = SafeSurfaceOffset;
 
-            // Recess the road deck one full base block into the sampled terrain.
-            // Its top remains a continuous height field (no stair-stepped Z planes),
-            // while the logical road cell and density SDF both describe a full block
-            // volume below that recessed deck. Lifted bridge spans retain their lift.
-            const double RoadDeckZ = CenterGround + Lift + TerrainClearance - RoadBlockSize;
+            // Keep the road top level with sampled terrain (or slightly above it
+            // via SurfaceOffset). The road's full voxel thickness extends downward,
+            // so it does not need to lower the visible deck to create solid geometry.
+            const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
             const double LeftZ = RoadDeckZ;
             const double RightZ = RoadDeckZ;
 
@@ -3887,8 +3886,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const double WX=(static_cast<double>(Spill.X)+0.5)*RoadBlockSize;
                 const double WY=(static_cast<double>(Spill.Y)+0.5)*RoadBlockSize;
                 const double Ground=FSVoxelGenerator::SampleSurfaceHeight(WX,WY,GenerationSettings);
-                // The intended road deck is recessed one base voxel below natural ground.
-                if (std::abs((Ground - *Deck) - RoadBlockSize)>RoadBlockSize*0.75) continue;
+                // Account for the configured offset: the deck follows sampled terrain
+                // and may sit slightly above it, rather than one voxel below it.
+                if (std::abs((Ground - *Deck) + SafeSurfaceOffset)>RoadBlockSize*0.75) continue;
                 uint32 H=static_cast<uint32>(Group)*196314165u ^ static_cast<uint32>(Spill.X)*907633515u ^
                     static_cast<uint32>(Spill.Y)*604171u ^ static_cast<uint32>(GenerationSettings.Seed)*1376312589u;
                 H^=H>>16; H*=0x7feb352du; H^=H>>15;
