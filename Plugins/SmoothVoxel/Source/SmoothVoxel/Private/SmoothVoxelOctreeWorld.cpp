@@ -1445,13 +1445,15 @@ void ASmoothVoxelOctreeWorld::LoadReferenceWorldData()
 		}
 
 		const FString DocsFallback = FPaths::Combine(
-			ProjectRoot, TEXT("Docs/WorldReference/WestBiyoveValley"), FallbackFileName);
+			FPaths::Combine(ProjectRoot, TEXT("Docs/WorldReference/WestBiyoveValley")),
+			FallbackFileName);
 		if (FPaths::FileExists(DocsFallback))
 		{
 			return DocsFallback;
 		}
 		const FString SavedFallback = FPaths::Combine(
-			ProjectRoot, TEXT("Saved/WorldReference/WestBiyoveValley"), FallbackFileName);
+			FPaths::Combine(ProjectRoot, TEXT("Saved/WorldReference/WestBiyoveValley")),
+			FallbackFileName);
 		if (FPaths::FileExists(SavedFallback))
 		{
 			return SavedFallback;
@@ -1565,10 +1567,11 @@ void ASmoothVoxelOctreeWorld::UpdateRoadNetwork()
 		return;
 	}
 
-	if (bUseReferenceWorldData && ReferenceWorldDataSnapshot.IsValid())
+	if (bUseReferenceWorldData && ReferenceWorldDataSnapshot.IsValid() &&
+		ReferenceWorldDataSnapshot->HasRoadMask())
 	{
 		// Source red/green road pixels are rendered in terrain sections. Suppress
-		// the unrelated seed-generated road actor in reference-world mode.
+		// the unrelated seed-generated road actor only when the exact source mask is loaded.
 		if (IsValid(RoadNetworkActor))
 		{
 			RoadNetworkActor->Destroy();
