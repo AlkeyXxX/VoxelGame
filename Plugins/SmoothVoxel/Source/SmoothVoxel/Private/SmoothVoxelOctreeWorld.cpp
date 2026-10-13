@@ -906,6 +906,7 @@ void ASmoothVoxelWaterSurface::ConfigureSurface(
 		FMath::IsNearlyEqual(Old.HillHeight, InGenerationSettings.HillHeight) &&
 		FMath::IsNearlyEqual(Old.DesertHillCoverage, InGenerationSettings.DesertHillCoverage) &&
 		FMath::IsNearlyEqual(Old.MountainBiomeThreshold, InGenerationSettings.MountainBiomeThreshold) &&
+		FMath::IsNearlyEqual(Old.MountainCoverage, InGenerationSettings.MountainCoverage) &&
 		FMath::IsNearlyEqual(Old.MountainHeight, InGenerationSettings.MountainHeight) &&
 		FMath::IsNearlyEqual(Old.BaseHeight, InGenerationSettings.BaseHeight) &&
 		FMath::IsNearlyEqual(Old.HeightAmplitude, InGenerationSettings.HeightAmplitude) &&
@@ -1417,6 +1418,35 @@ ASmoothVoxelOctreeWorld::ASmoothVoxelOctreeWorld()
 void ASmoothVoxelOctreeWorld::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Older BP_OctreeWorld assets may serialize the reference-map flag as true.
+	// Procedural terrain is now the default; the captured map remains opt-in.
+	if (bForceProceduralGeneration)
+	{
+		bUseReferenceWorldData = false;
+		ReferenceWorldDataSnapshot.Reset();
+
+		// Migrate values left at the previous native defaults while preserving
+		// any terrain settings that were deliberately customized in the Blueprint.
+		if (FMath::IsNearlyEqual(FlatlandCoverage, 0.2f))
+		{
+			FlatlandCoverage = 0.5f;
+		}
+		if (FMath::IsNearlyEqual(FlatlandCoverageMultiplier, 0.6f))
+		{
+			FlatlandCoverageMultiplier = 1.0f;
+		}
+		if (FMath::IsNearlyEqual(DesertHillCoverage, 0.18f))
+		{
+			DesertHillCoverage = 0.5f;
+		}
+	}
+
+	if (bRandomizeSeedForNewWorld)
+	{
+		Seed = FGuid::NewGuid().A;
+	}
+
 	LoadReferenceWorldData();
 	TryBindPlayerInteractionInput();
 	UpdateWaterSurface();
@@ -1773,6 +1803,16 @@ void ASmoothVoxelOctreeWorld::RegenerateWorld()
 
 void ASmoothVoxelOctreeWorld::StartNewGame()
 {
+	if (bForceProceduralGeneration)
+	{
+		bUseReferenceWorldData = false;
+		ReferenceWorldDataSnapshot.Reset();
+	}
+	if (bRandomizeSeedForNewWorld)
+	{
+		Seed = FGuid::NewGuid().A;
+	}
+
 	for (TPair<FIntVector, ASmoothVoxelPlacedCubeBlock*>& Pair : PlacedCubeBlocks)
 	{
 		if (IsValid(Pair.Value))
@@ -1805,8 +1845,9 @@ void ASmoothVoxelOctreeWorld::StartNewGame()
 
 float ASmoothVoxelOctreeWorld::GetWorldSizeCentimeters() const
 {
-	// 8192 DTM samples are spaced at 1 m; use exact source extent so base voxels are 100 cm.
-	return bUseReferenceWorldData ? 819200.0f :
+	// Only use the fixed DTM extent when the source raster actually loaded.
+	const bool bHasActiveReference = bUseReferenceWorldData && ReferenceWorldDataSnapshot.IsValid();
+	return bHasActiveReference ? 819200.0f :
 		GetWorldSizeCentimetersForPreset(WorldSize);
 }
 
@@ -2108,6 +2149,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.HillHeight = HillHeight;
 	Settings.DesertHillCoverage = DesertHillCoverage;
 	Settings.MountainBiomeThreshold = MountainBiomeThreshold;
+	Settings.MountainCoverage = MountainCoverage;
 	Settings.MountainHeight = MountainHeight;
 	Settings.BaseHeight = BaseHeight;
 	Settings.HeightAmplitude = HeightAmplitude;
