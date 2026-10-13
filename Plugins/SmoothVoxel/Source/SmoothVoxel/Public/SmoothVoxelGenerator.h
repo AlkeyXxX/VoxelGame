@@ -110,9 +110,9 @@ struct FSVoxelGenerationSettings
 	float DesertHillCoverage = 0.5f;
 	float MountainBiomeThreshold = 0.80f;
 	float MountainCoverage = 0.20f;
-	float MountainHeight = 12000.0f;
+	float MountainHeight = 16000.0f;
 
-	float BaseHeight = 900.0f;
+	float BaseHeight = 3500.0f;
 	float HeightAmplitude = 3500.0f;
 	float NoiseScale = 0.00005f;
 	float DetailScale = 0.000025f;
