@@ -2,6 +2,8 @@
 #include "SmoothVoxelGenerator.h"
 #include "SmoothVoxelMCTables.h"
 #include "Math/UnrealMathUtility.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include <cmath>
 
 namespace
@@ -598,6 +600,180 @@ void FSVoxelGenerator::SampleBiomeClimate(
         X * Scale * 0.35, Y * Scale * 0.35, S.Seed + 3907);
 }
 
+bool FSVoxelReferenceWorldData::HasHeightField() const
+{
+    return HeightWidth == 8192 && HeightHeight == 8192 &&
+        HeightBytesLE.Num() == HeightWidth * HeightHeight * 2;
+}
+
+bool FSVoxelReferenceWorldData::HasBiomeMask() const
+{
+    return BiomeWidth == 1024 && BiomeHeight == 1024 &&
+        BiomeIds.Num() == BiomeWidth * BiomeHeight;
+}
+
+bool FSVoxelReferenceWorldData::HasRoadMask() const
+{
+    return RoadWidth == 8192 && RoadHeight == 8192 &&
+        PackedRoadMask.Num() == (RoadWidth * RoadHeight + 3) / 4;
+}
+
+double FSVoxelReferenceWorldData::SampleHeightCentimeters(
+    double WorldX,
+    double WorldY,
+    double WorldCenterX,
+    double WorldCenterY) const
+{
+    if (!HasHeightField())
+    {
+        return 0.0;
+    }
+
+    // The 7DTD DTM's coordinate hypothesis was cross-checked against 4175
+    // prefab elevation values: sample index ~= round(world metres + 4096).
+    const double GridX = FMath::Clamp(
+        (WorldX - WorldCenterX) / 100.0 + static_cast<double>(HeightWidth) * 0.5,
+        0.0, static_cast<double>(HeightWidth - 1));
+    const double GridY = FMath::Clamp(
+        (WorldY - WorldCenterY) / 100.0 + static_cast<double>(HeightHeight) * 0.5,
+        0.0, static_cast<double>(HeightHeight - 1));
+    const int32 X0 = FMath::FloorToInt(GridX);
+    const int32 Y0 = FMath::FloorToInt(GridY);
+    const int32 X1 = FMath::Min(X0 + 1, HeightWidth - 1);
+    const int32 Y1 = FMath::Min(Y0 + 1, HeightHeight - 1);
+    const double TX = GridX - static_cast<double>(X0);
+    const double TY = GridY - static_cast<double>(Y0);
+
+    const auto ReadSample = [this](int32 X, int32 Y) -> double
+    {
+        const int32 SampleIndex = Y * HeightWidth + X;
+        const int32 ByteIndex = SampleIndex * 2;
+        const uint16 Value = static_cast<uint16>(HeightBytesLE[ByteIndex]) |
+            (static_cast<uint16>(HeightBytesLE[ByteIndex + 1]) << 8);
+        return static_cast<double>(Value);
+    };
+
+    const double H00 = ReadSample(X0, Y0);
+    const double H10 = ReadSample(X1, Y0);
+    const double H01 = ReadSample(X0, Y1);
+    const double H11 = ReadSample(X1, Y1);
+    const double HeightRaw = FMath::Lerp(
+        FMath::Lerp(H00, H10, TX),
+        FMath::Lerp(H01, H11, TX),
+        TY);
+
+    // Raw height unit is 1/256 metre; Unreal uses centimetres.
+    return HeightRaw * (100.0 / 256.0);
+}
+
+ESVoxelBiome FSVoxelReferenceWorldData::SampleBiome(
+    double WorldX,
+    double WorldY,
+    double WorldCenterX,
+    double WorldCenterY) const
+{
+    if (!HasBiomeMask())
+    {
+        return ESVoxelBiome::Plains;
+    }
+
+    const double SourceX = FMath::Clamp(
+        (WorldX - WorldCenterX) / 100.0 + static_cast<double>(HeightWidth) * 0.5,
+        0.0, static_cast<double>(HeightWidth - 1));
+    const double SourceY = FMath::Clamp(
+        (WorldY - WorldCenterY) / 100.0 + static_cast<double>(HeightHeight) * 0.5,
+        0.0, static_cast<double>(HeightHeight - 1));
+    const int32 X = FMath::Clamp(
+        FMath::FloorToInt(SourceX * static_cast<double>(BiomeWidth) / HeightWidth),
+        0, BiomeWidth - 1);
+    const int32 Y = FMath::Clamp(
+        FMath::FloorToInt(SourceY * static_cast<double>(BiomeHeight) / HeightHeight),
+        0, BiomeHeight - 1);
+
+    switch (BiomeIds[Y * BiomeWidth + X])
+    {
+    case 1: return ESVoxelBiome::Forest;
+    case 2: return ESVoxelBiome::Desert;
+    case 3: return ESVoxelBiome::Snow;
+    case 4: return ESVoxelBiome::BurntForest;
+    case 5: return ESVoxelBiome::Wasteland;
+    default: return ESVoxelBiome::Plains;
+    }
+}
+
+EVoxelBlock FSVoxelReferenceWorldData::SampleRoadType(
+    double WorldX,
+    double WorldY,
+    double WorldCenterX,
+    double WorldCenterY) const
+{
+    if (!HasRoadMask())
+    {
+        return EVoxelBlock::Air;
+    }
+
+    const int32 X = FMath::Clamp(
+        FMath::RoundToInt((WorldX - WorldCenterX) / 100.0 + static_cast<double>(RoadWidth) * 0.5),
+        0, RoadWidth - 1);
+    const int32 Y = FMath::Clamp(
+        FMath::RoundToInt((WorldY - WorldCenterY) / 100.0 + static_cast<double>(RoadHeight) * 0.5),
+        0, RoadHeight - 1);
+    const int32 PixelIndex = Y * RoadWidth + X;
+    const uint8 PackedByte = PackedRoadMask[PixelIndex >> 2];
+    const uint8 RoadCode = (PackedByte >> ((PixelIndex & 3) * 2)) & 0x03;
+    return RoadCode == 1 ? EVoxelBlock::Asphalt :
+        (RoadCode == 2 ? EVoxelBlock::DirtRoad : EVoxelBlock::Air);
+}
+
+FSVoxelReferenceWorldDataPtr FSVoxelGenerator::LoadReferenceWorldData(
+    const FString& HeightmapPath,
+    const FString& BiomeMaskPath,
+    const FString& RoadMaskPath,
+    FString& OutStatus)
+{
+    TArray<uint8> HeightBytes;
+    if (!FFileHelper::LoadFileToArray(HeightBytes, *HeightmapPath))
+    {
+        OutStatus = FString::Printf(
+            TEXT("Could not read source heightmap: %s"), *HeightmapPath);
+        return nullptr;
+    }
+    const int32 ExpectedHeightBytes = 8192 * 8192 * 2;
+    if (HeightBytes.Num() != ExpectedHeightBytes)
+    {
+        OutStatus = FString::Printf(
+            TEXT("Source heightmap has %d bytes; expected %d (8192x8192 uint16 LE)."),
+            HeightBytes.Num(), ExpectedHeightBytes);
+        return nullptr;
+    }
+
+    TSharedPtr<FSVoxelReferenceWorldData, ESPMode::ThreadSafe> Data =
+        MakeShared<FSVoxelReferenceWorldData, ESPMode::ThreadSafe>();
+    Data->HeightBytesLE = MoveTemp(HeightBytes);
+
+    TArray<uint8> BiomeBytes;
+    if (FFileHelper::LoadFileToArray(BiomeBytes, *BiomeMaskPath) &&
+        BiomeBytes.Num() == 1024 * 1024)
+    {
+        Data->BiomeIds = MoveTemp(BiomeBytes);
+    }
+
+    TArray<uint8> RoadBytes;
+    const int32 ExpectedRoadBytes = (8192 * 8192 + 3) / 4;
+    if (FFileHelper::LoadFileToArray(RoadBytes, *RoadMaskPath) &&
+        RoadBytes.Num() == ExpectedRoadBytes)
+    {
+        Data->PackedRoadMask = MoveTemp(RoadBytes);
+    }
+
+    OutStatus = FString::Printf(
+        TEXT("Loaded 8192x8192 DTM from %s; biome mask: %s; 2-bit road mask: %s."),
+        *HeightmapPath,
+        Data->HasBiomeMask() ? TEXT("ready") : TEXT("missing/invalid"),
+        Data->HasRoadMask() ? TEXT("ready") : TEXT("missing/invalid"));
+    return Data;
+}
+
 float FSVoxelGenerator::SampleTerrainNoise(
     double WorldX,
     double WorldY,
@@ -673,6 +849,11 @@ ESVoxelBiome FSVoxelGenerator::SampleBiome(
     if (!S.bEnableBiomes)
     {
         return ESVoxelBiome::Plains;
+    }
+    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid())
+    {
+        return S.ReferenceWorldData->SampleBiome(
+            X, Y, S.BiomeWorldCenter.X, S.BiomeWorldCenter.Y);
     }
 
     float DesertWeight = 0.0f;
@@ -993,6 +1174,10 @@ float FSVoxelGenerator::SamplePOISuitability(
     double Y,
     const FSVoxelGenerationSettings& S)
 {
+    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid())
+    {
+        return 0.0f;
+    }
     double SiteX = X;
     double SiteY = Y;
     return GetPOIPlateauInfluence(X, Y, S, SiteX, SiteY);
@@ -1023,12 +1208,22 @@ FLinearColor FSVoxelGenerator::GetBiomeTint(
     case ESVoxelBiome::Snow:
         Tint = FLinearColor(0.78f, 0.83f, 0.88f, 1.0f);
         break;
+    case ESVoxelBiome::BurntForest:
+        Tint = FLinearColor(1.0f, 0.894f, 0.467f, 1.0f);
+        break;
+    case ESVoxelBiome::Wasteland:
+        Tint = FLinearColor(0.729f, 0.0f, 1.0f, 1.0f);
+        break;
     case ESVoxelBiome::Plains:
     default:
         Tint = FLinearColor(0.46f, 0.49f, 0.25f, 1.0f);
         break;
     }
 
+    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid())
+    {
+        return Tint;
+    }
     const float ClearingWeight = SamplePOISuitability(X, Y, S);
     const FLinearColor BareEarth(0.40f, 0.32f, 0.22f, 1.0f);
     return FMath::Lerp(Tint, BareEarth, ClearingWeight * 0.45f);
@@ -1048,7 +1243,8 @@ void FSVoxelGenerator::SampleRiverMaskAndField(
     {
         *OutBankInfluence = 0.0f;
     }
-    if (!S.bEnableRivers)
+    if (!S.bEnableRivers ||
+        (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid()))
     {
         return;
     }
@@ -1155,7 +1351,8 @@ void FSVoxelGenerator::SampleLakeMaskAndLevel(
 {
     OutInfluence = 0.0f;
     OutWaterLevel = S.RiverWaterLevel;
-    if (!S.bEnableLakes)
+    if (!S.bEnableLakes ||
+        (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid()))
     {
         return;
     }
@@ -1329,6 +1526,14 @@ double FSVoxelGenerator::SampleSurfaceHeight(
     double Y,
     const FSVoxelGenerationSettings& S)
 {
+    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid() &&
+        S.ReferenceWorldData->HasHeightField())
+    {
+        // In source-world mode the DTM is authoritative: do not add procedural
+        // hills, POI flattening, micro-noise, or synthetic river/lake cuts.
+        return S.ReferenceWorldData->SampleHeightCentimeters(
+            X, Y, S.BiomeWorldCenter.X, S.BiomeWorldCenter.Y);
+    }
     const double NaturalHeight = SampleUnflattenedSurfaceHeight(X, Y, S);
     double SiteX = X;
     double SiteY = Y;
