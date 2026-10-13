@@ -1,0 +1,278 @@
+{
+  "world": "West Biyove Valley",
+  "archive": {
+    "file": "West Biyove Valley.7z",
+    "bytes": 138447232,
+    "sha256": "10e4b2dd90a3b5a0d2b1368b48e9d47f5e4546835811ceca6d9b704ee95dbfaa"
+  },
+  "map": {
+    "gameVersion": "V.3.1.4",
+    "widthSamples": 8192,
+    "heightSamples": 8192,
+    "scale": 1,
+    "nominalExtentMeters": [
+      8192,
+      8192
+    ],
+    "mapSeed": -1058264646,
+    "generationSeed": 123,
+    "randomGeneratedWorld": true,
+    "fixedWaterLevel": false,
+    "modes": [
+      "Survival",
+      "SurvivalSP",
+      "SurvivalMP",
+      "Creative"
+    ],
+    "generationParameters": {
+      "Towns": "Default",
+      "Wilderness": "Default",
+      "Lakes": "Default",
+      "Rivers": "Default",
+      "Cracks": "Default",
+      "Craters": "Default",
+      "Plains": 4,
+      "Hills": 4,
+      "Mountains": 2,
+      "Forest": 13,
+      "BurntForest": 18,
+      "Desert": 22,
+      "Snow": 23,
+      "Wasteland": 24
+    }
+  },
+  "terrain": {
+    "source": "dtm.raw",
+    "bytes": 134217728,
+    "storage": "8192x8192 uint16 little-endian inferred from byte count",
+    "heightMetersFormula": "sample / 256.0",
+    "sampleRange": [
+      257,
+      50784
+    ],
+    "heightMetersRange": [
+      1.00390625,
+      198.375
+    ],
+    "meanMeters": 48.90817013516789,
+    "stdMeters": 18.965216139483083,
+    "percentileHeightsMeters": [
+      1.00390625,
+      1.00390625,
+      12.765625,
+      35.43359375,
+      39.0625,
+      43.44921875,
+      49.19140625,
+      91.5546875,
+      125.390625,
+      149.94140625,
+      198.375
+    ],
+    "percentilePercent": [
+      0,
+      0.1,
+      1,
+      5,
+      25,
+      50,
+      75,
+      95,
+      99,
+      99.9,
+      100
+    ]
+  },
+  "alternateTerrain": {
+    "source": "dtm_processed.raw",
+    "bytes": 134217728,
+    "sameDimensionsAsPrimary": true,
+    "identicalPixelsPercent": 96.72023206949234,
+    "differentPixelsPercent": 3.27976793050766,
+    "meanAbsoluteDifferenceMeters": 0.0655254140147008,
+    "pixelsOver1mDifferencePercent": 2.3932889103889465,
+    "pixelsOver3_906mDifferencePercent": 0.4733040928840637,
+    "maximumDifferenceRawUnits": 10794,
+    "note": "source-selection between raw and processed must be A/B tested; dtm.raw is the initial authoritative field because it is the direct DTM source"
+  },
+  "empiricalCoordinates": {
+    "column": "round(world_x + 4096)",
+    "row": "round(world_z + 4096)",
+    "heightMeters": "dtm.raw[row,column] / 256",
+    "unrealCentimeters": {
+      "X": "(column - 4096) * 100",
+      "Y": "(row - 4096) * 100",
+      "Z": "(sample / 256) * 100"
+    },
+    "prefabsChecked": 4175,
+    "absoluteHeightErrorMetersMedian": 0.85546875,
+    "absoluteHeightErrorMetersMean": 2.338575973053892,
+    "absoluteHeightErrorMetersP90": 6.14453125,
+    "note": "validation against prefab Y values; prefab origin does not always coincide with a ground contact point"
+  },
+  "prefabs": {
+    "file": "prefabs.xml",
+    "placements": 4175,
+    "distinctNames": 1107,
+    "attributeKeys": [
+      "type",
+      "name",
+      "position",
+      "rotation"
+    ],
+    "positionRanges": {
+      "x": [
+        -3923,
+        3807
+      ],
+      "y": [
+        2,
+        143
+      ],
+      "z": [
+        -3920,
+        3847
+      ]
+    },
+    "prefixCounts": {
+      "part_": 1916,
+      "rwg_tile_": 372,
+      "roadPrefix": 25
+    },
+    "topNames": [
+      [
+        "part_highway_transition",
+        116
+      ],
+      [
+        "part_driveway_countryresidential_07",
+        66
+      ],
+      [
+        "part_driveway_industrial_01",
+        58
+      ],
+      [
+        "part_driveway_countryresidential_06",
+        48
+      ],
+      [
+        "part_driveway_rural_08",
+        43
+      ],
+      [
+        "part_driveway_rural_06",
+        42
+      ],
+      [
+        "part_driveway_industrial_08",
+        40
+      ],
+      [
+        "part_driveway_countryresidential_01",
+        37
+      ],
+      [
+        "part_driveway_rural_02",
+        35
+      ],
+      [
+        "part_driveway_countryresidential_09",
+        33
+      ],
+      [
+        "part_driveway_countrytown_10",
+        32
+      ],
+      [
+        "rwg_tile_rural_cap",
+        31
+      ]
+    ]
+  },
+  "spawnpoints": {
+    "file": "spawnpoints.xml",
+    "count": 87,
+    "positionRanges": {
+      "x": [
+        -1541,
+        1429
+      ],
+      "y": [
+        31.40749,
+        95.48764
+      ],
+      "z": [
+        -1240,
+        1489
+      ]
+    }
+  },
+  "biomeRaster": {
+    "file": "biomes.png",
+    "dimensions": [
+      1024,
+      1024
+    ],
+    "palette": [
+      {
+        "rgba": [
+          255,
+          168,
+          0,
+          255
+        ],
+        "pixels": 246221,
+        "percent": 23.481,
+        "label": "Desert-like; visual inference"
+      },
+      {
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "pixels": 244099,
+        "percent": 23.279,
+        "label": "Snow/pale region; visual inference"
+      },
+      {
+        "rgba": [
+          255,
+          228,
+          119,
+          255
+        ],
+        "pixels": 227791,
+        "percent": 21.724,
+        "label": "Burnt-forest/ochre; visual inference"
+      },
+      {
+        "rgba": [
+          186,
+          0,
+          255,
+          255
+        ],
+        "pixels": 195144,
+        "percent": 18.61,
+        "label": "Wasteland/purple; visual inference"
+      },
+      {
+        "rgba": [
+          0,
+          64,
+          0,
+          255
+        ],
+        "pixels": 135321,
+        "percent": 12.905,
+        "label": "Forest/dark-green; visual inference"
+      }
+    ]
+  },
+  "archiveMemberCount": 18,
+  "extractedTotalBytes": 282450923,
+  "reproductionRule": "Use source DTM samples as a heightfield; do not expect seed-only procedural generation to be identical."
+}
