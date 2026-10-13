@@ -443,6 +443,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	const int32 OriginalTriangleIndexCount = Data.Triangles.Num();
 	const int32 OriginalNormalCount = Data.Normals.Num();
 	const int32 OriginalUVCount = Data.UV0.Num();
+    const int32 OriginalUV1Count = Data.UV1.Num();
 	const int32 OriginalTangentCount = Data.Tangents.Num();
 	const int32 OriginalVertexColorCount = Data.VertexColors.Num();
 	FSVoxelMeshData EditedBackfaceData;
@@ -470,6 +471,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		{
 			EditedBackfaceData.UV0.Add(Data.UV0[Index]);
 		}
+        for (int32 Index=OriginalUV1Count; Index<Data.UV1.Num(); ++Index) EditedBackfaceData.UV1.Add(Data.UV1[Index]);
 		for (int32 Index = OriginalTangentCount; Index < Data.Tangents.Num(); ++Index)
 		{
 			EditedBackfaceData.Tangents.Add(Data.Tangents[Index]);
@@ -485,6 +487,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		Data.Triangles.SetNum(OriginalTriangleIndexCount);
 		Data.Normals.SetNum(OriginalNormalCount);
 		Data.UV0.SetNum(OriginalUVCount);
+        Data.UV1.SetNum(OriginalUV1Count);
 		Data.Tangents.SetNum(OriginalTangentCount);
 		Data.VertexColors.SetNum(OriginalVertexColorCount);
 
@@ -606,6 +609,8 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 
 		const FVector Center = (
 			Data.Vertices[A] + Data.Vertices[B] + Data.Vertices[C]) / 3.0f;
+        if (PendingSettings.bEnableSurfaceMaterialBlending)
+        { TerrainTriangles.Add(A); TerrainTriangles.Add(B); TerrainTriangles.Add(C); continue; }
 		EVoxelBlock RoadType = EVoxelBlock::Air;
 		if (ClassifyRoadSurface(Center, RoadType) &&
 			RoadType == EVoxelBlock::Asphalt)
@@ -662,6 +667,8 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 			EditedBackfaceData.Vertices[A] +
 			EditedBackfaceData.Vertices[B] +
 			EditedBackfaceData.Vertices[C]) / 3.0f;
+        if (PendingSettings.bEnableSurfaceMaterialBlending)
+        { EditedBackfaceTerrainTriangles.Add(A); EditedBackfaceTerrainTriangles.Add(B); EditedBackfaceTerrainTriangles.Add(C); continue; }
 		EVoxelBlock RoadType = EVoxelBlock::Air;
 		if (ClassifyRoadSurface(Center, RoadType) &&
 			RoadType == EVoxelBlock::Asphalt)
@@ -717,6 +724,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		Compact.Vertices.Reserve(VertexReserve);
 		Compact.Normals.Reserve(VertexReserve);
 		Compact.UV0.Reserve(VertexReserve);
+        Compact.UV1.Reserve(VertexReserve);
 		Compact.VertexColors.Reserve(VertexReserve);
 		Compact.Tangents.Reserve(VertexReserve);
 		Compact.Triangles.Reserve(SourceTriangles.Num());
@@ -751,6 +759,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 					? Source.Normals[OldIndex] : FVector::UpVector);
 				Compact.UV0.Add(Source.UV0.IsValidIndex(OldIndex)
 					? Source.UV0[OldIndex] : FVector2D::ZeroVector);
+                Compact.UV1.Add(Source.UV1.IsValidIndex(OldIndex) ? Source.UV1[OldIndex] : FVector2D::ZeroVector);
 				Compact.VertexColors.Add(Source.VertexColors.IsValidIndex(OldIndex)
 					? Source.VertexColors[OldIndex] : FLinearColor::White);
 				Compact.Tangents.Add(Source.Tangents.IsValidIndex(OldIndex)
@@ -767,7 +776,7 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 				Compact.Triangles,
 				Compact.Normals,
 				Compact.UV0,
-				EmptyUV1,
+                Compact.UV1,
 				EmptyUV2,
 				EmptyUV3,
 				Compact.VertexColors,
@@ -2129,6 +2138,7 @@ FSVoxelGenerationSettings ASmoothVoxelOctreeWorld::MakeGenerationSettings(
 	Settings.NormalSampleStep = FMath::Max(5.0f, EffectiveBaseVoxelSize * 0.5f);
 	Settings.IsoLevel = 0.0f;
 	Settings.bEnableRoadCollision = bRoadCollision;
+    Settings.bEnableSurfaceMaterialBlending = bEnableSurfaceMaterialBlending;
 	Settings.Seed = Seed;
 	Settings.bUseReferenceWorldData = bUseReferenceWorldData &&
 		ReferenceWorldDataSnapshot.IsValid();
@@ -3748,33 +3758,21 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 			static_cast<double>(DesiredCellsPerAxis) * static_cast<double>(*VoxelSize) * 0.5;
 		const double ChunkCenterY = static_cast<double>(ChunkOrigin->Y) +
 			static_cast<double>(DesiredCellsPerAxis) * static_cast<double>(*VoxelSize) * 0.5;
-		UMaterialInterface* SelectedBiomeMaterial = TerrainMaterial;
-		switch (FSVoxelGenerator::SampleBiome(ChunkCenterX, ChunkCenterY, BiomeSettings))
-		{
-		case ESVoxelBiome::Forest:
-			SelectedBiomeMaterial = ForestBiomeMaterial ? ForestBiomeMaterial : TerrainMaterial;
-			break;
-		case ESVoxelBiome::Desert:
-			SelectedBiomeMaterial = DesertBiomeMaterial ? DesertBiomeMaterial : TerrainMaterial;
-			break;
-		case ESVoxelBiome::Mountain:
-			SelectedBiomeMaterial = MountainBiomeMaterial ? MountainBiomeMaterial : TerrainMaterial;
-			break;
-		case ESVoxelBiome::Snow:
-			SelectedBiomeMaterial = SnowBiomeMaterial ? SnowBiomeMaterial : TerrainMaterial;
-			break;
-		case ESVoxelBiome::BurntForest:
-			SelectedBiomeMaterial = BurntForestBiomeMaterial ? BurntForestBiomeMaterial : TerrainMaterial;
-			break;
-		case ESVoxelBiome::Wasteland:
-			SelectedBiomeMaterial = WastelandBiomeMaterial ? WastelandBiomeMaterial : TerrainMaterial;
-			break;
-		case ESVoxelBiome::Plains:
-		default:
-			SelectedBiomeMaterial = PlainsBiomeMaterial ? PlainsBiomeMaterial : TerrainMaterial;
-			break;
-		}
-		Chunk->SetTerrainMaterial(SelectedBiomeMaterial);
+        UMaterialInterface* SelectedBiomeMaterial = TerrainMaterial;
+        if (!bEnableSurfaceMaterialBlending)
+        {
+            switch (FSVoxelGenerator::SampleBiome(ChunkCenterX, ChunkCenterY, BiomeSettings))
+            {
+            case ESVoxelBiome::Forest: SelectedBiomeMaterial = ForestBiomeMaterial ? ForestBiomeMaterial : TerrainMaterial; break;
+            case ESVoxelBiome::Desert: SelectedBiomeMaterial = DesertBiomeMaterial ? DesertBiomeMaterial : TerrainMaterial; break;
+            case ESVoxelBiome::Mountain: SelectedBiomeMaterial = MountainBiomeMaterial ? MountainBiomeMaterial : TerrainMaterial; break;
+            case ESVoxelBiome::Snow: SelectedBiomeMaterial = SnowBiomeMaterial ? SnowBiomeMaterial : TerrainMaterial; break;
+            case ESVoxelBiome::BurntForest: SelectedBiomeMaterial = BurntForestBiomeMaterial ? BurntForestBiomeMaterial : TerrainMaterial; break;
+            case ESVoxelBiome::Wasteland: SelectedBiomeMaterial = WastelandBiomeMaterial ? WastelandBiomeMaterial : MountainBiomeMaterial; break;
+            default: SelectedBiomeMaterial = PlainsBiomeMaterial ? PlainsBiomeMaterial : TerrainMaterial; break;
+            }
+        }
+        Chunk->SetTerrainMaterial(SelectedBiomeMaterial);
 
 		if (bForceBuildDesiredSelection || !Chunk->IsConfiguredFor(
 			Node, DesiredCellsPerAxis, *ChunkOrigin, *FaceMask, *VoxelSize, *bCollision))
