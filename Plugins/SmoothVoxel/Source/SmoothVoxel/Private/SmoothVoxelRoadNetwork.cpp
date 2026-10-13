@@ -231,6 +231,73 @@ ASmoothVoxelRoadNetwork::GetRoadBlockSnapshotForChunk(
     return MakeShared<FSVoxelRoadBlockMap, ESPMode::ThreadSafe>(MoveTemp(LocalRoadBlocks));
 }
 
+TSharedPtr<const FSVoxelRoadEmbankmentHeightMap, ESPMode::ThreadSafe>
+ASmoothVoxelRoadNetwork::GetRoadEmbankmentFillSnapshotForChunk(
+    const FIntVector& ChunkOriginCells,
+    int32 CellsPerAxis,
+    float BaseVoxelSize,
+    float VoxelSize) const
+{
+    if (RoadEmbankmentFillBins.Num() == 0 || CellsPerAxis <= 0 ||
+        !RoadEmbankmentFillHeightSnapshot.IsValid())
+    {
+        return nullptr;
+    }
+
+    constexpr int32 BinSize = 32;
+    const double SafeBaseStep = FMath::Max(1.0, static_cast<double>(BaseVoxelSize));
+    const int32 LodStride = FMath::Max(
+        1, FMath::RoundToInt(FMath::Max(SafeBaseStep, static_cast<double>(VoxelSize)) /
+            SafeBaseStep));
+    const int32 Border = LodStride * 2 + 3;
+    const int32 MinCellX = ChunkOriginCells.X - Border;
+    const int32 MinCellY = ChunkOriginCells.Y - Border;
+    const int32 MaxCellX = ChunkOriginCells.X + CellsPerAxis * LodStride + Border;
+    const int32 MaxCellY = ChunkOriginCells.Y + CellsPerAxis * LodStride + Border;
+
+    const auto FloorDivideByBin = [BinSize](int32 Value) -> int32
+    {
+        return Value >= 0 ? Value / BinSize : (Value - (BinSize - 1)) / BinSize;
+    };
+
+    FSVoxelRoadEmbankmentHeightMap LocalFillHeights;
+    const int32 MinBinX = FloorDivideByBin(MinCellX);
+    const int32 MinBinY = FloorDivideByBin(MinCellY);
+    const int32 MaxBinX = FloorDivideByBin(MaxCellX);
+    const int32 MaxBinY = FloorDivideByBin(MaxCellY);
+    for (int32 BinY = MinBinY; BinY <= MaxBinY; ++BinY)
+    {
+        for (int32 BinX = MinBinX; BinX <= MaxBinX; ++BinX)
+        {
+            const TArray<FIntPoint>* BinCells =
+                RoadEmbankmentFillBins.Find(FIntPoint(BinX, BinY));
+            if (!BinCells)
+            {
+                continue;
+            }
+            for (const FIntPoint& Cell : *BinCells)
+            {
+                if (Cell.X < MinCellX || Cell.X > MaxCellX ||
+                    Cell.Y < MinCellY || Cell.Y > MaxCellY)
+                {
+                    continue;
+                }
+                if (const double* Height = RoadEmbankmentFillHeightSnapshot->Find(Cell))
+                {
+                    LocalFillHeights.Add(Cell, *Height);
+                }
+            }
+        }
+    }
+
+    if (LocalFillHeights.Num() == 0)
+    {
+        return nullptr;
+    }
+    return MakeShared<FSVoxelRoadEmbankmentHeightMap, ESPMode::ThreadSafe>(
+        MoveTemp(LocalFillHeights));
+}
+
 void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const FVector& WorldCenter,
     float WorldSize,
@@ -249,7 +316,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     Mesh->ClearAllMeshSections();
     RoadBlockSnapshot.Reset();
     RoadSurfaceHeightSnapshot.Reset();
+    RoadEmbankmentFillHeightSnapshot.Reset();
     RoadSurfaceHeights.Reset();
+    RoadEmbankmentFillHeights.Reset();
+    RoadEmbankmentFillBins.Reset();
     RoadSampleBinsSnapshot.Reset();
     RoadBlockBins.Reset();
     RoadBlockTypes.Reset();
@@ -1925,11 +1995,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const double CenterGround = GroundHeights[SampleIndex];
             const double TerrainClearance = SafeSurfaceOffset;
 
-            // The road-cell Z index is ceil(deck / voxel size) - 1. Compensate
-            // for that lower-cell indexing so the extracted road top meets the
-            // terrain surface instead of appearing one voxel below it.
-            // The solid remains exactly one base voxel thick, downward from the deck.
-            const double RoadDeckZ = CenterGround + Lift + TerrainClearance + RoadBlockSize;
+            // Match the natural surface elevation. The SDF slab is already one
+            // full base voxel thick below this deck; shifting the top by a voxel
+            // would lift the carriageway and manufacture unnecessary embankments.
+            const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
             const double LeftZ = RoadDeckZ;
             const double RightZ = RoadDeckZ;
 
@@ -3857,48 +3926,113 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
-    // Add an intermittent full-cell soil shoulder beside straight asphalt
-    // runs. The core stays 4/8/16 blocks, and the footprint reaches 6/10/18
-    // where shoulders appear. Four-cell groups create 1-2-cell spill runs.
-    if (RoadBlockTypes.Num() > 0)
+    // Build embankments as terrain fill, not as an auxiliary mesh or extra road
+    // blocks. Only columns where the natural ground falls below the road's
+    // 1-voxel deck receive fill; surfaces keep the biome material of the land.
+    TSet<FIntPoint> RoadFootprintCells;
+    TMap<FIntPoint, double> RoadDeckByColumn;
+    RoadFootprintCells.Reserve(RoadBlockTypes.Num());
+    RoadDeckByColumn.Reserve(RoadSurfaceHeights.Num());
+    for (const TPair<FIntVector, EVoxelBlock>& RoadBlock : RoadBlockTypes)
     {
-        TArray<FIntVector> AsphaltCells;
-        AsphaltCells.Reserve(RoadBlockTypes.Num());
-        for (const TPair<FIntVector, EVoxelBlock>& Entry : RoadBlockTypes)
-            if (Entry.Value == EVoxelBlock::Asphalt) AsphaltCells.Add(Entry.Key);
-        TArray<TPair<FIntVector, double>> SpillCells;
-        for (const FIntVector& Cell : AsphaltCells)
+        const FIntPoint XY(RoadBlock.Key.X, RoadBlock.Key.Y);
+        RoadFootprintCells.Add(XY);
+        const double* Deck = RoadSurfaceHeights.Find(RoadBlock.Key);
+        if (!Deck)
         {
-            const auto IsAsphalt = [this](const FIntVector& C)
-            { const EVoxelBlock* T=RoadBlockTypes.Find(C); return T && *T==EVoxelBlock::Asphalt; };
-            const int32 NX=(IsAsphalt(Cell+FIntVector(-1,0,0))?1:0)+(IsAsphalt(Cell+FIntVector(1,0,0))?1:0);
-            const int32 NY=(IsAsphalt(Cell+FIntVector(0,-1,0))?1:0)+(IsAsphalt(Cell+FIntVector(0,1,0))?1:0);
-            if (NX==NY || FMath::Max(NX,NY)<2) continue;
-            const bool AlongX=NX>NY;
-            const int32 LongCell=AlongX?Cell.X:Cell.Y;
-            const int32 Group=LongCell>=0?LongCell/4:(LongCell-3)/4;
-            const int32 Within=LongCell-Group*4;
-            const double* Deck=RoadSurfaceHeights.Find(Cell);
-            if (!Deck) continue;
-            for (int32 Side : {-1,1})
+            continue;
+        }
+        double* ExistingDeck = RoadDeckByColumn.Find(XY);
+        if (!ExistingDeck || *Deck > *ExistingDeck)
+        {
+            RoadDeckByColumn.Add(XY, *Deck);
+        }
+    }
+
+    const double MinimumNaturalFill = RoadBlockSize * 0.10;
+    const int32 MaxEmbankmentRunCells = 18;
+    static const int32 FillDirections[8][2] =
+    {
+        { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+        { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 }
+    };
+
+    for (const TPair<FIntPoint, double>& RoadColumn : RoadDeckByColumn)
+    {
+        const FIntPoint& RoadXY = RoadColumn.Key;
+        const double DeckHeight = RoadColumn.Value;
+        const double RoadWorldX = (static_cast<double>(RoadXY.X) + 0.5) * RoadBlockSize;
+        const double RoadWorldY = (static_cast<double>(RoadXY.Y) + 0.5) * RoadBlockSize;
+        const double RoadGround = FSVoxelGenerator::SampleSurfaceHeight(
+            RoadWorldX, RoadWorldY, GenerationSettings);
+
+        // Do not close river/lake crossings with soil. Their raised deck remains
+        // supported by the bridge logic; fill is only for ordinary road shoulders.
+        const bool bRoadRaisedWellAboveGround =
+            DeckHeight - RoadGround > RoadBlockSize * 2.0;
+        bool bWetCrossing = false;
+        if (bRoadRaisedWellAboveGround && GenerationSettings.bEnableRivers)
+        {
+            const float RiverInfluence = FSVoxelGenerator::SampleRiverInfluence(
+                RoadWorldX, RoadWorldY, GenerationSettings);
+            bWetCrossing = RiverInfluence > 0.05f &&
+                RoadGround < static_cast<double>(GenerationSettings.RiverWaterLevel) +
+                    RoadBlockSize * 3.0;
+        }
+        if (bRoadRaisedWellAboveGround && !bWetCrossing &&
+            GenerationSettings.bEnableLakes)
+        {
+            float LakeInfluence = 0.0f;
+            float LakeLevel = static_cast<float>(GenerationSettings.RiverWaterLevel);
+            FSVoxelGenerator::SampleLakeMaskAndLevel(
+                RoadWorldX, RoadWorldY, GenerationSettings, LakeInfluence, LakeLevel);
+            bWetCrossing = LakeInfluence >= 0.10f &&
+                RoadGround < static_cast<double>(LakeLevel) + RoadBlockSize * 3.0;
+        }
+        if (bWetCrossing)
+        {
+            continue;
+        }
+
+        for (const auto& Direction : FillDirections)
+        {
+            const FIntPoint Adjacent(RoadXY.X + Direction[0], RoadXY.Y + Direction[1]);
+            if (RoadFootprintCells.Contains(Adjacent))
             {
-                const FIntVector Spill=AlongX?Cell+FIntVector(0,Side,0):Cell+FIntVector(Side,0,0);
-                if (RoadBlockTypes.Contains(Spill)) continue;
-                const double WX=(static_cast<double>(Spill.X)+0.5)*RoadBlockSize;
-                const double WY=(static_cast<double>(Spill.Y)+0.5)*RoadBlockSize;
-                const double Ground=FSVoxelGenerator::SampleSurfaceHeight(WX,WY,GenerationSettings);
-                // The deck reference includes one voxel of cell-index compensation.
-                // Remove that compensation when comparing it to the sampled terrain.
-                if (std::abs((Ground - *Deck) + RoadBlockSize + SafeSurfaceOffset)>RoadBlockSize*0.75) continue;
-                uint32 H=static_cast<uint32>(Group)*196314165u ^ static_cast<uint32>(Spill.X)*907633515u ^
-                    static_cast<uint32>(Spill.Y)*604171u ^ static_cast<uint32>(GenerationSettings.Seed)*1376312589u;
-                H^=H>>16; H*=0x7feb352du; H^=H>>15;
-                const int32 Run=1+static_cast<int32>((H>>8)&1u);
-                if ((H%100u)<80u && Within<Run) SpillCells.Add(TPair<FIntVector,double>(Spill,*Deck));
+                continue;
+            }
+
+            for (int32 RunCell = 1; RunCell <= MaxEmbankmentRunCells; ++RunCell)
+            {
+                const FIntPoint FillCell(
+                    RoadXY.X + Direction[0] * RunCell,
+                    RoadXY.Y + Direction[1] * RunCell);
+                if (RoadFootprintCells.Contains(FillCell))
+                {
+                    break;
+                }
+
+                const double FillWorldX = (static_cast<double>(FillCell.X) + 0.5) * RoadBlockSize;
+                const double FillWorldY = (static_cast<double>(FillCell.Y) + 0.5) * RoadBlockSize;
+                const double Ground = FSVoxelGenerator::SampleSurfaceHeight(
+                    FillWorldX, FillWorldY, GenerationSettings);
+                // The first outside cell begins half a voxel beyond the road edge;
+                // then native terrain fill descends at a conservative 1:1.5 grade.
+                const double DistanceFromRoadEdge =
+                    (static_cast<double>(RunCell) - 0.5) * RoadBlockSize;
+                const double FillTop = DeckHeight - DistanceFromRoadEdge / 1.5;
+                if (FillTop <= Ground + MinimumNaturalFill)
+                {
+                    break;
+                }
+
+                double* ExistingFillTop = RoadEmbankmentFillHeights.Find(FillCell);
+                if (!ExistingFillTop || FillTop > *ExistingFillTop)
+                {
+                    RoadEmbankmentFillHeights.Add(FillCell, FillTop);
+                }
             }
         }
-        for (const TPair<FIntVector,double>& S : SpillCells)
-            if (!RoadBlockTypes.Contains(S.Key)) { RoadBlockTypes.Add(S.Key,EVoxelBlock::DirtRoad); RoadSurfaceHeights.Add(S.Key,S.Value); }
     }
 
     if (RoadBlockTypes.Num() == 0)
@@ -3951,10 +4085,44 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             }
         }
     }
+    // Fill columns are outside the discrete road footprint. Mark all 3D
+    // density bins from natural ground to each fill top so fill-only chunks build.
+    for (const TPair<FIntPoint, double>& Fill : RoadEmbankmentFillHeights)
+    {
+        const double WX = (static_cast<double>(Fill.Key.X) + 0.5) * RoadBlockSize;
+        const double WY = (static_cast<double>(Fill.Key.Y) + 0.5) * RoadBlockSize;
+        const double Ground = FSVoxelGenerator::SampleSurfaceHeight(WX, WY, GenerationSettings);
+        const int32 MinCellZ = FMath::FloorToInt(Ground / RoadBlockSize) - 1;
+        const int32 MaxCellZ = FMath::CeilToInt(Fill.Value / RoadBlockSize) + 1;
+        const int32 MinSampleBinX = FloorDivideByRoadSampleBin(Fill.Key.X - 1);
+        const int32 MinSampleBinY = FloorDivideByRoadSampleBin(Fill.Key.Y - 1);
+        const int32 MinSampleBinZ = FloorDivideByRoadSampleBin(MinCellZ);
+        const int32 MaxSampleBinX = FloorDivideByRoadSampleBin(Fill.Key.X + 1);
+        const int32 MaxSampleBinY = FloorDivideByRoadSampleBin(Fill.Key.Y + 1);
+        const int32 MaxSampleBinZ = FloorDivideByRoadSampleBin(MaxCellZ);
+        const FIntPoint FillBin(
+            FloorDivideByRoadBin(Fill.Key.X),
+            FloorDivideByRoadBin(Fill.Key.Y));
+        RoadEmbankmentFillBins.FindOrAdd(FillBin).Add(Fill.Key);
+        for (int32 BinZ = MinSampleBinZ; BinZ <= MaxSampleBinZ; ++BinZ)
+        {
+            for (int32 BinY = MinSampleBinY; BinY <= MaxSampleBinY; ++BinY)
+            {
+                for (int32 BinX = MinSampleBinX; BinX <= MaxSampleBinX; ++BinX)
+                {
+                    RoadSampleBins.Add(FIntVector(BinX, BinY, BinZ));
+                }
+            }
+        }
+    }
+
     RoadSampleBinsSnapshot = MakeShared<FSVoxelRoadSampleBinSet, ESPMode::ThreadSafe>(
         MoveTemp(RoadSampleBins));
     RoadSurfaceHeightSnapshot = MakeShared<FSVoxelRoadSurfaceHeightMap, ESPMode::ThreadSafe>(
         MoveTemp(RoadSurfaceHeights));
+    RoadEmbankmentFillHeightSnapshot =
+        MakeShared<FSVoxelRoadEmbankmentHeightMap, ESPMode::ThreadSafe>(
+            MoveTemp(RoadEmbankmentFillHeights));
     // The generation map is no longer needed on the actor after bins are built.
     // Move it into the immutable snapshot instead of duplicating the full TMap.
     RoadBlockSnapshot = MakeShared<FSVoxelRoadBlockMap, ESPMode::ThreadSafe>(
@@ -3963,27 +4131,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // Flat road stretches still work: the shared road-cell map produces their
     // carriageway inside terrain chunks, even when there are no side slopes.
 
-    const TArray<FVector2D> EmptyUV1;
-    const TArray<FVector2D> EmptyUV2;
-    const TArray<FVector2D> EmptyUV3;
-    if (DirtRoadTriangles.Num() > 0)
-    {
-        Mesh->CreateMeshSection_LinearColor(
-            0,
-            Vertices,
-            DirtRoadTriangles,
-            Normals,
-            UV0,
-            EmptyUV1,
-            EmptyUV2,
-            EmptyUV3,
-            VertexColors,
-            Tangents,
-            false);
-        Mesh->SetMaterial(0, ActiveDirtRoadMaterial);
-    }
-    // The auxiliary embankment mesh is visual-only. Collision for the road
-    // surface comes from the Transvoxel terrain sections.
+    // Carriageways and embankments are generated by the shared terrain density
+    // field; this actor keeps only its POI instances, never a visual-only fill mesh.
     Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 
