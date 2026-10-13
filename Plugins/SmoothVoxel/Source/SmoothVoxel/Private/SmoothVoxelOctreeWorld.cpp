@@ -552,13 +552,55 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 		{
 			return false;
 		}
-		const EVoxelBlock* RoadType = PendingSettings.RoadBlocks->Find(SurfaceCell);
-		if (!RoadType || (*RoadType != EVoxelBlock::Asphalt &&
-			*RoadType != EVoxelBlock::DirtRoad))
+		// The mesh surface follows an interpolated deck height, so its triangle
+		// centre can quantize to the Z layer beside the road's stored logical cell.
+		// Search nearby Z layers and classify using the same continuous deck height.
+		const double WorldZ = static_cast<double>(Center.Z) +
+			static_cast<double>(PendingSettings.ChunkOriginCells.Z) * RoadCellStep;
+		EVoxelBlock BestRoadType = EVoxelBlock::Air;
+		double BestVerticalScore = TNumericLimits<double>::Max();
+		for (int32 DZ = -2; DZ <= 2; ++DZ)
+		{
+			const FIntVector Candidate = SurfaceCell + FIntVector(0, 0, DZ);
+			if (PendingSettings.MinedRoadBlocks.IsValid() &&
+				PendingSettings.MinedRoadBlocks->Contains(Candidate))
+			{
+				continue;
+			}
+			const EVoxelBlock* RoadType = PendingSettings.RoadBlocks->Find(Candidate);
+			if (!RoadType || (*RoadType != EVoxelBlock::Asphalt &&
+				*RoadType != EVoxelBlock::DirtRoad))
+			{
+				continue;
+			}
+
+			double DeckHeight = (static_cast<double>(Candidate.Z) + 1.0) * RoadCellStep;
+			if (PendingSettings.RoadSurfaceHeights.IsValid())
+			{
+				if (const double* StoredHeight = PendingSettings.RoadSurfaceHeights->Find(Candidate))
+				{
+					DeckHeight = *StoredHeight;
+				}
+			}
+			const double VerticalDelta = WorldZ - DeckHeight;
+			const double SlabTolerance = static_cast<double>(RoadCellStep) * 0.60;
+			if (VerticalDelta < -SlabTolerance ||
+				VerticalDelta > RoadCellStep + SlabTolerance)
+			{
+				continue;
+			}
+			const double Score = FMath::Abs(VerticalDelta);
+			if (Score < BestVerticalScore)
+			{
+				BestVerticalScore = Score;
+				BestRoadType = *RoadType;
+			}
+		}
+		if (BestRoadType == EVoxelBlock::Air)
 		{
 			return false;
 		}
-		OutRoadType = *RoadType;
+		OutRoadType = BestRoadType;
 		return true;
 	};
 
