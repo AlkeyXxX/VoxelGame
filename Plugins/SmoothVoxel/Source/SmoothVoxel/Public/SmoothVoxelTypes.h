@@ -34,6 +34,10 @@ struct FSVoxelMeshData
     UPROPERTY()
     TArray<FVector2D> UV0;
 
+    // UV channel 1 carries the soil/dirt-road layer weight in X.
+    UPROPERTY()
+    TArray<FVector2D> UV1;
+
     UPROPERTY()
     TArray<FLinearColor> VertexColors;
 
@@ -46,6 +50,7 @@ struct FSVoxelMeshData
         Triangles.Reset();
         Normals.Reset();
         UV0.Reset();
+        UV1.Reset();
         VertexColors.Reset();
         Tangents.Reset();
     }
