@@ -21,6 +21,7 @@ Purpose: preserve the analysis and import contract for the user-supplied West Bi
 Branch: `feature/transvoxel-octree-terrain`.
 
 - In reference mode, `FSVoxelGenerator::SampleSurfaceHeight` uses bilinear samples of the original DTM and bypasses procedural hills, POI plateaus, micro-noise, and synthetic river/lake carving.
+- Octree chunk culling uses the true minimum/maximum DTM elevation after a single load-time scan, not the legacy procedural `BaseHeight` / mountain envelope; this prevents omitting source mountain tops.
 - The 8192² source map is centred on `RootWorldCenter`; one source pixel is 1 m. In Unreal units, the DTM returns height in centimetres.
 - The 1024² biome raster is mapped into six mesh material sections (Plains fallback, Forest, Desert, Snow, Burnt Forest, Wasteland). Assign the corresponding material properties on `ASmoothVoxelOctreeWorld` to reproduce the colors/textures; if unassigned, the section falls back to the chunk's terrain material.
 - The 2-bit packed splat3 road mask classifies asphalt/dirt faces in the same terrain chunk mesh and collision component. Source road cells are available to the mining/placement query without per-road actors.
@@ -34,7 +35,7 @@ Required files:
 - `biomes.raw` — 1 byte per biome pixel, 1 MiB; IDs: 1 Forest, 2 Desert, 3 Snow, 4 BurntForest, 5 Wasteland.
 - `roadmask_2bit.raw` — 4 road pixels per byte, 16 MiB; two-bit codes: 0 none, 1 red/asphalt, 2 green/dirt, 3 unused.
 
-Download the ready-to-extract [runtime rasters ZIP](https://github.com/AlkeyXxX/VoxelGame) is not stored in this repository; in this ChatGPT conversation it is supplied as `West_Biyove_Valley_Runtime_Assets.zip`. Extract it at the project root to populate `Docs/WorldReference/WestBiyoveValley/*.raw`. The loader also supports `Content/WorldReference/WestBiyoveValley/`. The project packaging config stages the Content directory for packaged builds.
+The ready-to-extract runtime ZIP is supplied separately as `West_Biyove_Valley_Runtime_Assets.zip`; it is not hosted in this repository yet. Extract it at the project root to populate `Docs/WorldReference/WestBiyoveValley/*.raw`. The loader also supports `Content/WorldReference/WestBiyoveValley/`. For packaged builds, copy the same files into `Content/WorldReference/WestBiyoveValley/`; project packaging settings stage that Content subdirectory.
 
 ## Files in this folder
 
