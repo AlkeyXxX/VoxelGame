@@ -2,6 +2,9 @@
 #include "SmoothVoxelGenerator.h"
 #include "SmoothVoxelMCTables.h"
 #include "Math/UnrealMathUtility.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include <cmath>
 
 namespace
 {
@@ -14,34 +17,429 @@ namespace
         return X + Y * N + Z * N * N;
     }
 
-    FORCEINLINE float Fade(float T)
+    FORCEINLINE double Fade(double T)
     {
-        // Smooth C1 interpolation.
-        return T * T * (3.0f - 2.0f * T);
+        return T * T * (3.0 - 2.0 * T);
     }
 
-    FORCEINLINE float Lerp3D(
-        float C000,
-        float C100,
-        float C010,
-        float C110,
-        float C001,
-        float C101,
-        float C011,
-        float C111,
-        float TX,
-        float TY,
-        float TZ)
+    FORCEINLINE double Lerp3D(
+        double C000,
+        double C100,
+        double C010,
+        double C110,
+        double C001,
+        double C101,
+        double C011,
+        double C111,
+        double TX,
+        double TY,
+        double TZ)
     {
-        const float X00 = FMath::Lerp(C000, C100, TX);
-        const float X10 = FMath::Lerp(C010, C110, TX);
-        const float X01 = FMath::Lerp(C001, C101, TX);
-        const float X11 = FMath::Lerp(C011, C111, TX);
+        const double X00 = FMath::Lerp(C000, C100, TX);
+        const double X10 = FMath::Lerp(C010, C110, TX);
+        const double X01 = FMath::Lerp(C001, C101, TX);
+        const double X11 = FMath::Lerp(C011, C111, TX);
 
-        const float Y0 = FMath::Lerp(X00, X10, TY);
-        const float Y1 = FMath::Lerp(X01, X11, TY);
-
+        const double Y0 = FMath::Lerp(X00, X10, TY);
+        const double Y1 = FMath::Lerp(X01, X11, TY);
         return FMath::Lerp(Y0, Y1, TZ);
+    }
+
+    FORCEINLINE int64 FloorToInt64(double Value)
+    {
+        return static_cast<int64>(std::floor(Value));
+    }
+
+    FORCEINLINE uint64 MixHash64(uint64 H)
+    {
+        H ^= H >> 30;
+        H *= 0xBF58476D1CE4E5B9ull;
+        H ^= H >> 27;
+        H *= 0x94D049BB133111EBull;
+        H ^= H >> 31;
+        return H;
+    }
+
+    FORCEINLINE uint32 HashLattice2D(int64 X, int64 Y, int32 Seed)
+    {
+        uint64 H =
+            static_cast<uint64>(X) * 0x9E3779B185EBCA87ull ^
+            static_cast<uint64>(Y) * 0xC2B2AE3D27D4EB4Full ^
+            static_cast<uint64>(static_cast<uint32>(Seed)) * 0x165667B19E3779F9ull;
+        return static_cast<uint32>(MixHash64(H) >> 40) & 0x00FFFFFFu;
+    }
+
+    FORCEINLINE uint32 HashLattice3D(int64 X, int64 Y, int64 Z, int32 Seed)
+    {
+        uint64 H =
+            static_cast<uint64>(X) * 0x9E3779B185EBCA87ull ^
+            static_cast<uint64>(Y) * 0xC2B2AE3D27D4EB4Full ^
+            static_cast<uint64>(Z) * 0x165667B19E3779F9ull ^
+            static_cast<uint64>(static_cast<uint32>(Seed)) * 0x85EBCA77C2B2AE63ull;
+        return static_cast<uint32>(MixHash64(H) >> 40) & 0x00FFFFFFu;
+    }
+
+    FORCEINLINE double SmoothMaximum(double A, double B, double BlendWidth)
+    {
+        if (BlendWidth <= SMALL_NUMBER)
+        {
+            return FMath::Max(A, B);
+        }
+
+        const double H = FMath::Clamp(
+            0.5 + 0.5 * (A - B) / BlendWidth,
+            0.0,
+            1.0);
+        return FMath::Lerp(B, A, H) + BlendWidth * H * (1.0 - H);
+    }
+
+    FORCEINLINE double BoxSdf(
+        double X,
+        double Y,
+        double Z,
+        double CenterX,
+        double CenterY,
+        double CenterZ,
+        double HalfExtent,
+        double RoundRadius)
+    {
+        const double CoreHalfExtent = FMath::Max(0.0, HalfExtent - RoundRadius);
+        const double QX = std::abs(X - CenterX) - CoreHalfExtent;
+        const double QY = std::abs(Y - CenterY) - CoreHalfExtent;
+        const double QZ = std::abs(Z - CenterZ) - CoreHalfExtent;
+        const double OutsideX = FMath::Max(QX, 0.0);
+        const double OutsideY = FMath::Max(QY, 0.0);
+        const double OutsideZ = FMath::Max(QZ, 0.0);
+        const double OutsideDistance = std::sqrt(
+            OutsideX * OutsideX + OutsideY * OutsideY + OutsideZ * OutsideZ);
+        const double InsideDistance = FMath::Min(
+            FMath::Max(QX, FMath::Max(QY, QZ)),
+            0.0);
+        return OutsideDistance + InsideDistance - RoundRadius;
+    }
+
+    FORCEINLINE float ApplyBlockEdits(
+        double X,
+        double Y,
+        double Z,
+        float Density,
+        const FSVoxelGenerationSettings& Settings)
+    {
+        const bool bHasBlockEdits =
+            Settings.BlockEdits.IsValid() && Settings.BlockEdits->Num() > 0;
+        const bool bHasMinedNodes =
+            Settings.MinedNodes.IsValid() && Settings.MinedNodes->Num() > 0;
+        const bool bHasRoadBlocks =
+            Settings.RoadBlocks.IsValid() && Settings.RoadBlocks->Num() > 0;
+        if (!bHasBlockEdits && !bHasMinedNodes && !bHasRoadBlocks)
+        {
+            return Density;
+        }
+
+        const double Step = FMath::Max(1.0, static_cast<double>(Settings.BaseVoxelSize));
+        const int32 BaseX = static_cast<int32>(std::floor(X / Step));
+        const int32 BaseY = static_cast<int32>(std::floor(Y / Step));
+        const int32 BaseZ = static_cast<int32>(std::floor(Z / Step));
+        bool bMayHaveRoadBlock = bHasRoadBlocks;
+        if (bMayHaveRoadBlock && Settings.RoadSampleBins.IsValid())
+        {
+            constexpr int32 RoadSampleBinSize = 8;
+            const auto FloorDivideBySampleBin = [RoadSampleBinSize](int32 Value) -> int32
+            {
+                return Value >= 0
+                    ? Value / RoadSampleBinSize
+                    : (Value - (RoadSampleBinSize - 1)) / RoadSampleBinSize;
+            };
+            const FIntVector SampleBin(
+                FloorDivideBySampleBin(BaseX),
+                FloorDivideBySampleBin(BaseY),
+                FloorDivideBySampleBin(BaseZ));
+            bMayHaveRoadBlock = Settings.RoadSampleBins->Contains(SampleBin);
+        }
+
+        // Block placement is a visual/collision actor and must not carve
+        // procedural terrain. State +2 is only a logical occupancy marker.
+        // Terrain mining uses MinedNodes as integer voxel-cell coordinates.
+        const double RoundRadius = Step * 0.28;
+        const double SmoothBlend = Step * 0.10;
+
+        // Road blocks still occupy discrete XY cells for mining/material lookup,
+        // but their deck is a continuous height field. Interpolating stamped
+        // elevations before evaluating the SDF removes voxel-height stair steps
+        // without adding per-block actors or independent collision objects.
+        if (bMayHaveRoadBlock)
+        {
+            const double RoadHalfExtent = Step * 0.5 +
+                FMath::Max(0.05, Step * 0.005);
+            const auto FindRoadHeightAtColumn = [&](int32 CellX, int32 CellY,
+                double ReferenceHeight, double& OutHeight) -> bool
+            {
+                if (!Settings.RoadSurfaceHeights.IsValid())
+                {
+                    return false;
+                }
+                const int32 ReferenceCellZ = FMath::FloorToInt(ReferenceHeight / Step);
+                double BestDifference = TNumericLimits<double>::Max();
+                bool bFound = false;
+                // The integer road-cell Z is ceil(deck/Step)-1; search adjacent
+                // levels to support exact grid-plane heights and bridge crossings.
+                for (int32 DZ = -2; DZ <= 1; ++DZ)
+                {
+                    const FIntVector Candidate(CellX, CellY, ReferenceCellZ + DZ);
+                    // Keep deck heights valid for mined road cells so the
+                    // excavation cut stays continuous after their solid is removed.
+                    if (!Settings.RoadBlocks->Contains(Candidate))
+                    {
+                        continue;
+                    }
+                    const double* Height = Settings.RoadSurfaceHeights->Find(Candidate);
+                    if (!Height)
+                    {
+                        continue;
+                    }
+                    const double Difference = FMath::Abs(*Height - ReferenceHeight);
+                    if (Difference < BestDifference)
+                    {
+                        BestDifference = Difference;
+                        OutHeight = *Height;
+                        bFound = true;
+                    }
+                }
+                return bFound;
+            };
+
+            const double GridX = X / Step - 0.5;
+            const double GridY = Y / Step - 0.5;
+            const int32 X0 = FMath::FloorToInt(GridX);
+            const int32 Y0 = FMath::FloorToInt(GridY);
+            const double TX = GridX - static_cast<double>(X0);
+            const double TY = GridY - static_cast<double>(Y0);
+            struct FRoadHeightQuadCache
+            {
+                int32 Layer = 0;
+                double H00 = 0.0;
+                double H10 = 0.0;
+                double H01 = 0.0;
+                double H11 = 0.0;
+                bool bHasH00 = false;
+                bool bHasH10 = false;
+                bool bHasH01 = false;
+                bool bHasH11 = false;
+            };
+            FRoadHeightQuadCache HeightQuadCache[4];
+            int32 HeightQuadCacheCount = 0;
+            const auto GetSmoothRoadDeckHeight = [&](double DeckHeight) -> double
+            {
+                const int32 ReferenceLayer = FMath::FloorToInt(DeckHeight / Step);
+                for (int32 CacheIndex = 0; CacheIndex < HeightQuadCacheCount; ++CacheIndex)
+                {
+                    const FRoadHeightQuadCache& Cached = HeightQuadCache[CacheIndex];
+                    if (Cached.Layer == ReferenceLayer)
+                    {
+                        // Missing columns use the current cell's height, not the
+                        // first cached cell's height, so ramps stay graded at edges.
+                        const double H00 = Cached.bHasH00 ? Cached.H00 : DeckHeight;
+                        const double H10 = Cached.bHasH10 ? Cached.H10 : DeckHeight;
+                        const double H01 = Cached.bHasH01 ? Cached.H01 : DeckHeight;
+                        const double H11 = Cached.bHasH11 ? Cached.H11 : DeckHeight;
+                        const double Low = FMath::Lerp(H00, H10, TX);
+                        const double High = FMath::Lerp(H01, H11, TX);
+                        return FMath::Lerp(Low, High, TY);
+                    }
+                }
+
+                FRoadHeightQuadCache Quad;
+                Quad.Layer = ReferenceLayer;
+                Quad.H00 = DeckHeight;
+                Quad.H10 = DeckHeight;
+                Quad.H01 = DeckHeight;
+                Quad.H11 = DeckHeight;
+                Quad.bHasH00 = FindRoadHeightAtColumn(X0,     Y0,     DeckHeight, Quad.H00);
+                Quad.bHasH10 = FindRoadHeightAtColumn(X0 + 1, Y0,     DeckHeight, Quad.H10);
+                Quad.bHasH01 = FindRoadHeightAtColumn(X0,     Y0 + 1, DeckHeight, Quad.H01);
+                Quad.bHasH11 = FindRoadHeightAtColumn(X0 + 1, Y0 + 1, DeckHeight, Quad.H11);
+                if (HeightQuadCacheCount < 4)
+                {
+                    HeightQuadCache[HeightQuadCacheCount++] = Quad;
+                }
+                const double Low = FMath::Lerp(Quad.bHasH00 ? Quad.H00 : DeckHeight,
+                    Quad.bHasH10 ? Quad.H10 : DeckHeight, TX);
+                const double High = FMath::Lerp(Quad.bHasH01 ? Quad.H01 : DeckHeight,
+                    Quad.bHasH11 ? Quad.H11 : DeckHeight, TX);
+                return FMath::Lerp(Low, High, TY);
+            };
+
+            for (int32 DZ = -1; DZ <= 1; ++DZ)
+            {
+                for (int32 DY = -1; DY <= 1; ++DY)
+                {
+                    for (int32 DX = -1; DX <= 1; ++DX)
+                    {
+                        const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        if (!Settings.RoadBlocks->Contains(Cell))
+                        {
+                            continue;
+                        }
+                        const bool bRoadCellMined = Settings.MinedRoadBlocks.IsValid() &&
+                            Settings.MinedRoadBlocks->Contains(Cell);
+
+                        const double* CellDeckHeight = Settings.RoadSurfaceHeights.IsValid()
+                            ? Settings.RoadSurfaceHeights->Find(Cell) : nullptr;
+                        const double DeckHeight = CellDeckHeight
+                            ? *CellDeckHeight
+                            : (static_cast<double>(Cell.Z) + 1.0) * Step;
+
+                        // Reuse the four interpolated column heights for other nearby
+                        // road cells in the same vertical layer.
+                        const double SmoothDeckZ = GetSmoothRoadDeckHeight(DeckHeight);
+
+                        const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
+                        const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
+                        const double QX = std::abs(X - CenterX) - RoadHalfExtent;
+                        const double QY = std::abs(Y - CenterY) - RoadHalfExtent;
+                        const double QTop = Z - SmoothDeckZ;
+                        const double QBottom = SmoothDeckZ - Step - Z;
+                        const double RoadSdf = FMath::Max(
+                            FMath::Max(QX, QY), FMath::Max(QTop, QBottom));
+                        // Remove terrain above the road deck within this cell, then
+                        // restore a full one-cell-deep solid in the same density field.
+                        const double RoadCutSdf = FMath::Max(FMath::Max(QX, QY), -QTop);
+                        // Keep the cut even when the asphalt/dirt-road block is mined:
+                        // otherwise natural terrain instantly fills the road back to the
+                        // old surface height, making the road behave like a paper-thin decal.
+                        Density = FMath::Min(Density, static_cast<float>(RoadCutSdf));
+                        if (!bRoadCellMined)
+                        {
+                            Density = static_cast<float>(FMath::Max(
+                                static_cast<double>(Density), -RoadSdf));
+                        }
+                    }
+                }
+            }
+        }
+
+        int8 CandidateStates[27];
+        double CandidateSdfs[27];
+        int32 CandidateCount = 0;
+
+        // A completed mining hit removes exactly one grid cell. The cut is
+        // centred at (cell + 0.5) * Step, not at a lattice corner: repeated
+        // hits while looking vertically down therefore remove successive cells
+        // in the same column and create flat floors/walls instead of a drifting
+        // octahedral tunnel.
+        if (bHasMinedNodes)
+        {
+            // Make the cell corners just inside the cutter. If the box
+            // ended exactly on the lattice corners, their density could remain
+            // zero/solid and the marching-cubes surface would leave a paper-thin
+            // cap instead of a complete excavated cell.
+            const double CutHalfExtent = Step * 0.5 + FMath::Max(0.05, Step * 0.005);
+            const double CutRoundRadius = 0.0;
+            for (int32 DZ = -1; DZ <= 1; ++DZ)
+            {
+                for (int32 DY = -1; DY <= 1; ++DY)
+                {
+                    for (int32 DX = -1; DX <= 1; ++DX)
+                    {
+                        const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        if (!Settings.MinedNodes->Contains(Cell))
+                        {
+                            continue;
+                        }
+
+                        const double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
+                        const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
+                        const double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
+                        const double CellSdf = BoxSdf(
+                            X, Y, Z, CenterX, CenterY, CenterZ,
+                            CutHalfExtent, CutRoundRadius);
+                        Density = FMath::Min(Density, static_cast<float>(CellSdf));
+                    }
+                }
+            }
+        }
+
+        if (bHasBlockEdits)
+        {
+            for (int32 DZ = -1; DZ <= 1; ++DZ)
+            {
+                for (int32 DY = -1; DY <= 1; ++DY)
+                {
+                    for (int32 DX = -1; DX <= 1; ++DX)
+                    {
+                        const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
+                        const int8* EditState = Settings.BlockEdits->Find(Cell);
+                        if (!EditState || *EditState == 0 || *EditState == 2 ||
+                            *EditState > 2 || *EditState < -5)
+                        {
+                            continue;
+                        }
+
+                        double CenterX = (static_cast<double>(Cell.X) + 0.5) * Step;
+                        double CenterY = (static_cast<double>(Cell.Y) + 0.5) * Step;
+                        double CenterZ = (static_cast<double>(Cell.Z) + 0.5) * Step;
+                        if (Settings.BlockEditCenters.IsValid())
+                        {
+                            if (const FVector* EditCenter = Settings.BlockEditCenters->Find(Cell))
+                            {
+                                CenterX = static_cast<double>(EditCenter->X);
+                                CenterY = static_cast<double>(EditCenter->Y);
+                                CenterZ = static_cast<double>(EditCenter->Z);
+                            }
+                        }
+
+                        CandidateStates[CandidateCount] = *EditState;
+                        if (*EditState == 1)
+                        {
+                            CandidateSdfs[CandidateCount] = BoxSdf(
+                                X, Y, Z, CenterX, CenterY, CenterZ,
+                                Step * 0.5, RoundRadius);
+                        }
+                        else
+                        {
+                            // Legacy cell-removal edits use the same axis-aligned
+                            // voxel footprint as ray mining. The tiny overhang
+                            // makes the shared boundary unambiguously air for the
+                            // marching-cubes sampler without cutting into the
+                            // centre of a neighbouring cell.
+                            const double CutHalfExtent = Step * 0.5 +
+                                FMath::Max(0.05, Step * 0.005);
+                            CandidateSdfs[CandidateCount] = BoxSdf(
+                                X, Y, Z, CenterX, CenterY, CenterZ,
+                                CutHalfExtent, 0.0);
+                        }
+                        ++CandidateCount;
+                    }
+                }
+            }
+
+            // Add soil/sand before cuts so excavations always win overlaps.
+            for (int32 Index = 0; Index < CandidateCount; ++Index)
+            {
+                if (CandidateStates[Index] == 1)
+                {
+                    Density = static_cast<float>(SmoothMaximum(
+                        static_cast<double>(Density),
+                        -CandidateSdfs[Index],
+                        SmoothBlend));
+                }
+            }
+
+            for (int32 Index = 0; Index < CandidateCount; ++Index)
+            {
+                const int8 State = CandidateStates[Index];
+                if (State < 0)
+                {
+                    // Cell removal is a Boolean box cut, just like a completed
+                    // mining hit. A smooth minimum rounds the walls and can
+                    // leak into adjacent cells, defeating voxel-aligned mining.
+                    Density = FMath::Min(Density, static_cast<float>(CandidateSdfs[Index]));
+                }
+            }
+        }
+
+
+        return Density;
     }
 }
 
@@ -51,40 +449,28 @@ namespace
 // ============================================================
 
 float FSVoxelGenerator::HashNoise2D(
-    float X,
-    float Y,
+    double X,
+    double Y,
     int32 Seed)
 {
-    const float IX = FMath::FloorToFloat(X);
-    const float IY = FMath::FloorToFloat(Y);
+    // Use double for fractional noise coordinates and integer hashing for
+    // lattice points. A sine hash of large float inputs loses mantissa bits and
+    // can cluster/repeat values across distant rows of terrain.
+    const int64 IX = FloorToInt64(X);
+    const int64 IY = FloorToInt64(Y);
+    const double FX = X - static_cast<double>(IX);
+    const double FY = Y - static_cast<double>(IY);
 
-    const float FX = X - IX;
-    const float FY = Y - IY;
+    const double A = static_cast<double>(HashLattice2D(IX,     IY,     Seed)) / 16777215.0;
+    const double B = static_cast<double>(HashLattice2D(IX + 1, IY,     Seed)) / 16777215.0;
+    const double C = static_cast<double>(HashLattice2D(IX,     IY + 1, Seed)) / 16777215.0;
+    const double D = static_cast<double>(HashLattice2D(IX + 1, IY + 1, Seed)) / 16777215.0;
 
-    auto Hash = [Seed](float A, float B)
-    {
-        const float V =
-            FMath::Sin(
-                A * 127.1f +
-                B * 311.7f +
-                float(Seed) * 74.7f)
-            * 43758.5453f;
-
-        return V - FMath::FloorToFloat(V);
-    };
-
-    const float A = Hash(IX,     IY);
-    const float B = Hash(IX + 1, IY);
-    const float C = Hash(IX,     IY + 1);
-    const float D = Hash(IX + 1, IY + 1);
-
-    const float SX = Fade(FX);
-    const float SY = Fade(FY);
-
-    const float AB = FMath::Lerp(A, B, SX);
-    const float CD = FMath::Lerp(C, D, SX);
-
-    return FMath::Lerp(AB, CD, SY) * 2.0f - 1.0f;
+    const double SX = Fade(FX);
+    const double SY = Fade(FY);
+    const double AB = FMath::Lerp(A, B, SX);
+    const double CD = FMath::Lerp(C, D, SX);
+    return static_cast<float>(FMath::Lerp(AB, CD, SY) * 2.0 - 1.0);
 }
 
 
@@ -93,36 +479,28 @@ float FSVoxelGenerator::HashNoise2D(
 // ============================================================
 
 float FSVoxelGenerator::FBM2D(
-    float X,
-    float Y,
+    double X,
+    double Y,
     int32 Seed)
 {
-    float Sum = 0.0f;
-    float Amplitude = 1.0f;
-    float Frequency = 1.0f;
-    float Normalization = 0.0f;
-
-    // 3 octaves instead of 4.
-    //
-    // This is intentional.
-    // With 100-unit voxels, too many high-frequency octaves
-    // create ugly spikes and aliasing.
+    double Sum = 0.0;
+    double Amplitude = 1.0;
+    double Frequency = 1.0;
+    double Normalization = 0.0;
 
     for (int32 Octave = 0; Octave < 3; ++Octave)
     {
-        Sum += HashNoise2D(
+        Sum += static_cast<double>(HashNoise2D(
             X * Frequency,
             Y * Frequency,
-            Seed + Octave * 101)
-            * Amplitude;
+            Seed + Octave * 101)) * Amplitude;
 
         Normalization += Amplitude;
-
-        Amplitude *= 0.5f;
-        Frequency *= 2.0f;
+        Amplitude *= 0.5;
+        Frequency *= 2.0;
     }
 
-    return Sum / Normalization;
+    return static_cast<float>(Sum / Normalization);
 }
 
 
@@ -131,30 +509,12 @@ float FSVoxelGenerator::FBM2D(
 // ============================================================
 
 float FSVoxelGenerator::HashNoise3D(
-    int32 X,
-    int32 Y,
-    int32 Z,
+    int64 X,
+    int64 Y,
+    int64 Z,
     int32 Seed)
 {
-    // Integer hash.
-    //
-    // Unlike the old HashNoise3D(), this function is only used
-    // at lattice points. SmoothNoise3D() interpolates between
-    // them, producing continuous noise.
-
-    uint32 H =
-        uint32(X) * 374761393u +
-        uint32(Y) * 668265263u +
-        uint32(Z) * 2147483647u +
-        uint32(Seed) * 1274126177u;
-
-    H ^= H >> 13;
-    H *= 1274126177u;
-    H ^= H >> 16;
-
-    const uint32 Masked = H & 0x00FFFFFFu;
-
-    return float(Masked) / float(0x00FFFFFFu);
+    return static_cast<float>(HashLattice3D(X, Y, Z, Seed)) / 16777215.0f;
 }
 
 
@@ -163,84 +523,35 @@ float FSVoxelGenerator::HashNoise3D(
 // ============================================================
 
 float FSVoxelGenerator::SmoothNoise3D(
-    float X,
-    float Y,
-    float Z,
+    double X,
+    double Y,
+    double Z,
     int32 Seed)
 {
-    const int32 IX = FMath::FloorToInt(X);
-    const int32 IY = FMath::FloorToInt(Y);
-    const int32 IZ = FMath::FloorToInt(Z);
+    const int64 IX = FloorToInt64(X);
+    const int64 IY = FloorToInt64(Y);
+    const int64 IZ = FloorToInt64(Z);
 
-    const float FX = X - float(IX);
-    const float FY = Y - float(IY);
-    const float FZ = Z - float(IZ);
+    const double FX = X - static_cast<double>(IX);
+    const double FY = Y - static_cast<double>(IY);
+    const double FZ = Z - static_cast<double>(IZ);
 
-    const float TX = Fade(FX);
-    const float TY = Fade(FY);
-    const float TZ = Fade(FZ);
+    const double TX = Fade(FX);
+    const double TY = Fade(FY);
+    const double TZ = Fade(FZ);
 
-    const float C000 = HashNoise3D(
-        IX,
-        IY,
-        IZ,
-        Seed);
+    const double C000 = HashNoise3D(IX,     IY,     IZ,     Seed);
+    const double C100 = HashNoise3D(IX + 1, IY,     IZ,     Seed);
+    const double C010 = HashNoise3D(IX,     IY + 1, IZ,     Seed);
+    const double C110 = HashNoise3D(IX + 1, IY + 1, IZ,     Seed);
+    const double C001 = HashNoise3D(IX,     IY,     IZ + 1, Seed);
+    const double C101 = HashNoise3D(IX + 1, IY,     IZ + 1, Seed);
+    const double C011 = HashNoise3D(IX,     IY + 1, IZ + 1, Seed);
+    const double C111 = HashNoise3D(IX + 1, IY + 1, IZ + 1, Seed);
 
-    const float C100 = HashNoise3D(
-        IX + 1,
-        IY,
-        IZ,
-        Seed);
-
-    const float C010 = HashNoise3D(
-        IX,
-        IY + 1,
-        IZ,
-        Seed);
-
-    const float C110 = HashNoise3D(
-        IX + 1,
-        IY + 1,
-        IZ,
-        Seed);
-
-    const float C001 = HashNoise3D(
-        IX,
-        IY,
-        IZ + 1,
-        Seed);
-
-    const float C101 = HashNoise3D(
-        IX + 1,
-        IY,
-        IZ + 1,
-        Seed);
-
-    const float C011 = HashNoise3D(
-        IX,
-        IY + 1,
-        IZ + 1,
-        Seed);
-
-    const float C111 = HashNoise3D(
-        IX + 1,
-        IY + 1,
-        IZ + 1,
-        Seed);
-
-    return Lerp3D(
-        C000,
-        C100,
-        C010,
-        C110,
-        C001,
-        C101,
-        C011,
-        C111,
-        TX,
-        TY,
-        TZ)
-        * 2.0f - 1.0f;
+    return static_cast<float>(Lerp3D(
+        C000, C100, C010, C110, C001, C101, C011, C111,
+        TX, TY, TZ) * 2.0 - 1.0);
 }
 
 
@@ -249,33 +560,30 @@ float FSVoxelGenerator::SmoothNoise3D(
 // ============================================================
 
 float FSVoxelGenerator::FBM3D(
-    float X,
-    float Y,
-    float Z,
+    double X,
+    double Y,
+    double Z,
     int32 Seed)
 {
-    float Sum = 0.0f;
-    float Amplitude = 1.0f;
-    float Frequency = 1.0f;
-    float Normalization = 0.0f;
+    double Sum = 0.0;
+    double Amplitude = 1.0;
+    double Frequency = 1.0;
+    double Normalization = 0.0;
 
-    // 3 octaves is enough for caves.
     for (int32 Octave = 0; Octave < 3; ++Octave)
     {
-        Sum += SmoothNoise3D(
+        Sum += static_cast<double>(SmoothNoise3D(
             X * Frequency,
             Y * Frequency,
             Z * Frequency,
-            Seed + Octave * 137)
-            * Amplitude;
+            Seed + Octave * 137)) * Amplitude;
 
         Normalization += Amplitude;
-
-        Amplitude *= 0.5f;
-        Frequency *= 2.0f;
+        Amplitude *= 0.5;
+        Frequency *= 2.0;
     }
 
-    return Sum / Normalization;
+    return static_cast<float>(Sum / Normalization);
 }
 
 
@@ -283,101 +591,1245 @@ float FSVoxelGenerator::FBM3D(
 // DENSITY
 // ============================================================
 
-float FSVoxelGenerator::Density(
-    float X,
-    float Y,
-    float Z,
-    const FSVoxelGenerationSettings& S)
+void FSVoxelGenerator::SampleBiomeClimate(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    float& OutTemperature,
+    float& OutMoisture,
+    float& OutMountainSignal)
 {
-    // Positive = solid.
-    // Negative = air.
+    const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.BiomeScale)));
+    OutTemperature = FBM2D(X * Scale * 0.60, Y * Scale * 0.60, S.Seed + 1709);
+    OutMoisture = HashNoise2D(X * Scale * 0.85, Y * Scale * 0.85, S.Seed + 2903);
+    // Mountain regions span several kilometres so they form rare traversable
+    // ranges instead of noisy sub-kilometre spikes.
+    OutMountainSignal = HashNoise2D(
+        X * Scale * 0.35, Y * Scale * 0.35, S.Seed + 3907);
+}
 
-    // --------------------------------------------------------
-    // TERRAIN HEIGHT
-    // --------------------------------------------------------
+bool FSVoxelReferenceWorldData::HasHeightField() const
+{
+    return HeightWidth == 8192 && HeightHeight == 8192 &&
+        HeightBytesLE.Num() == HeightWidth * HeightHeight * 2;
+}
 
-    const float Macro =
-        FBM2D(
-            X * S.NoiseScale,
-            Y * S.NoiseScale,
-            S.Seed);
+bool FSVoxelReferenceWorldData::HasBiomeMask() const
+{
+    return BiomeWidth == 1024 && BiomeHeight == 1024 &&
+        BiomeIds.Num() == BiomeWidth * BiomeHeight;
+}
 
-    const float Detail =
-        FBM2D(
-            X * S.DetailScale,
-            Y * S.DetailScale,
-            S.Seed + 777);
+bool FSVoxelReferenceWorldData::HasRoadMask() const
+{
+    return RoadWidth == 8192 && RoadHeight == 8192 &&
+        PackedRoadMask.Num() == (RoadWidth * RoadHeight + 3) / 4;
+}
 
-    float SurfaceHeight =
-        S.BaseHeight +
-        Macro * S.HeightAmplitude +
-        Detail * S.DetailAmplitude;
-
-    // --------------------------------------------------------
-    // BASE DENSITY
-    // --------------------------------------------------------
-
-    float D = SurfaceHeight - Z;
-
-    // --------------------------------------------------------
-    // BOTTOM
-    // --------------------------------------------------------
-
-    if (Z < SurfaceHeight - S.BottomDepth)
+double FSVoxelReferenceWorldData::SampleHeightCentimeters(
+    double WorldX,
+    double WorldY,
+    double WorldCenterX,
+    double WorldCenterY) const
+{
+    if (!HasHeightField())
     {
-        D = 1.0f;
+        return 0.0;
     }
 
-    // --------------------------------------------------------
-    // CAVES
-    // --------------------------------------------------------
+    // The 7DTD DTM's coordinate hypothesis was cross-checked against 4175
+    // prefab elevation values: sample index ~= round(world metres + 4096).
+    const double GridX = FMath::Clamp(
+        (WorldX - WorldCenterX) / 100.0 + static_cast<double>(HeightWidth) * 0.5,
+        0.0, static_cast<double>(HeightWidth - 1));
+    const double GridY = FMath::Clamp(
+        (WorldY - WorldCenterY) / 100.0 + static_cast<double>(HeightHeight) * 0.5,
+        0.0, static_cast<double>(HeightHeight - 1));
+    const int32 X0 = FMath::FloorToInt(GridX);
+    const int32 Y0 = FMath::FloorToInt(GridY);
+    const int32 X1 = FMath::Min(X0 + 1, HeightWidth - 1);
+    const int32 Y1 = FMath::Min(Y0 + 1, HeightHeight - 1);
+    const double TX = GridX - static_cast<double>(X0);
+    const double TY = GridY - static_cast<double>(Y0);
 
-    if (S.bEnableCaves && S.CaveStrength > 0.0f)
+    const auto ReadSample = [this](int32 X, int32 Y) -> double
     {
-        const float Cave =
-            FBM3D(
-                X * S.CaveScale,
-                Y * S.CaveScale,
-                Z * S.CaveScale,
-                S.Seed + 4242);
+        const int32 SampleIndex = Y * HeightWidth + X;
+        const int32 ByteIndex = SampleIndex * 2;
+        const uint16 Value = static_cast<uint16>(HeightBytesLE[ByteIndex]) |
+            (static_cast<uint16>(HeightBytesLE[ByteIndex + 1]) << 8);
+        return static_cast<double>(Value);
+    };
 
-        // Convert cave noise into a smooth 0..1 mask.
-        //
-        // Below threshold = no cave.
-        // Above threshold = gradually stronger carving.
+    const double H00 = ReadSample(X0, Y0);
+    const double H10 = ReadSample(X1, Y0);
+    const double H01 = ReadSample(X0, Y1);
+    const double H11 = ReadSample(X1, Y1);
+    const double HeightRaw = FMath::Lerp(
+        FMath::Lerp(H00, H10, TX),
+        FMath::Lerp(H01, H11, TX),
+        TY);
 
-        const float Range =
-            FMath::Max(
-                0.001f,
-                1.0f - S.CaveThreshold);
+    // Raw height unit is 1/256 metre; Unreal uses centimetres.
+    return HeightRaw * (100.0 / 256.0);
+}
 
-        float T =
-            (Cave - S.CaveThreshold) / Range;
+ESVoxelBiome FSVoxelReferenceWorldData::SampleBiome(
+    double WorldX,
+    double WorldY,
+    double WorldCenterX,
+    double WorldCenterY) const
+{
+    if (!HasBiomeMask())
+    {
+        return ESVoxelBiome::Plains;
+    }
 
-        T = FMath::Clamp(T, 0.0f, 1.0f);
+    const double SourceX = FMath::Clamp(
+        (WorldX - WorldCenterX) / 100.0 + static_cast<double>(HeightWidth) * 0.5,
+        0.0, static_cast<double>(HeightWidth - 1));
+    const double SourceY = FMath::Clamp(
+        (WorldY - WorldCenterY) / 100.0 + static_cast<double>(HeightHeight) * 0.5,
+        0.0, static_cast<double>(HeightHeight - 1));
+    const int32 X = FMath::Clamp(
+        FMath::FloorToInt(SourceX * static_cast<double>(BiomeWidth) / HeightWidth),
+        0, BiomeWidth - 1);
+    const int32 Y = FMath::Clamp(
+        FMath::FloorToInt(SourceY * static_cast<double>(BiomeHeight) / HeightHeight),
+        0, BiomeHeight - 1);
 
-        // Smoothstep.
-        const float CaveMask =
-            T * T * (3.0f - 2.0f * T);
+    switch (BiomeIds[Y * BiomeWidth + X])
+    {
+    case 1: return ESVoxelBiome::Forest;
+    case 2: return ESVoxelBiome::Desert;
+    case 3: return ESVoxelBiome::Snow;
+    case 4: return ESVoxelBiome::BurntForest;
+    case 5: return ESVoxelBiome::Wasteland;
+    default: return ESVoxelBiome::Plains;
+    }
+}
 
-        // Only carve existing solid.
-        if (D > 0.0f)
+EVoxelBlock FSVoxelReferenceWorldData::SampleRoadType(
+    double WorldX,
+    double WorldY,
+    double WorldCenterX,
+    double WorldCenterY) const
+{
+    if (!HasRoadMask())
+    {
+        return EVoxelBlock::Air;
+    }
+
+    const int32 X = FMath::Clamp(
+        FMath::FloorToInt((WorldX - WorldCenterX) / 100.0 + static_cast<double>(RoadWidth) * 0.5),
+        0, RoadWidth - 1);
+    const int32 Y = FMath::Clamp(
+        FMath::FloorToInt((WorldY - WorldCenterY) / 100.0 + static_cast<double>(RoadHeight) * 0.5),
+        0, RoadHeight - 1);
+    const int32 PixelIndex = Y * RoadWidth + X;
+    const uint8 PackedByte = PackedRoadMask[PixelIndex >> 2];
+    const uint8 RoadCode = (PackedByte >> ((PixelIndex & 3) * 2)) & 0x03;
+    return RoadCode == 1 ? EVoxelBlock::Asphalt :
+        (RoadCode == 2 ? EVoxelBlock::DirtRoad : EVoxelBlock::Air);
+}
+
+FSVoxelReferenceWorldDataPtr FSVoxelGenerator::LoadReferenceWorldData(
+    const FString& HeightmapPath,
+    const FString& BiomeMaskPath,
+    const FString& RoadMaskPath,
+    FString& OutStatus)
+{
+    TArray<uint8> HeightBytes;
+    if (!FFileHelper::LoadFileToArray(HeightBytes, *HeightmapPath))
+    {
+        OutStatus = FString::Printf(
+            TEXT("Could not read source heightmap: %s"), *HeightmapPath);
+        return nullptr;
+    }
+    const int32 ExpectedHeightBytes = 8192 * 8192 * 2;
+    if (HeightBytes.Num() != ExpectedHeightBytes)
+    {
+        OutStatus = FString::Printf(
+            TEXT("Source heightmap has %d bytes; expected %d (8192x8192 uint16 LE)."),
+            HeightBytes.Num(), ExpectedHeightBytes);
+        return nullptr;
+    }
+
+    TSharedPtr<FSVoxelReferenceWorldData, ESPMode::ThreadSafe> Data =
+        MakeShared<FSVoxelReferenceWorldData, ESPMode::ThreadSafe>();
+    Data->HeightBytesLE = MoveTemp(HeightBytes);
+
+    // Scan the uint16 height field once at load time. Chunk selection can then
+    // cull entirely empty vertical regions using the real DTM range rather than
+    // the unrelated BaseHeight/HillHeight values from procedural mode.
+    uint16 MinHeightSample = 65535;
+    uint16 MaxHeightSample = 0;
+    for (int32 ByteIndex = 0; ByteIndex < Data->HeightBytesLE.Num(); ByteIndex += 2)
+    {
+        const uint16 Sample = static_cast<uint16>(Data->HeightBytesLE[ByteIndex]) |
+            (static_cast<uint16>(Data->HeightBytesLE[ByteIndex + 1]) << 8);
+        MinHeightSample = FMath::Min(MinHeightSample, Sample);
+        MaxHeightSample = FMath::Max(MaxHeightSample, Sample);
+    }
+    Data->MinHeightCentimeters = static_cast<double>(MinHeightSample) * (100.0 / 256.0);
+    Data->MaxHeightCentimeters = static_cast<double>(MaxHeightSample) * (100.0 / 256.0);
+
+    TArray<uint8> BiomeBytes;
+    if (FFileHelper::LoadFileToArray(BiomeBytes, *BiomeMaskPath) &&
+        BiomeBytes.Num() == 1024 * 1024)
+    {
+        Data->BiomeIds = MoveTemp(BiomeBytes);
+    }
+
+    TArray<uint8> RoadBytes;
+    const int32 ExpectedRoadBytes = (8192 * 8192 + 3) / 4;
+    if (FFileHelper::LoadFileToArray(RoadBytes, *RoadMaskPath) &&
+        RoadBytes.Num() == ExpectedRoadBytes)
+    {
+        Data->PackedRoadMask = MoveTemp(RoadBytes);
+    }
+
+    OutStatus = FString::Printf(
+        TEXT("Loaded 8192x8192 DTM from %s; biome mask: %s; 2-bit road mask: %s."),
+        *HeightmapPath,
+        Data->HasBiomeMask() ? TEXT("ready") : TEXT("missing/invalid"),
+        Data->HasRoadMask() ? TEXT("ready") : TEXT("missing/invalid"));
+    return Data;
+}
+
+float FSVoxelGenerator::SampleTerrainNoise(
+    double WorldX,
+    double WorldY,
+    const FSVoxelGenerationSettings& Settings)
+{
+    return FBM2D(
+        WorldX * static_cast<double>(Settings.NoiseScale),
+        WorldY * static_cast<double>(Settings.NoiseScale),
+        Settings.Seed);
+}
+
+void FSVoxelGenerator::SampleBiomeRegionWeights(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    float& OutDesertWeight,
+    float& OutWinterWeight,
+    float& OutTemperateWeight)
+{
+    OutDesertWeight = 0.0f;
+    OutWinterWeight = 0.0f;
+    OutTemperateWeight = 1.0f;
+    if (!S.bEnableBiomes)
+    {
+        return;
+    }
+
+    const double HalfWorldSize = FMath::Max(
+        1000.0, std::abs(static_cast<double>(S.BiomeWorldSize)) * 0.5);
+    const double NX = (X - static_cast<double>(S.BiomeWorldCenter.X)) / HalfWorldSize;
+    const double NY = (Y - static_cast<double>(S.BiomeWorldCenter.Y)) / HalfWorldSize;
+
+    const auto SmoothStep = [](double Edge0, double Edge1, double Value)
+    {
+        const double T = FMath::Clamp(
+            (Value - Edge0) / FMath::Max(0.000001, Edge1 - Edge0), 0.0, 1.0);
+        return T * T * (3.0 - 2.0 * T);
+    };
+
+    // One large, rounded central temperate region. Low-frequency warp adds
+    // broad lobes so its edge is irregular, but never breaks into scattered islands.
+    const double CentralEdgeNoise = FBM2D(
+        NX * 3.2 + 13.7, NY * 2.7 - 8.4, S.Seed + 4811);
+    const double CentralDetailNoise = FBM2D(
+        NX * 6.1 - 4.3, NY * 5.4 + 11.9, S.Seed + 4819);
+    const double CentralRadius = 0.68 +
+        CentralEdgeNoise * 0.045 + CentralDetailNoise * 0.018;
+    const double RadialDistance = std::sqrt(
+        NX * NX * 0.96 * 0.96 + NY * NY * 1.04 * 1.04);
+    const double OutsideCentral = SmoothStep(
+        CentralRadius - 0.04, CentralRadius + 0.04, RadialDistance);
+
+    // Split the outer map into desert on the left and winter on the right,
+    // using broad and fine warp so the boundary curves across the top and bottom.
+    const double MainBorderWarp = FBM2D(
+        NX * 1.8 + 22.1, NY * 2.4 - 17.3, S.Seed + 4829);
+    const double SmallBorderWarp = FBM2D(
+        NX * 5.0 - 9.7, NY * 4.2 + 3.6, S.Seed + 4831);
+    const double SplitX = 0.015 + MainBorderWarp * 0.14 + SmallBorderWarp * 0.035;
+    const double DesertSide = 1.0 - SmoothStep(
+        SplitX - 0.045, SplitX + 0.045, NX);
+
+    OutDesertWeight = static_cast<float>(OutsideCentral * DesertSide);
+    OutWinterWeight = static_cast<float>(OutsideCentral * (1.0 - DesertSide));
+    OutTemperateWeight = static_cast<float>(1.0 - OutsideCentral);
+}
+
+ESVoxelBiome FSVoxelGenerator::SampleBiome(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid() &&
+        S.ReferenceWorldData->HasBiomeMask())
+    {
+        return S.ReferenceWorldData->SampleBiome(
+            X, Y, S.BiomeWorldCenter.X, S.BiomeWorldCenter.Y);
+    }
+    if (!S.bEnableBiomes)
+    {
+        return ESVoxelBiome::Plains;
+    }
+
+    float DesertWeight = 0.0f;
+    float WinterWeight = 0.0f;
+    float TemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
+
+    // Material selection is discrete, but the geography is map-relative and
+    // contiguous. The terrain surface itself uses continuous weights.
+    if (TemperateWeight < 0.5f)
+    {
+        return DesertWeight >= WinterWeight
+            ? ESVoxelBiome::Desert
+            : ESVoxelBiome::Snow;
+    }
+
+    const double HalfWorldSize = FMath::Max(
+        1000.0, std::abs(static_cast<double>(S.BiomeWorldSize)) * 0.5);
+    const double NX = (X - static_cast<double>(S.BiomeWorldCenter.X)) / HalfWorldSize;
+    const double NY = (Y - static_cast<double>(S.BiomeWorldCenter.Y)) / HalfWorldSize;
+
+    // Plains and forest form a small set of large coherent patches in the centre.
+    const float ForestSignal = FBM2D(
+        NX * 3.0 + 7.1, NY * 3.0 - 9.3, S.Seed + 4849);
+    return ForestSignal > 0.02f ? ESVoxelBiome::Forest : ESVoxelBiome::Plains;
+}
+
+float FSVoxelGenerator::SampleFlatlandInfluence(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    float Temperature = 0.0f;
+    float Moisture = 0.0f;
+    float MountainSignal = 0.0f;
+    SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
+    (void)Temperature;
+    (void)Moisture;
+
+    const double Scale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.FlatlandRegionScale)));
+    const float Region01 = FMath::Clamp(
+        HashNoise2D(X * Scale, Y * Scale, S.Seed + 5549) * 0.5f + 0.5f,
+        0.0f, 1.0f);
+    float DesertWeight = 0.0f;
+    float WinterWeight = 0.0f;
+    float TemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
+    const float EffectiveFlatlandCoverage = FMath::Clamp(
+        FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f) *
+            FMath::Clamp(S.FlatlandCoverageMultiplier, 0.1f, 1.0f),
+        0.05f, 0.9f);
+    const float NonDesertHillCoverage = FMath::Clamp(
+        1.0f - EffectiveFlatlandCoverage, 0.0f, 0.95f);
+    const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.9f);
+    // Blend two finished masks instead of sliding one threshold across the noise
+    // field. Sliding the threshold can make a whole hillside vanish in a narrow
+    // strip at the biome border, even when the biome weights are continuous.
+    const auto GetHillMask = [&Region01](float Coverage, float BorderWidth)
+    {
+        const float T = FMath::Clamp(
+            (Region01 - (1.0f - Coverage - BorderWidth)) /
+                FMath::Max(0.0001f, BorderWidth * 2.0f),
+            0.0f, 1.0f);
+        return T * T * (3.0f - 2.0f * T);
+    };
+    const float NonDesertHillBlend = GetHillMask(NonDesertHillCoverage, 0.075f);
+    const float DesertHillBlend = GetHillMask(DesertHillCoverage, 0.025f);
+    const float SmoothHillBlend = FMath::Lerp(
+        NonDesertHillBlend, DesertHillBlend, DesertWeight);
+
+    // Mountain landforms use their own seed-driven macro mask across the whole
+    // map, rather than being confined to the fixed snowy biome on one side.
+    // The threshold is calibrated for smooth value noise so 0.20 gives roughly
+    // one fifth mountainous terrain rather than a few isolated peaks.
+    const float MountainCoverage = FMath::Clamp(S.MountainCoverage, 0.05f, 0.45f);
+    const float MountainSignal01 = FMath::Clamp(MountainSignal * 0.5f + 0.5f, 0.0f, 1.0f);
+    const float MountainStart = 0.5f + (0.5f - MountainCoverage) * 0.30f;
+    const float MountainT = FMath::Clamp(
+        (MountainSignal01 - MountainStart) / 0.20f, 0.0f, 1.0f);
+    const float MountainSignalBlend = MountainT * MountainT * (3.0f - 2.0f * MountainT);
+    const float MountainBlend = MountainSignalBlend;
+    (void)WinterWeight;
+    return (1.0f - SmoothHillBlend) * (1.0f - MountainBlend);
+}
+
+double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    const double RegionScale = FMath::Max(0.00000001, std::abs(static_cast<double>(S.FlatlandRegionScale)));
+    const float Region01 = FMath::Clamp(
+        HashNoise2D(X * RegionScale, Y * RegionScale, S.Seed + 5549) * 0.5f + 0.5f,
+        0.0f, 1.0f);
+
+    float Temperature = 0.0f;
+    float Moisture = 0.0f;
+    float MountainSignal = 0.0f;
+    SampleBiomeClimate(X, Y, S, Temperature, Moisture, MountainSignal);
+    (void)Temperature;
+    (void)Moisture;
+
+    const auto SmoothStep = [](float Edge0, float Edge1, float Value)
+    {
+        const float T = FMath::Clamp(
+            (Value - Edge0) / FMath::Max(0.0001f, Edge1 - Edge0), 0.0f, 1.0f);
+        return T * T * (3.0f - 2.0f * T);
+    };
+
+    // Terrain relief uses continuous map-relative weights to remain smooth
+    // at regional edges; material biome IDs never switch terrain height abruptly.
+    float DesertBlend = 0.0f;
+    float WinterBlend = 0.0f;
+    float TemperateBlend = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S, DesertBlend, WinterBlend, TemperateBlend);
+    (void)TemperateBlend;
+    (void)WinterBlend;
+
+    const float EffectiveFlatlandCoverage = FMath::Clamp(
+        FMath::Clamp(S.FlatlandCoverage, 0.2f, 0.9f) *
+            FMath::Clamp(S.FlatlandCoverageMultiplier, 0.1f, 1.0f),
+        0.05f, 0.9f);
+    const float NonDesertHillCoverage = FMath::Clamp(
+        1.0f - EffectiveFlatlandCoverage, 0.0f, 0.95f);
+    const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f);
+    // Evaluate the biome-specific hill masks independently, then fade between
+    // them with the broad biome weight. This prevents a moving threshold from
+    // abruptly switching a tall green-biome hill off at the desert boundary.
+    const float NonDesertHillBlend = SmoothStep(
+        1.0f - NonDesertHillCoverage - 0.075f,
+        1.0f - NonDesertHillCoverage + 0.075f,
+        Region01);
+    const float DesertHillBlend = SmoothStep(
+        1.0f - DesertHillCoverage - 0.025f,
+        1.0f - DesertHillCoverage + 0.025f,
+        Region01);
+    float HillBlend = FMath::Lerp(
+        NonDesertHillBlend, DesertHillBlend, DesertBlend);
+
+    // Landforms are independent of climate/biome layout: every biome can
+    // contain plains, rolling hills, or a mountain range. Soften the target
+    // coverage boundary to keep the terrain continuous at region edges.
+    const float MountainCoverage = FMath::Clamp(S.MountainCoverage, 0.05f, 0.45f);
+    const float MountainSignal01 = FMath::Clamp(MountainSignal * 0.5f + 0.5f, 0.0f, 1.0f);
+    const float MountainStart = 0.5f + (0.5f - MountainCoverage) * 0.30f;
+    float MountainBlend = SmoothStep(MountainStart, MountainStart + 0.20f, MountainSignal01);
+    (void)WinterBlend;
+
+    // Keep the landform classes distinct: mountains replace ordinary hills
+    // rather than stacking full hill relief on top of the mountain envelope.
+    HillBlend *= (1.0f - MountainBlend);
+
+    const double HillNoise = FBM2D(
+        X * static_cast<double>(S.HillScale),
+        Y * static_cast<double>(S.HillScale),
+        S.Seed + 1001);
+    const double HillShape = SmoothStep(-0.35f, 0.55f, static_cast<float>(HillNoise));
+    const double FineNoise = FBM2D(
+        X * static_cast<double>(S.DetailScale),
+        Y * static_cast<double>(S.DetailScale),
+        S.Seed + 777);
+    const double FineAmplitude = FMath::Lerp(
+        static_cast<double>(S.FlatlandNoiseAmplitude),
+        static_cast<double>(S.DetailAmplitude),
+        static_cast<double>(HillBlend));
+    const double MicroRelief = FineNoise * FineAmplitude;
+    // Desert hills use a much lower height ceiling than forest/plains hills.
+    // Interpolating the hill amplitude along with the mask lets existing hills
+    // taper down into the desert instead of ending as a cliff at the colour edge.
+    const double FullHillHeight = std::abs(static_cast<double>(S.HillHeight));
+    const double DesertHillHeight = FMath::Min(FullHillHeight * 0.20, 1000.0);
+    const double BlendedHillHeight = FMath::Lerp(
+        FullHillHeight, DesertHillHeight, static_cast<double>(DesertBlend));
+    const double HillRelief = HillShape * BlendedHillHeight *
+        static_cast<double>(HillBlend);
+
+    // Replace some perfect plains with broad, gentle rolls instead of turning
+    // every former flatland into a full-sized hill. The long wavelength keeps
+    // slopes mild enough for roads; the hill mask fades this relief smoothly
+    // where the larger hills begin.
+    const double GentleReliefNoise = FBM2D(
+        X * RegionScale * 0.40,
+        Y * RegionScale * 0.40,
+        S.Seed + 6311);
+    const double GentleRelief = GentleReliefNoise *
+        static_cast<double>(FMath::Abs(S.GentleReliefHeight)) *
+        (1.0 - static_cast<double>(HillBlend)) *
+        (1.0 - static_cast<double>(MountainBlend));
+
+    // Add broad, signed desert rolls: low crests and equally smooth troughs rather
+    // than a constant non-negative lift. The long wavelength keeps slopes gentle
+    // enough for roads and prevents the desert from looking like a flat slab.
+    // Start the relief only after the biome weight has crossed the desert edge:
+    // river masks are disabled for desert samples, so negative desert troughs
+    // cannot lower the weak river fringe on the temperate side below its water plane.
+    const double DesertRollingNoise = FBM2D(
+        X * RegionScale * 0.45,
+        Y * RegionScale * 0.45,
+        S.Seed + 6449);
+    const float DesertReliefFade = SmoothStep(0.55f, 0.90f, DesertBlend);
+    const double DesertRollingAmplitude = FMath::Clamp(
+        std::abs(static_cast<double>(S.HillHeight)) * 0.15, 400.0, 800.0);
+    const double DesertRollingRelief = DesertRollingNoise * DesertRollingAmplitude *
+        static_cast<double>(DesertReliefFade) *
+        (1.0 - static_cast<double>(HillBlend)) *
+        (1.0 - static_cast<double>(MountainBlend));
+
+    // Mountain height is a separate, rare macro-form. Its broad noise is
+    // continuous across chunks/LODs and cannot create narrow, jagged peaks.
+    const double MountainRegionNoise = FBM2D(
+        X * RegionScale * 0.35,
+        Y * RegionScale * 0.35,
+        S.Seed + 6007);
+    const double MountainShape = FMath::Clamp((MountainRegionNoise + 1.0) * 0.5, 0.0, 1.0);
+    const double MountainLift = MountainShape * static_cast<double>(FMath::Abs(S.MountainHeight)) *
+        static_cast<double>(MountainBlend);
+
+    const float Dune = FMath::Abs(HashNoise2D(
+        X * RegionScale * 1.35,
+        Y * RegionScale * 1.35,
+        S.Seed + 4909));
+    const double DuneLift = static_cast<double>(Dune) *
+        static_cast<double>(FMath::Abs(S.FlatlandNoiseAmplitude)) *
+        1.5 * static_cast<double>(DesertBlend);
+
+    return static_cast<double>(S.BaseHeight) + MicroRelief + HillRelief +
+        GentleRelief + DesertRollingRelief + MountainLift + DuneLift;
+}
+
+
+float FSVoxelGenerator::GetPOIPlateauInfluence(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    double& OutSiteX,
+    double& OutSiteY)
+{
+    OutSiteX = X;
+    OutSiteY = Y;
+    if (!S.bEnablePOIPlateaus)
+    {
+        return 0.0f;
+    }
+
+    const double Spacing = FMath::Max(20000.0, std::abs(static_cast<double>(S.POISiteSpacing)));
+    const int64 GridX = static_cast<int64>(std::round(X / Spacing));
+    const int64 GridY = static_cast<int64>(std::round(Y / Spacing));
+    const uint32 SiteHash = HashLattice2D(GridX, GridY, S.Seed + 5167);
+
+    // Split one stable hash into two bounded jitters. Radius plus jitter stays
+    // under half the grid spacing, so no terrain sample is influenced by two sites.
+    const double JitterX = (static_cast<double>(SiteHash & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    const double JitterY = (static_cast<double>((SiteHash >> 12) & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    OutSiteX = static_cast<double>(GridX) * Spacing + JitterX * Spacing;
+    OutSiteY = static_cast<double>(GridY) * Spacing + JitterY * Spacing;
+
+    const double CoreRadius = FMath::Clamp(static_cast<double>(S.POIPlateauRadius), 0.0, Spacing * 0.25);
+    const double MaximumInfluenceRadius = Spacing * 0.30;
+    const double BlendDistance = FMath::Clamp(
+        static_cast<double>(S.POIPlateauBlendDistance),
+        0.0,
+        FMath::Max(0.0, MaximumInfluenceRadius - CoreRadius));
+    const double OuterRadius = CoreRadius + BlendDistance;
+    if (OuterRadius <= 0.0)
+    {
+        return 0.0f;
+    }
+
+    const double DX = X - OutSiteX;
+    const double DY = Y - OutSiteY;
+    const double DistanceSquared = DX * DX + DY * DY;
+    if (DistanceSquared > OuterRadius * OuterRadius)
+    {
+        return 0.0f;
+    }
+
+    // Protect steep mountain zones, but allow clearings in plains, forests,
+    // deserts and snowy biomes.
+    if (SampleBiome(OutSiteX, OutSiteY, S) == ESVoxelBiome::Mountain)
+    {
+        return 0.0f;
+    }
+
+    const double Distance = std::sqrt(DistanceSquared);
+    if (Distance <= CoreRadius)
+    {
+        return 1.0f;
+    }
+    if (BlendDistance <= SMALL_NUMBER)
+    {
+        return 0.0f;
+    }
+
+    const float T = FMath::Clamp(static_cast<float>((Distance - CoreRadius) / BlendDistance), 0.0f, 1.0f);
+    return 1.0f - T * T * (3.0f - 2.0f * T);
+}
+
+FVector2D FSVoxelGenerator::SamplePOISitePosition(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    // Match GetPOIPlateauInfluence exactly so road endpoints land at the same
+    // deterministic grid sites used by future POI placement.
+    const double Spacing = FMath::Max(
+        20000.0, std::abs(static_cast<double>(S.POISiteSpacing)));
+    const int64 GridX = static_cast<int64>(std::round(X / Spacing));
+    const int64 GridY = static_cast<int64>(std::round(Y / Spacing));
+    const uint32 SiteHash = HashLattice2D(GridX, GridY, S.Seed + 5167);
+    const double JitterX =
+        (static_cast<double>(SiteHash & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    const double JitterY =
+        (static_cast<double>((SiteHash >> 12) & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    return FVector2D(
+        static_cast<float>(static_cast<double>(GridX) * Spacing + JitterX * Spacing),
+        static_cast<float>(static_cast<double>(GridY) * Spacing + JitterY * Spacing));
+}
+
+float FSVoxelGenerator::SamplePOISuitability(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid())
+    {
+        return 0.0f;
+    }
+    double SiteX = X;
+    double SiteY = Y;
+    return GetPOIPlateauInfluence(X, Y, S, SiteX, SiteY);
+}
+
+FLinearColor FSVoxelGenerator::GetBiomeTint(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    const bool bHasSourceBiomeMask = S.bUseReferenceWorldData &&
+        S.ReferenceWorldData.IsValid() && S.ReferenceWorldData->HasBiomeMask();
+    if (!S.bEnableBiomes && !bHasSourceBiomeMask)
+    {
+        return FLinearColor::White;
+    }
+
+    FLinearColor Tint;
+    switch (SampleBiome(X, Y, S))
+    {
+    case ESVoxelBiome::Forest:
+        Tint = FLinearColor(0.22f, 0.39f, 0.16f, 1.0f);
+        break;
+    case ESVoxelBiome::Desert:
+        Tint = FLinearColor(0.68f, 0.48f, 0.25f, 1.0f);
+        break;
+    case ESVoxelBiome::Mountain:
+        Tint = FLinearColor(0.38f, 0.36f, 0.33f, 1.0f);
+        break;
+    case ESVoxelBiome::Snow:
+        Tint = FLinearColor(0.78f, 0.83f, 0.88f, 1.0f);
+        break;
+    case ESVoxelBiome::BurntForest:
+        Tint = FLinearColor(1.0f, 0.894f, 0.467f, 1.0f);
+        break;
+    case ESVoxelBiome::Wasteland:
+        Tint = FLinearColor(0.729f, 0.0f, 1.0f, 1.0f);
+        break;
+    case ESVoxelBiome::Plains:
+    default:
+        Tint = FLinearColor(0.46f, 0.49f, 0.25f, 1.0f);
+        break;
+    }
+
+    if (bHasSourceBiomeMask)
+    {
+        return Tint;
+    }
+    const float ClearingWeight = SamplePOISuitability(X, Y, S);
+    const FLinearColor BareEarth(0.40f, 0.32f, 0.22f, 1.0f);
+    return FMath::Lerp(Tint, BareEarth, ClearingWeight * 0.45f);
+}
+
+void FSVoxelGenerator::SampleRiverMaskAndField(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    float& OutInfluence,
+    float& OutSignedField,
+    float* OutBankInfluence)
+{
+    OutInfluence = 0.0f;
+    OutSignedField = 0.0f;
+    if (OutBankInfluence)
+    {
+        *OutBankInfluence = 0.0f;
+    }
+    if (!S.bEnableRivers ||
+        (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid()))
+    {
+        return;
+    }
+
+    // Use a denser world-scale field so 2-4 km maps contain multiple long
+    // channels, while keeping RiverScale as the user-facing tuning control.
+    const double Scale = FMath::Max(
+        0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
+    const double HalfWidth = FMath::Max(
+        0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
+    if (HalfWidth <= 0.0)
+    {
+        return;
+    }
+    // RiverHalfWidth directly controls the visible channel width. Do not enlarge
+    // the water mask at distant LODs; terrain carving must not change river width.
+
+    // Domain warp makes the zero-contours meander instead of looking like a
+    // repeated grid. The signed field also provides a stable local channel
+    // normal, allowing river water to stay level across the width of its bed.
+    const double WarpScale = Scale * 0.37;
+    const double WarpX = FBM2D(X * WarpScale, Y * WarpScale, S.Seed + 8111);
+    const double WarpY = FBM2D(X * WarpScale + 19.7, Y * WarpScale - 31.3, S.Seed + 8231);
+    const double WarpDistance = HalfWidth * 2.0;
+    const double Field = FBM2D(
+        (X + WarpX * WarpDistance) * Scale,
+        (Y + WarpY * WarpDistance) * Scale,
+        S.Seed + 8329);
+
+    // Convert channel and broad valley widths into dimensionless bands around
+    // the same signed field. The inner mask stays narrow enough for a riverbed;
+    // the outer bank mask spans tens of metres and is faded at its outer edge.
+    const double Threshold = FMath::Clamp(HalfWidth * Scale * 2.0, 0.0001, 0.20);
+    const double BankHalfWidth = FMath::Max(HalfWidth * 10.0, 5000.0);
+    const double BankThreshold = FMath::Max(
+        Threshold,
+        FMath::Min(BankHalfWidth * Scale * 2.0, 0.20));
+    const float T = FMath::Clamp(
+        static_cast<float>(std::abs(Field) / Threshold),
+        0.0f,
+        1.0f);
+    const float SmoothT = T * T * (3.0f - 2.0f * T);
+    OutInfluence = 1.0f - SmoothT;
+    OutSignedField = static_cast<float>(Field);
+
+    if (OutBankInfluence)
+    {
+        const float BankDistance01 = FMath::Clamp(
+            static_cast<float>(std::abs(Field) / BankThreshold), 0.0f, 1.0f);
+        const float BankFadeT = FMath::Clamp((BankDistance01 - 0.70f) / 0.30f, 0.0f, 1.0f);
+        const float BankFade = BankFadeT * BankFadeT * (3.0f - 2.0f * BankFadeT);
+        *OutBankInfluence = 1.0f - BankFade;
+    }
+
+    float DesertWeight = 0.0f;
+    float WinterWeight = 0.0f;
+    float TemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S, DesertWeight, WinterWeight, TemperateWeight);
+
+    // Fade both the narrow channel and broad banks using the continuous
+    // biome weight before making the water-only discrete biome decision.
+    // Applying this after the early return would hard-cut the terrain bank
+    // profile at the material boundary and create a vertical wall.
+    const float NonDesertWeight = 1.0f - DesertWeight;
+    OutInfluence *= NonDesertWeight;
+    if (OutBankInfluence)
+    {
+        *OutBankInfluence *= NonDesertWeight;
+    }
+
+    // Keep visible river water out of the desert to avoid isolated floating
+    // patches, while the already-faded bank influence remains continuous.
+    if (S.bEnableBiomes && SampleBiome(X, Y, S) == ESVoxelBiome::Desert)
+    {
+        OutInfluence = 0.0f;
+        return;
+    }
+
+    // Do not gate the channel by flatland coverage: at high hill coverage that
+    // gate reduced the channel mask, so terrain could be cut without reaching
+    // RiverWaterLevel and the same river appeared as a dry trench. Full-strength
+    // centre lines now carve to the bed level and are rendered with matching water.
+}
+
+float FSVoxelGenerator::SampleRiverInfluence(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    float Influence = 0.0f;
+    float SignedField = 0.0f;
+    SampleRiverMaskAndField(X, Y, S, Influence, SignedField);
+    return Influence;
+}
+
+
+void FSVoxelGenerator::SampleLakeMaskAndLevel(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S,
+    float& OutInfluence,
+    float& OutWaterLevel)
+{
+    OutInfluence = 0.0f;
+    OutWaterLevel = S.RiverWaterLevel;
+    if (!S.bEnableLakes ||
+        (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid()))
+    {
+        return;
+    }
+
+    const double Spacing = FMath::Max(20000.0, std::abs(static_cast<double>(S.LakeSiteSpacing)));
+    const int64 GridX = static_cast<int64>(std::round(X / Spacing));
+    const int64 GridY = static_cast<int64>(std::round(Y / Spacing));
+    const uint32 SiteHash = HashLattice2D(GridX, GridY, S.Seed + 7331);
+    const double SiteChance = static_cast<double>((SiteHash >> 16) & 0xFFu) / 255.0;
+    const double JitterX = (static_cast<double>(SiteHash & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    const double JitterY = (static_cast<double>((SiteHash >> 12) & 0x0FFFu) / 4095.0 - 0.5) * 0.30;
+    const double SiteX = static_cast<double>(GridX) * Spacing + JitterX * Spacing;
+    const double SiteY = static_cast<double>(GridY) * Spacing + JitterY * Spacing;
+
+    const ESVoxelBiome Biome = SampleBiome(SiteX, SiteY, S);
+    if (Biome == ESVoxelBiome::Desert || Biome == ESVoxelBiome::Mountain)
+    {
+        return;
+    }
+
+    float Temperature = 0.0f;
+    float Moisture = 0.0f;
+    float MountainSignal = 0.0f;
+    SampleBiomeClimate(SiteX, SiteY, S, Temperature, Moisture, MountainSignal);
+    (void)Temperature;
+    (void)Moisture;
+    float DesertWeight = 0.0f;
+    float WinterWeight = 0.0f;
+    float TemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        SiteX, SiteY, S, DesertWeight, WinterWeight, TemperateWeight);
+    if (MountainSignal >= FMath::Clamp(S.MountainBiomeThreshold, 0.3f, 0.95f) &&
+        WinterWeight > 0.5f)
+    {
+        return;
+    }
+
+    const float Flatness = SampleFlatlandInfluence(SiteX, SiteY, S);
+    // Blend lake frequency across gently rolling terrain instead of switching
+    // abruptly to the very rare hill-lake chance at one threshold. This keeps
+    // lakes present when the terrain settings increase hill coverage.
+    const float LakeFlatnessBlendT = FMath::Clamp((Flatness - 0.30f) / 0.35f, 0.0f, 1.0f);
+    const float LakeFlatnessBlend = LakeFlatnessBlendT * LakeFlatnessBlendT *
+        (3.0f - 2.0f * LakeFlatnessBlendT);
+    const float CandidateChance = FMath::Lerp(
+        FMath::Clamp(S.HillLakeChance, 0.0f, 1.0f),
+        FMath::Clamp(S.LakeChance, 0.0f, 1.0f),
+        LakeFlatnessBlend);
+    if (SiteChance > static_cast<double>(CandidateChance))
+    {
+        return;
+    }
+
+    // LakeRadius is an artist-facing world-space radius and must remain the
+    // actual lake radius. Expanding it to several times the coarsest world LOD
+    // made a 20 m lake grow into a 100+ m basin. Coarse LODs may simplify small
+    // lakes while distant, but close-range terrain uses finer samples and must
+    // reproduce the configured size rather than silently changing it.
+    const double Radius = FMath::Clamp(
+        std::abs(static_cast<double>(S.LakeRadius)),
+        500.0,
+        Spacing * 0.25);
+    const double Blend = FMath::Clamp(
+        std::abs(static_cast<double>(S.LakeShoreBlendDistance)), 0.0,
+        Spacing * 0.25 - Radius);
+    const double DX = X - SiteX;
+    const double DY = Y - SiteY;
+    const uint32 ShapeHash = HashLattice2D(GridX, GridY, S.Seed + 7477);
+    const double Angle = static_cast<double>(ShapeHash & 0xFFFFu) /
+        65535.0 * 6.283185307179586;
+    const double AxisX = 0.72 + static_cast<double>((ShapeHash >> 16) & 0xFFu) / 255.0 * 0.53;
+    const double AxisY = 1.0 / AxisX;
+    const double CosAngle = std::cos(Angle);
+    const double SinAngle = std::sin(Angle);
+    const double RotatedX = DX * CosAngle + DY * SinAngle;
+    const double RotatedY = -DX * SinAngle + DY * CosAngle;
+    const double EllipseDistance = std::sqrt(
+        (RotatedX / AxisX) * (RotatedX / AxisX) +
+        (RotatedY / AxisY) * (RotatedY / AxisY));
+
+    // Stable per-site ellipse parameters plus subtle radial warp add bays and
+    // peninsulas, avoiding both perfect circles and identical lake outlines.
+    const double ShoreNoise = FBM2D(
+        DX / Radius * 1.8 + 17.2,
+        DY / Radius * 1.8 - 6.8,
+        S.Seed + static_cast<int32>(ShapeHash & 0x7FFFu) + 7481);
+    const double Distance = EllipseDistance / (1.0 + ShoreNoise * 0.085);
+    if (Distance >= Radius + Blend)
+    {
+        return;
+    }
+
+    // A lake is allowed only where the complete shore footprint is nearly level.
+    // This rejects hilltops and side slopes instead of cutting a flat basin that
+    // can leave water suspended above the downhill terrain.
+    const double CenterTerrainHeight = SampleUnflattenedSurfaceHeight(SiteX, SiteY, S);
+    double MinimumTerrainHeight = CenterTerrainHeight;
+    double MaximumTerrainHeight = CenterTerrainHeight;
+    double MinimumOuterRimHeight = TNumericLimits<double>::Max();
+    const double ShoreRadius = (Radius + Blend) * 1.12;
+    const double RingRadii[2] = { Radius * 0.65, ShoreRadius };
+    const int32 RingSamples[2] = { 8, 16 };
+    constexpr double MaxLakeTerrainRelief = 450.0; // 4.5 m across the LOD-safe lake footprint.
+
+    for (int32 RingIndex = 0; RingIndex < 2; ++RingIndex)
+    {
+        const double RingRadius = RingRadii[RingIndex];
+        for (int32 SampleIndex = 0; SampleIndex < RingSamples[RingIndex]; ++SampleIndex)
         {
-            // Much weaker than the old 2500 value.
-            //
-            // The old value was large enough to create huge,
-            // aggressive density changes.
+            const double SampleAngle = 6.283185307179586 * static_cast<double>(SampleIndex) /
+                static_cast<double>(RingSamples[RingIndex]);
+            const double EllipseX = RingRadius * std::cos(SampleAngle) * AxisX;
+            const double EllipseY = RingRadius * std::sin(SampleAngle) * AxisY;
+            const double OffsetX = EllipseX * CosAngle - EllipseY * SinAngle;
+            const double OffsetY = EllipseX * SinAngle + EllipseY * CosAngle;
+            const double RimHeight = SampleUnflattenedSurfaceHeight(
+                SiteX + OffsetX, SiteY + OffsetY, S);
 
-            const float CaveCarve =
-                CaveMask *
-                600.0f *
-                S.CaveStrength;
+            MinimumTerrainHeight = FMath::Min(MinimumTerrainHeight, RimHeight);
+            MaximumTerrainHeight = FMath::Max(MaximumTerrainHeight, RimHeight);
+            if (RingIndex == 1)
+            {
+                MinimumOuterRimHeight = FMath::Min(MinimumOuterRimHeight, RimHeight);
+            }
 
+            // Stop immediately when this site is clearly on uneven terrain.
+            if (MaximumTerrainHeight - MinimumTerrainHeight > MaxLakeTerrainRelief)
+            {
+                return;
+            }
+        }
+    }
+
+    // Keep the water plane below every sampled shore point by a safety margin.
+    // The rim is sampled beyond the mask's maximum radial warp, so the lake is
+    // enclosed by terrain on all sides even when shore noise is at its extreme.
+    const double DesiredLakeLevel = Flatness >= 0.5f
+        ? static_cast<double>(S.RiverWaterLevel)
+        : CenterTerrainHeight - 50.0;
+    constexpr double LakeShoreSafetyMargin = 100.0;
+    OutWaterLevel = static_cast<float>(FMath::Min(
+        DesiredLakeLevel,
+        MinimumOuterRimHeight - LakeShoreSafetyMargin));
+
+    if (Distance <= Radius || Blend <= SMALL_NUMBER)
+    {
+        OutInfluence = 1.0f;
+    }
+    else
+    {
+        const float T = FMath::Clamp(
+            static_cast<float>((Distance - Radius) / Blend), 0.0f, 1.0f);
+        OutInfluence = 1.0f - T * T * (3.0f - 2.0f * T);
+    }
+
+    // A valid lake may sit near the temperate/desert border. Fade its basin
+    // with the local continuous biome weights so the terrain does not switch
+    // abruptly from the carved lake floor to untouched desert ground where
+    // the material biome changes.
+    float LocalDesertWeight = 0.0f;
+    float LocalWinterWeight = 0.0f;
+    float LocalTemperateWeight = 1.0f;
+    SampleBiomeRegionWeights(
+        X, Y, S,
+        LocalDesertWeight, LocalWinterWeight, LocalTemperateWeight);
+    OutInfluence *= FMath::Clamp(1.0f - LocalDesertWeight, 0.0f, 1.0f);
+}
+
+double FSVoxelGenerator::SampleSurfaceHeight(
+    double X,
+    double Y,
+    const FSVoxelGenerationSettings& S)
+{
+    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid() &&
+        S.ReferenceWorldData->HasHeightField())
+    {
+        // In source-world mode the DTM is authoritative: do not add procedural
+        // hills, POI flattening, micro-noise, or synthetic river/lake cuts.
+        return S.ReferenceWorldData->SampleHeightCentimeters(
+            X, Y, S.BiomeWorldCenter.X, S.BiomeWorldCenter.Y);
+    }
+    const double NaturalHeight = SampleUnflattenedSurfaceHeight(X, Y, S);
+    double SiteX = X;
+    double SiteY = Y;
+    const float PlateauWeight = GetPOIPlateauInfluence(X, Y, S, SiteX, SiteY);
+
+    double SurfaceHeight = NaturalHeight;
+    if (PlateauWeight > 0.0f)
+    {
+        // Keep the clearing at the terrain's natural centre height, with a smooth
+        // falloff into surrounding ground.
+        const double PlateauHeight = SampleUnflattenedSurfaceHeight(SiteX, SiteY, S);
+        SurfaceHeight = FMath::Lerp(
+            NaturalHeight,
+            PlateauHeight,
+            static_cast<double>(PlateauWeight));
+    }
+
+    // Fine relief enriches normal terrain, but its weight goes to zero inside a
+    // POI/city plateau so the built-up core remains exactly level. The broad scale
+    // avoids block-sized bumps and the weight fades smoothly at the plateau edge.
+    const double MicroScale = FMath::Max(
+        0.00000001, std::abs(static_cast<double>(S.DetailScale)));
+    const double MicroNoise = FBM2D(
+        X * MicroScale, Y * MicroScale, S.Seed + 8009);
+    const double MicroAmplitude = FMath::Clamp(
+        static_cast<double>(FMath::Max(50.0f, S.FlatlandNoiseAmplitude)),
+        50.0, 75.0);
+    const float FlatnessForMicroRelief = SampleFlatlandInfluence(X, Y, S);
+    const double MicroWeight = FMath::Lerp(
+        0.35, 1.0, static_cast<double>(FlatnessForMicroRelief)) *
+        (1.0 - static_cast<double>(PlateauWeight));
+    // POI/city cores stay genuinely level; the micro-detail fades smoothly into
+    // the surrounding terrain instead of adding bumps on top of the flat pad.
+    SurfaceHeight += MicroNoise * MicroAmplitude * MicroWeight;
+
+    if (S.bEnableRivers)
+    {
+        float RiverInfluence = 0.0f;
+        float RiverSignedField = 0.0f;
+        float RiverBankInfluence = 0.0f;
+        SampleRiverMaskAndField(
+            X, Y, S, RiverInfluence, RiverSignedField, &RiverBankInfluence);
+        RiverInfluence = FMath::Clamp(RiverInfluence, 0.0f, 1.0f);
+        RiverBankInfluence = FMath::Clamp(RiverBankInfluence, 0.0f, 1.0f);
+
+        // Carve a broad, smooth river valley into high ground before cutting the
+        // narrow water channel. The bank profile starts just above water level at
+        // the channel edge and rises smoothly back toward the surrounding hills.
+        // This turns a sharp canyon into sloping banks and lets hills split into
+        // two rounded shoulders when a river crosses a hilltop.
+        if (RiverBankInfluence > 0.0001f)
+        {
+            const double RiverScale = FMath::Max(
+                0.00000001, std::abs(static_cast<double>(S.RiverScale)) * 2.5);
+            const double RiverHalfWidth = FMath::Max(
+                0.0, std::abs(static_cast<double>(S.RiverHalfWidth)));
+            const double ChannelThreshold = FMath::Clamp(
+                RiverHalfWidth * RiverScale * 2.0, 0.0001, 0.20);
+            const double BankHalfWidth = FMath::Max(
+                RiverHalfWidth * 10.0, 5000.0);
+            const double BankThreshold = FMath::Max(
+                ChannelThreshold,
+                FMath::Min(BankHalfWidth * RiverScale * 2.0, 0.20));
+            const double BankProgress = FMath::Clamp(
+                (std::abs(static_cast<double>(RiverSignedField)) - ChannelThreshold) /
+                    FMath::Max(0.0001, BankThreshold - ChannelThreshold),
+                0.0,
+                1.0);
+            const double SmoothBankProgress = BankProgress * BankProgress *
+                (3.0 - 2.0 * BankProgress);
+            const double BankRise = FMath::Clamp(
+                std::abs(static_cast<double>(S.HillHeight)) * 1.15, 1500.0, 7000.0);
+            // Let the inner bank profile start slightly above the water plane.
+            // The actual narrow channel is carved to its separate bed level below,
+            // while this broad shoulder gives the bank a gradual visible slope.
+            const double BankProfileHeight = static_cast<double>(S.RiverWaterLevel) +
+                150.0 + BankRise * SmoothBankProgress;
+            const double CarvedBankHeight = FMath::Min(SurfaceHeight, BankProfileHeight);
+            SurfaceHeight = FMath::Lerp(
+                SurfaceHeight, CarvedBankHeight, static_cast<double>(RiverBankInfluence));
+        }
+
+        // Keep the actual narrow channel at its configured bed level. The broad
+        // bank profile affects adjacent terrain only, not the water-channel depth.
+        const double RiverBedLevel = static_cast<double>(S.RiverWaterLevel) -
+            std::abs(static_cast<double>(S.RiverDepth));
+        // Lerp alone raises low terrain toward the target bed, creating a raised
+        // ribbon. A riverbed is a cut: preserve any ground already below target.
+        const double CarvedChannelHeight = FMath::Lerp(
+            SurfaceHeight, RiverBedLevel, static_cast<double>(RiverInfluence));
+        SurfaceHeight = FMath::Min(SurfaceHeight, CarvedChannelHeight);
+    }
+
+    float LakeInfluence = 0.0f;
+    float LakeWaterLevel = S.RiverWaterLevel;
+    SampleLakeMaskAndLevel(X, Y, S, LakeInfluence, LakeWaterLevel);
+    if (LakeInfluence > 0.0f)
+    {
+        const double LakeBedLevel = static_cast<double>(LakeWaterLevel) -
+            FMath::Min(500.0, std::abs(static_cast<double>(S.LakeDepth)));
+        // A lake basin must never lift the existing terrain up to its target floor.
+        const double CarvedLakeHeight = FMath::Lerp(
+            SurfaceHeight, LakeBedLevel, static_cast<double>(LakeInfluence));
+        SurfaceHeight = FMath::Min(SurfaceHeight, CarvedLakeHeight);
+    }
+    return SurfaceHeight;
+}
+
+double FSVoxelGenerator::SampleSurfaceHeightAtChunkLocal(
+    const FVector& LocalPosition,
+    const FSVoxelGenerationSettings& Settings)
+{
+    double WorldX;
+    double WorldY;
+    if (Settings.bUseChunkLatticeCoordinates)
+    {
+        const double BaseStep = static_cast<double>(Settings.BaseVoxelSize);
+        WorldX = static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep +
+            static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep +
+            static_cast<double>(LocalPosition.Y);
+    }
+    else
+    {
+        WorldX = static_cast<double>(Settings.ChunkWorldOrigin.X) +
+            static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkWorldOrigin.Y) +
+            static_cast<double>(LocalPosition.Y);
+    }
+
+    return SampleSurfaceHeight(WorldX, WorldY, Settings);
+}
+
+float FSVoxelGenerator::SampleDensityAtChunkLocalWithSurfaceHeight(
+    const FVector& LocalPosition,
+    double SurfaceHeight,
+    const FSVoxelGenerationSettings& Settings)
+{
+    double WorldX;
+    double WorldY;
+    double WorldZ;
+    if (Settings.bUseChunkLatticeCoordinates)
+    {
+        const double BaseStep = static_cast<double>(Settings.BaseVoxelSize);
+        WorldX = static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep +
+            static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep +
+            static_cast<double>(LocalPosition.Y);
+        WorldZ = static_cast<double>(Settings.ChunkOriginCells.Z) * BaseStep +
+            static_cast<double>(LocalPosition.Z);
+    }
+    else
+    {
+        WorldX = static_cast<double>(Settings.ChunkWorldOrigin.X) +
+            static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkWorldOrigin.Y) +
+            static_cast<double>(LocalPosition.Y);
+        WorldZ = static_cast<double>(Settings.ChunkWorldOrigin.Z) +
+            static_cast<double>(LocalPosition.Z);
+    }
+
+    return DensityFromSurfaceHeight(WorldX, WorldY, WorldZ, SurfaceHeight, Settings);
+}
+
+float FSVoxelGenerator::Density(
+    double X,
+    double Y,
+    double Z,
+    const FSVoxelGenerationSettings& S)
+{
+    return DensityFromSurfaceHeight(X, Y, Z, SampleSurfaceHeight(X, Y, S), S);
+}
+
+float FSVoxelGenerator::DensityFromSurfaceHeight(
+    double X,
+    double Y,
+    double Z,
+    double SurfaceHeight,
+    const FSVoxelGenerationSettings& S)
+{
+    // Positive = solid, negative = air.
+    double D = SurfaceHeight - Z;
+
+    // Preserve the solid-bottom behaviour of the original density field.
+    if (Z < SurfaceHeight - S.BottomDepth)
+    {
+        D = 1.0;
+    }
+
+    if (S.bEnableCaves && S.CaveStrength > 0.0f &&
+        !(S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid() &&
+            S.ReferenceWorldData->HasHeightField()))
+    {
+        const float Cave = FBM3D(
+            X * static_cast<double>(S.CaveScale),
+            Y * static_cast<double>(S.CaveScale),
+            Z * static_cast<double>(S.CaveScale),
+            S.Seed + 4242);
+
+        const float Range = FMath::Max(0.001f, 1.0f - S.CaveThreshold);
+        float T = (Cave - S.CaveThreshold) / Range;
+        T = FMath::Clamp(T, 0.0f, 1.0f);
+        const float CaveMask = T * T * (3.0f - 2.0f * T);
+
+        if (D > 0.0)
+        {
+            const float CaveCarve = CaveMask * 600.0f * S.CaveStrength;
             D -= CaveCarve;
         }
     }
 
-    return D;
+    return ApplyBlockEdits(X, Y, Z, static_cast<float>(D), S);
+}
+
+float FSVoxelGenerator::SampleDensity(
+    double WorldX,
+    double WorldY,
+    double WorldZ,
+    const FSVoxelGenerationSettings& Settings)
+{
+    return Density(WorldX, WorldY, WorldZ, Settings);
+}
+
+float FSVoxelGenerator::SampleDensityAtChunkLocal(
+    const FVector& LocalPosition,
+    const FSVoxelGenerationSettings& Settings)
+{
+    double WorldX;
+    double WorldY;
+    double WorldZ;
+    if (Settings.bUseChunkLatticeCoordinates)
+    {
+        const double BaseStep = static_cast<double>(Settings.BaseVoxelSize);
+        WorldX = static_cast<double>(Settings.ChunkOriginCells.X) * BaseStep + static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkOriginCells.Y) * BaseStep + static_cast<double>(LocalPosition.Y);
+        WorldZ = static_cast<double>(Settings.ChunkOriginCells.Z) * BaseStep + static_cast<double>(LocalPosition.Z);
+    }
+    else
+    {
+        WorldX = static_cast<double>(Settings.ChunkWorldOrigin.X) + static_cast<double>(LocalPosition.X);
+        WorldY = static_cast<double>(Settings.ChunkWorldOrigin.Y) + static_cast<double>(LocalPosition.Y);
+        WorldZ = static_cast<double>(Settings.ChunkWorldOrigin.Z) + static_cast<double>(LocalPosition.Z);
+    }
+
+    return Density(WorldX, WorldY, WorldZ, Settings);
+}
+
+void FSVoxelGenerator::ClampNoiseScalesForMaxSampleStep(
+    FSVoxelGenerationSettings& Settings,
+    float CoarsestVoxelStep)
+{
+    // FBM2D uses three octaves with frequency multipliers 1, 2 and 4.
+    // Keep the highest octave below 0.35 noise-lattice units per coarsest
+    // sample. Use the same clamped scales for every LOD so this remains one
+    // deterministic world-space density field instead of different fields
+    // which could disagree along transition seams.
+    const float MaxNoiseScale =
+        0.35f / (FMath::Max(1.0f, CoarsestVoxelStep) * 4.0f);
+    Settings.NoiseScale = FMath::Min(FMath::Max(0.0f, Settings.NoiseScale), MaxNoiseScale);
+    Settings.DetailScale = FMath::Min(FMath::Max(0.0f, Settings.DetailScale), MaxNoiseScale * 0.75f);
+    Settings.FlatlandRegionScale = FMath::Min(
+        FMath::Max(0.0f, Settings.FlatlandRegionScale), MaxNoiseScale * 0.9f);
+    Settings.HillScale = FMath::Min(
+        FMath::Max(0.0f, Settings.HillScale), MaxNoiseScale);
 }
 
 
@@ -424,9 +1876,9 @@ FVector FSVoxelGenerator::Interpolate(
 // ============================================================
 
 FVector FSVoxelGenerator::DensityGradient(
-    float X,
-    float Y,
-    float Z,
+    double X,
+    double Y,
+    double Z,
     float Step,
     const FSVoxelGenerationSettings& S)
 {
@@ -456,6 +1908,102 @@ FVector FSVoxelGenerator::DensityGradient(
         Dz).GetSafeNormal();
 }
 
+
+void FSVoxelGenerator::GetSurfaceMaterialBlendData(
+    double X, double Y, double Z,
+    const FSVoxelGenerationSettings& S,
+    FLinearColor& OutVertexColor, FVector2D& OutUV1)
+{
+    const double Step = FMath::Max(1.0, static_cast<double>(S.BaseVoxelSize));
+    const double GX = X / Step - 0.5, GY = Y / Step - 0.5;
+    const int32 X0 = FMath::FloorToInt(GX), Y0 = FMath::FloorToInt(GY);
+    const auto Smooth = [](double V) { V = FMath::Clamp(V, 0.0, 1.0); return V * V * (3.0 - 2.0 * V); };
+    const double TX = Smooth(GX - X0), TY = Smooth(GY - Y0);
+
+    struct FWeights { double Desert=0, Forest=0, Snow=0, Asphalt=0, Soil=0; };
+
+    const int32 SampleCellX = FMath::FloorToInt(X / Step);
+    const int32 SampleCellY = FMath::FloorToInt(Y / Step);
+    const int32 SampleCellZ = FMath::FloorToInt(Z / Step);
+    const auto FloorDivideByBin = [](int32 Value)
+    {
+        return Value >= 0 ? Value / 8 : (Value - 7) / 8;
+    };
+    const FIntVector SampleBin(
+        FloorDivideByBin(SampleCellX), FloorDivideByBin(SampleCellY), FloorDivideByBin(SampleCellZ));
+    const bool bHasRoadMap = S.RoadBlocks.IsValid() && S.RoadBlocks->Num() > 0;
+    const bool bHasReferenceRoadMask = S.bUseReferenceWorldData &&
+        S.ReferenceWorldData.IsValid() && S.ReferenceWorldData->HasRoadMask();
+    const bool bMayQueryRoads = bHasReferenceRoadMask ||
+        (bHasRoadMap && (!S.RoadSampleBins.IsValid() || S.RoadSampleBins->Contains(SampleBin)));
+
+    const auto GetRoad = [&S, Step, Z, bMayQueryRoads, bHasReferenceRoadMask](
+        int32 CX, int32 CY, EVoxelBlock& Type) -> bool
+    {
+        Type = EVoxelBlock::Air;
+        if (!bMayQueryRoads) return false;
+        const int32 Z0 = FMath::FloorToInt(Z / Step);
+        double Best = TNumericLimits<double>::Max();
+        bool Found = false;
+        if (S.RoadBlocks.IsValid())
+        {
+            for (int32 DZ=-2; DZ<=1; ++DZ)
+            {
+                const FIntVector C(CX,CY,Z0+DZ);
+                const EVoxelBlock* T=S.RoadBlocks->Find(C);
+                if (!T || (*T!=EVoxelBlock::Asphalt && *T!=EVoxelBlock::DirtRoad) ||
+                    (S.MinedRoadBlocks.IsValid() && S.MinedRoadBlocks->Contains(C))) continue;
+                const double* H=S.RoadSurfaceHeights.IsValid()?S.RoadSurfaceHeights->Find(C):nullptr;
+                const double Height=H?*H:(static_cast<double>(C.Z)+1.0)*Step;
+                const double Diff=std::abs(Height-Z);
+                if (Diff<Best) { Best=Diff; Type=*T; Found=true; }
+            }
+        }
+        if (!Found && bHasReferenceRoadMask)
+        {
+            const double WX=(static_cast<double>(CX)+0.5)*Step, WY=(static_cast<double>(CY)+0.5)*Step;
+            const EVoxelBlock T=S.ReferenceWorldData->SampleRoadType(
+                WX,WY,S.BiomeWorldCenter.X,S.BiomeWorldCenter.Y);
+            if (T==EVoxelBlock::Asphalt || T==EVoxelBlock::DirtRoad)
+            { Type=T; Found=true; }
+        }
+        return Found;
+    };
+
+    const auto CellWeights = [&](int32 CX, int32 CY) -> FWeights
+    {
+        FWeights W;
+        EVoxelBlock Road=EVoxelBlock::Air;
+        if (GetRoad(CX,CY,Road))
+        {
+            if (Road==EVoxelBlock::Asphalt) W.Asphalt=1.0;
+            else W.Soil=1.0;
+            return W;
+        }
+        const double WX=(static_cast<double>(CX)+0.5)*Step, WY=(static_cast<double>(CY)+0.5)*Step;
+        switch (FSVoxelGenerator::SampleBiome(WX,WY,S))
+        {
+        case ESVoxelBiome::Desert: W.Desert=1.0; break;
+        case ESVoxelBiome::Forest: W.Forest=1.0; break;
+        case ESVoxelBiome::Snow: W.Snow=1.0; break;
+        default: break; // Plains is the implicit base layer.
+        }
+        return W;
+    };
+
+    // Interpolate adjacent cell-centre masks. The transition spans one base
+    // block and is exactly 50/50 at each shared boundary.
+    const FWeights A=CellWeights(X0,Y0), B=CellWeights(X0+1,Y0),
+                   C=CellWeights(X0,Y0+1), D=CellWeights(X0+1,Y0+1);
+    const auto Mix=[TX,TY](double A0,double B0,double C0,double D0)
+    { return FMath::Lerp(FMath::Lerp(A0,B0,TX),FMath::Lerp(C0,D0,TX),TY); };
+    OutVertexColor=FLinearColor(
+        static_cast<float>(Mix(A.Desert,B.Desert,C.Desert,D.Desert)),
+        static_cast<float>(Mix(A.Forest,B.Forest,C.Forest,D.Forest)),
+        static_cast<float>(Mix(A.Snow,B.Snow,C.Snow,D.Snow)),
+        static_cast<float>(Mix(A.Asphalt,B.Asphalt,C.Asphalt,D.Asphalt)));
+    OutUV1=FVector2D(static_cast<float>(Mix(A.Soil,B.Soil,C.Soil,D.Soil)),0.0f);
+}
 
 // ============================================================
 // GENERATE

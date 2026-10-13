@@ -1,0 +1,753 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "SmoothVoxelGenerator.h"
+#include "SmoothVoxelOctree.h"
+#include "SmoothVoxelTypes.h"
+#include "VoxelTypes.h"
+#include "SmoothVoxelOctreeWorld.generated.h"
+
+class UProceduralMeshComponent;
+class UMaterialInterface;
+class UDataTable;
+class APlayerController;
+class ASmoothVoxelRoadNetwork;
+
+// World dimensions are selected per new world in the editor. Keep these values
+// in centimetres in code (Unreal's default world units) for exact grid bounds.
+UENUM(BlueprintType)
+enum class ESmoothVoxelWorldSize : uint8
+{
+	Size2Km UMETA(DisplayName = "2 x 2 km"),
+	Size4Km UMETA(DisplayName = "4 x 4 km"),
+	Size8Km UMETA(DisplayName = "8 x 8 km")
+};
+
+/**
+ * One independently streamed chunk rendered with the new experimental
+ * Transvoxel backend. This actor is only spawned by ASmoothVoxelOctreeWorld.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class SMOOTHVOXEL_API ASmoothVoxelTransvoxelChunk : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASmoothVoxelTransvoxelChunk();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel")
+	UProceduralMeshComponent* Mesh = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Rendering")
+	UMaterialInterface* Material = nullptr;
+
+	void SetTerrainMaterial(UMaterialInterface* InMaterial);
+	void SetRoadMaterials(
+		UMaterialInterface* InDirtRoadMaterial,
+		UMaterialInterface* InAsphaltRoadMaterial);
+    void SetReferenceBiomeMaterials(
+        UMaterialInterface* InPlains,
+        UMaterialInterface* InForest,
+        UMaterialInterface* InDesert,
+        UMaterialInterface* InSnow,
+        UMaterialInterface* InBurntForest,
+        UMaterialInterface* InWasteland);
+
+	void QueueBuild(
+		const FSVoxelOctreeNode& Node,
+		int32 CellsPerAxis,
+		float VoxelSize,
+		uint8 TransitionFaceMask,
+		const FSVoxelGenerationSettings& Settings,
+		bool bCreateCollision);
+
+	void StartQueuedBuild();
+	bool HasPendingBuildApply() const { return bHasPendingBuildApply; }
+	void QueueCompletedBuild(
+		int32 BuildRevision,
+		const TSharedPtr<FSVoxelMeshData, ESPMode::ThreadSafe>& Data,
+		bool bCreateCollision);
+	void ApplyPendingBuild();
+
+	bool IsConfiguredFor(
+		const FSVoxelOctreeNode& Node,
+		int32 InCellsPerAxis,
+		const FVector& ChunkOrigin,
+		uint8 TransitionFaceMask,
+		float VoxelSize,
+		bool bCreateCollision) const;
+
+	bool IsReadyFor(
+		const FSVoxelOctreeNode& Node,
+		int32 InCellsPerAxis,
+		const FVector& ChunkOrigin,
+		uint8 TransitionFaceMask,
+		float VoxelSize,
+		bool bCreateCollision) const;
+
+	bool IsBuildQueued() const { return bBuildQueued; }
+	bool IsBuildInProgress() const { return bBuildInProgress; }
+	const FSVoxelOctreeNode& GetNode() const { return RequestedNode; }
+	uint8 GetRequestedFaceMask() const { return RequestedFaceMask; }
+	float GetRequestedVoxelSize() const { return RequestedVoxelSize; }
+	bool GetRequestedCollision() const { return bRequestedCollision; }
+
+private:
+	void CompleteBuild(
+		int32 BuildRevision,
+		FSVoxelMeshData&& Data,
+		bool bCreateCollision);
+
+	TSharedPtr<FSVoxelMeshData, ESPMode::ThreadSafe> PendingCompletedData;
+	UPROPERTY()
+	UMaterialInterface* DirtRoadSectionMaterial = nullptr;
+	UPROPERTY()
+	UMaterialInterface* AsphaltRoadSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferencePlainsSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceForestSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceDesertSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceSnowSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceBurntForestSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceWastelandSectionMaterial = nullptr;
+	int32 PendingCompletedRevision = -1;
+	bool bPendingCompletedCollision = false;
+	bool bHasPendingBuildApply = false;
+
+	FSVoxelOctreeNode RequestedNode;
+	FSVoxelGenerationSettings PendingSettings;
+	int32 RequestedCellsPerAxis = 32;
+	float RequestedVoxelSize = 100.0f;
+	uint8 RequestedFaceMask = 0;
+	bool bRequestedCollision = false;
+
+	int32 RequestedRevision = 0;
+	int32 CompletedRevision = -1;
+	bool bHasNode = false;
+	bool bBuildQueued = false;
+	bool bBuildInProgress = false;
+	bool bBuildFailed = false;
+};
+
+/**
+ * A placed non-soil block. It uses six independent flat-shaded faces instead
+ * of the smooth Transvoxel terrain field, so grass/stone/wood remain genuinely
+ * cubic and are ray-traceable for mining.
+ */
+UCLASS()
+class SMOOTHVOXEL_API ASmoothVoxelPlacedCubeBlock : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASmoothVoxelPlacedCubeBlock();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
+	UProceduralMeshComponent* Mesh = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
+	EVoxelBlock BlockType = EVoxelBlock::Air;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
+	FIntVector BlockCell = FIntVector::ZeroValue;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Blocks")
+	int32 DamageStage = 0;
+
+	void ConfigureBlock(
+		EVoxelBlock InBlockType,
+		const FIntVector& InCell,
+		float InBlockSize,
+		UMaterialInterface* InMaterial,
+		int32 InDamageStage = 0,
+		const FVector* InWorldOriginOverride = nullptr);
+
+	int32 RegisterDamageHit();
+	int32 GetDamageStage() const { return DamageStage; }
+};
+
+/**
+ * A single world-aligned water surface owned by ASmoothVoxelOctreeWorld.
+ * The terrain remains the source of shoreline shape: opaque terrain above the
+ * sea level naturally occludes this surface, while low terrain is flooded.
+ */
+UCLASS()
+class SMOOTHVOXEL_API ASmoothVoxelWaterSurface : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASmoothVoxelWaterSurface();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Water")
+	UProceduralMeshComponent* Mesh = nullptr;
+
+	/** Builds a level sea plane plus fixed-elevation rivers and sparse deterministic lakes. */
+	void ConfigureSurface(
+		const FVector& WorldCenter,
+		float WorldSize,
+		float InSeaLevel,
+		float InTileSize,
+		int32 InResolution,
+		UMaterialInterface* InMaterial,
+		const FSVoxelGenerationSettings& InGenerationSettings,
+		bool bEnableCollision);
+
+private:
+	void BuildSurfaceMesh(
+		float WorldSize,
+		float InTileSize,
+		int32 InResolution,
+		const FSVoxelGenerationSettings& GenerationSettings,
+		bool bEnableCollision);
+
+	UPROPERTY()
+	UMaterialInterface* FallbackWaterMaterial = nullptr;
+
+	UPROPERTY()
+	UMaterialInterface* ActiveMaterial = nullptr;
+
+	FVector ConfiguredWorldCenter = FVector::ZeroVector;
+	float ConfiguredWorldSize = -1.0f;
+	float ConfiguredSeaLevel = 0.0f;
+	float ConfiguredTileSize = 5000.0f;
+	int32 ConfiguredResolution = 0;
+	FSVoxelGenerationSettings ConfiguredGenerationSettings;
+	bool bConfiguredCollision = false;
+	bool bHasConfiguration = false;
+};
+
+/**
+ * Primary procedural world. Owns Octree selection, Transvoxel mesh streaming,
+ * biome sampling, and block editing without depending on the legacy AVoxelWorld.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class SMOOTHVOXEL_API ASmoothVoxelOctreeWorld : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASmoothVoxelOctreeWorld();
+
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming")
+	bool bAutoGenerate = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming")
+	AActor* FollowActor = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="0.05"))
+	float UpdateIntervalSeconds = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1.0"))
+	float UpdateDistance = 2000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="2"))
+	int32 MaxConcurrentBuilds = 2;
+
+	/** Limit actor creation/reconfiguration work per frame to avoid streaming hitches. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="1", ClampMax="16"))
+	int32 MaxChunkRequestsPerFrame = 4;
+
+	/** Chunk budget kept conservative to avoid long frame stalls while streaming is still being optimized. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Streaming", meta=(ClampMin="32", ClampMax="2048"))
+	int32 MaxLeafCount = 2048;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="4", ClampMax="128"))
+	int32 CellsPerAxis = 32;
+
+	/** Runtime-effective sample spacing is derived from WorldSize so the map bounds stay exact. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Voxel|Octree", meta=(Units="cm"))
+	float BaseVoxelSize = 97.65625f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0", ClampMax="4"))
+	int32 MaxLod = 4;
+
+	/** Select the finite map dimensions for this world instance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World", meta=(DisplayName="World Size"))
+	ESmoothVoxelWorldSize WorldSize = ESmoothVoxelWorldSize::Size8Km;
+
+    /** Opt-in: use the captured West Biyove Valley rasters as a fixed reference map. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
+    bool bUseReferenceWorldData = false;
+
+    /** Prefer seed-driven terrain even when an older Blueprint saved the reference flag as true. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World Generation")
+    bool bForceProceduralGeneration = true;
+
+    /** Choose a fresh seed at launch and each time StartNewGame is requested. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World Generation")
+    bool bRandomizeSeedForNewWorld = true;
+
+    /** Project-relative 8192x8192 little-endian uint16 DTM (1/256 metre units). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
+    FString ReferenceHeightmapPath = TEXT("Content/WorldReference/WestBiyoveValley/dtm.raw");
+
+    /** Project-relative 1024x1024 categorical biome IDs derived from biomes.png. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
+    FString ReferenceBiomeMaskPath = TEXT("Content/WorldReference/WestBiyoveValley/biomes.raw");
+
+    /** Project-relative 2-bit packed road types derived from splat3.png. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
+    FString ReferenceRoadMaskPath = TEXT("Content/WorldReference/WestBiyoveValley/roadmask_2bit.raw");
+
+	/** LOD refinement distance multiplier. Higher values create more chunks and transition boundaries. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0.05", ClampMax="4.0"))
+	float SplitDistanceMultiplier = 0.75f;
+
+	/** Fixed centre of the finite world bounds. The world does not follow the player. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World")
+	FVector RootWorldCenter = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
+	int32 Seed = 555;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
+	float BaseHeight = 3500.0f;
+
+	/** Legacy compatibility only; use HillHeight and MountainHeight for new terrain. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm", DeprecatedProperty, DeprecationMessage="Use Hill Height and Mountain Height"))
+	float HeightAmplitude = 3500.0f;
+
+	/** Legacy/debug-only noise frequency; it does not affect the generated terrain surface. Use HillScale, DetailScale, and FlatlandRegionScale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(DeprecatedProperty, DeprecationMessage="Does not affect generated terrain; use Hill Scale, Detail Scale, or Flatland Region Scale."))
+	float NoiseScale = 0.00005f;
+
+	/** World-space scale of surface detail. Higher values produce smaller, more visible undulations (still LOD-clamped). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.000001", ClampMax="0.0001"))
+	float DetailScale = 0.000025f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
+	float DetailAmplitude = 60.0f;
+
+	/** Flatland share among non-mountain terrain; 0.5 plus 20% mountains targets a 40/40/20 mix. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.2", ClampMax="0.9"))
+	float FlatlandCoverage = 0.5f;
+
+	/** Multiplies flatland coverage; leave at 1.0 to preserve the intended terrain proportions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.1", ClampMax="1.0", DisplayName="Flatland Coverage Multiplier"))
+	float FlatlandCoverageMultiplier = 1.0f;
+
+	/** Broad, gentle elevation variation over flatland regions, in centimetres. When fixed-level rivers are enabled, the effective value is capped to keep lowland terrain from falling far below the river plane. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="3000.0", Units="cm", DisplayName="Gentle Plains Relief Height"))
+	float GentleReliefHeight = 800.0f;
+
+	/** Scale of broad flatland/hill region borders. Smaller values create larger regions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0000001", ClampMax="0.00002"))
+	float FlatlandRegionScale = 0.00002f;
+
+	/** Maximum small-scale variation over flatlands, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="100.0", Units="cm"))
+	float FlatlandNoiseAmplitude = 50.0f;
+
+	/** Scale of broad, smooth hills. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0000001", ClampMax="0.00002"))
+	float HillScale = 0.00002f;
+
+	/** Maximum hill height above surrounding flats, in centimetres (30–40 blocks is about 3000–4000 cm). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="100000.0", Units="cm"))
+	float HillHeight = 4000.0f;
+
+	/** Share of desert assigned to hills; amplitudes remain lower in desert regions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="0.9"))
+	float DesertHillCoverage = 0.5f;
+
+	/** Climate threshold used to keep lakes out of cold mountain-climate cells. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.3", ClampMax="0.95"))
+	float MountainBiomeThreshold = 0.80f;
+
+	/** Target share of the whole map with mountainous landforms, independent of biome placement. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.05", ClampMax="0.45", DisplayName="Mountain Coverage"))
+	float MountainCoverage = 0.20f;
+
+	/** Large-scale mountain relief, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="200000.0", Units="cm"))
+	float MountainHeight = 16000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
+	float BottomDepth = 2000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Caves")
+	bool bEnableCaves = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Caves")
+	float CaveScale = 0.0030f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Caves")
+	float CaveThreshold = 0.58f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Caves")
+	float CaveStrength = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Collision")
+	bool bGenerateNearCollision = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Collision", meta=(ClampMin="0", ClampMax="8"))
+	int32 CollisionMaxLod = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Collision", meta=(ClampMin="0.0"))
+	float CollisionRadius = 2000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Rendering")
+	UMaterialInterface* TerrainMaterial = nullptr;
+
+    /** VertexColor RGBA = desert/forest/snow/asphalt; UV1.R = soil. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Materials")
+    bool bEnableSurfaceMaterialBlending = false;
+
+	/** Enables the single sea-level water sheet for this finite Octree world. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	bool bEnableWater = true;
+
+	/** Absolute world-space Z for oceans and any low basin intersecting this plane. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(Units="cm"))
+	float SeaLevel = 0.0f;
+
+	/** World-space size represented by one full water-material UV tile. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="100.0", Units="cm"))
+	float WaterTileSize = 5000.0f;
+
+	/** Base resolution of the river/lake grid. Narrow rivers automatically raise its effective resolution. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="16", ClampMax="512"))
+	int32 WaterGridResolution = 512;
+
+	/** Off by default so the water does not behave like a solid floor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	bool bWaterCollision = false;
+
+	/** Assign a project water material here. Starter Content water is used if available. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	UMaterialInterface* WaterMaterial = nullptr;
+
+	/** Sparse deterministic river network, restricted to flatlands in plains, forest and snow biomes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	bool bEnableRivers = true;
+
+	/** Channel-field frequency. Higher values create more river contours; mask width is scaled with it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.000001", ClampMax="0.00005"))
+	float RiverScale = 0.000004f;
+
+	/** River half-width in centimetres. 250 cm = 2.5 m on each side, 5 m total width. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="250.0", Units="cm"))
+	float RiverHalfWidth = 500.0f;
+
+	/** Carved river bed depth, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", Units="cm"))
+	float RiverDepth = 200.0f;
+
+	/** Absolute world-space Z shared by every river surface; separate from SeaLevel. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(Units="cm"))
+	float RiverWaterLevel = 2500.0f;
+
+	/** Generate rare small lakes in plains/forest/snow, never in desert or mountains. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
+	bool bEnableLakes = true;
+
+	/** Minimum separation between candidate lake sites, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="20000.0", Units="cm"))
+	float LakeSiteSpacing = 50000.0f;
+
+	/** Nominal lake basin radius in centimetres. The radius is no longer inflated to match distant LOD sampling. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="500.0", Units="cm"))
+	float LakeRadius = 4000.0f;
+
+	/** Width of the gradual shoreline/basin falloff outside LakeRadius, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.0", Units="cm"))
+	float LakeShoreBlendDistance = 1800.0f;
+
+	/** Lake depth; default 500 cm is about five one-metre blocks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="50.0", ClampMax="500.0", Units="cm"))
+	float LakeDepth = 500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float LakeChance = 0.3f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float HillLakeChance = 0.15f;
+
+	/** Enables deterministic forest/plains/desert/mountain/snow terrain masks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	bool bEnableBiomes = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes", meta=(ClampMin="0.000001", ClampMax="0.00005"))
+	float BiomeScale = 0.0000075f;
+
+	/** Reserve many seed-stable clearings for future POI placement. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(DisplayName="Generate POI Plateaus"))
+	bool bEnablePOIPlateaus = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(ClampMin="20000.0", Units="cm"))
+	float POISiteSpacing = 45000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(ClampMin="0.0", Units="cm"))
+	float POIPlateauRadius = 4500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|POI", meta=(ClampMin="0.0", Units="cm"))
+	float POIPlateauBlendDistance = 3000.0f;
+
+	/** Generates a deterministic road grid that links the seed-stable POI candidate sites. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
+	bool bEnableRoads = true;
+
+	/** Core road widths are 4, 8 and 16 base blocks, with intermittent one-cell soil shoulders. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="200.0", ClampMax="2000.0", Units="cm"))
+	float RoadWidth = 600.0f;
+
+	/** Longitudinal mesh sampling distance. Lower values smooth roads but create more triangles. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="250.0", ClampMax="5000.0", Units="cm"))
+	float RoadSampleSpacing = 500.0f;
+
+	/** Vertical road offset in centimetres. The default deck is recessed one base voxel below terrain; a positive offset raises it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="0.0", ClampMax="100.0", Units="cm"))
+	float RoadSurfaceOffset = 0.0f;
+
+	/** Enable collision so the player can walk/drive over generated roads. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads")
+	bool bRoadCollision = true;
+
+	/** Asphalt surface used by ordinary roads and highways. If unset, the Asphalt block material is used, then a concrete fallback. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(DisplayName="Asphalt Road Material"))
+	UMaterialInterface* RoadMaterial = nullptr;
+
+	/** Optional surface override for dirt/country roads and rural access lanes. If unset, the DirtRoad block material is used, then a gravel fallback. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(DisplayName="Dirt Road Material"))
+	UMaterialInterface* DirtRoadMaterial = nullptr;
+
+	/** Optional overrides. Unassigned entries fall back to TerrainMaterial. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* PlainsBiomeMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* ForestBiomeMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* DesertBiomeMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* MountainBiomeMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+	UMaterialInterface* SnowBiomeMaterial = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+    UMaterialInterface* BurntForestBiomeMaterial = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+    UMaterialInterface* WastelandBiomeMaterial = nullptr;
+
+	UFUNCTION(BlueprintPure, Category="Voxel|Biomes")
+	ESVoxelBiome GetBiomeAtWorldPosition(const FVector& WorldPosition) const;
+
+	/** Returns 0..1; high values are generated flat clearings suitable for POIs. */
+	UFUNCTION(BlueprintPure, Category="Voxel|POI")
+	float GetPOISuitabilityAtWorldPosition(const FVector& WorldPosition) const;
+
+	/** Query the currently selected Octree leaf containing a world-space position. */
+	bool GetOctreeNodeAtWorldPosition(
+		const FVector& WorldPosition,
+		FSVoxelOctreeNode& OutNode) const;
+
+	/** Query the current block interpretation and Octree leaf for an absolute base-cell coordinate. */
+	bool GetBlockDebugInfoForCell(
+		const FIntVector& Cell,
+		EVoxelBlock& OutBlock,
+		FIntVector& OutNodeOriginCells,
+		int32& OutLod) const;
+
+	bool GetBlockDebugInfoAtWorldPosition(
+		const FVector& WorldPosition,
+		EVoxelBlock& OutBlock,
+		FIntVector& OutCell,
+		FIntVector& OutNodeOriginCells,
+		int32& OutLod) const;
+
+	void GetTerrainDebugInfoAtWorldPosition(
+		const FVector& WorldPosition,
+		int32& OutSurfaceHeight,
+		float& OutTerrainNoise,
+		float& OutTemperature,
+		float& OutMoisture,
+		FString& OutBiomeName) const;
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Streaming")
+	void RegenerateWorld();
+
+	/** Clear runtime terrain edits and placed cubes, then rebuild the seed-defined base world. */
+	UFUNCTION(BlueprintCallable, Category="Voxel|World")
+	void StartNewGame();
+
+	UFUNCTION(BlueprintPure, Category="Voxel|World")
+	float GetWorldSizeCentimeters() const;
+
+	UFUNCTION(BlueprintPure, Category="Voxel|World")
+	static float GetWorldSizeCentimetersForPreset(ESmoothVoxelWorldSize InWorldSize);
+
+	/** Root levels are part of the size preset so the global voxel spacing is identical across 2K/4K/8K. */
+	static int32 GetRootLodForWorldSizePreset(ESmoothVoxelWorldSize InWorldSize);
+
+	/** Raise the far-world LOD when the requested tree depth cannot fit the leaf budget. */
+	static int32 GetEffectiveMaxLodForBudget(
+		int32 RootLod, int32 RequestedMaxLod, int32 MaxLeafCount);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
+	bool bEnableBlockEditing = true;
+
+	/** Bind BreakBlock/PlaceBlock input actions directly to this Octree world. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
+	bool bBindPlayerInteractionInput = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks")
+	UDataTable* BlockDataTable = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks", meta=(ClampMin="100.0"))
+	float InteractionDistance = 600.0f;
+
+	/** Reserved for future tool-vs-block durability; mining is currently one-hit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Blocks", meta=(ClampMin="0.1"))
+	float TerrainMiningToolDamage = 1.0f;
+
+	// Compatible with the existing player/Blueprint interaction calls.
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	bool BreakBlockByRay();
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	bool PlaceBlockByRay();
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	bool PlaceBlockByRayWithType(EVoxelBlock BlockToPlace);
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	void RemoveBlockAtWorld(const FVector& WorldPosition);
+
+	UFUNCTION(BlueprintCallable, Category="Voxel|Blocks")
+	void SetBlockAtWorld(const FVector& WorldPosition, EVoxelBlock Block);
+
+	void SetBlockDataTable(UDataTable* InDataTable) { BlockDataTable = InDataTable; }
+
+	UFUNCTION(BlueprintPure, Category="Voxel|Streaming")
+	int32 GetActiveChunkCount() const { return ActiveChunks.Num(); }
+
+	/** Called by chunk workers so idle ticks do not scan every active actor. */
+	void NotifyWorkerBuildFinished();
+	void EnqueueChunkBuild(ASmoothVoxelTransvoxelChunk* Chunk);
+	void EnqueueCompletedChunk(ASmoothVoxelTransvoxelChunk* Chunk);
+
+private:
+	void LoadReferenceWorldData();
+	void UpdateWaterSurface();
+	void UpdateRoadNetwork();
+	void TryBindPlayerInteractionInput();
+	void HandleBreakBlockInput();
+	void HandlePlaceBlockInput();
+	void RebuildForCamera(const FVector& CameraLocation);
+	void PrepareDesiredChunks(const FVector& CameraLocation);
+	void LaunchQueuedBuilds(const FVector& CameraLocation);
+	void ApplyOneCompletedBuild(const FVector& CameraLocation);
+	bool AreDesiredChunksReady() const;
+	void RetireUndesiredChunks(int32 MaxChunksToRetire);
+	int32 GetRootLodForWorldSize() const { return bUseReferenceWorldData && ReferenceWorldDataSnapshot.IsValid() ? 8 : GetRootLodForWorldSizePreset(WorldSize); }
+
+	bool TraceInteractionRay(FHitResult& OutHit) const;
+	float GetEffectiveBlockSize() const;
+	FIntVector WorldPositionToBlockCell(const FVector& WorldPosition) const;
+	FVector BlockCellCenter(const FIntVector& Cell) const;
+	FSVoxelGenerationSettings MakeBlockQuerySettings() const;
+	float SampleCurrentDensityAt(const FVector& WorldPosition) const;
+	EVoxelBlock GetBlockTypeForCell(const FIntVector& Cell) const;
+	bool ApplyBlockCellEdit(
+		const FIntVector& Cell,
+		EVoxelBlock Block,
+		int8 EditStateOverride = 0,
+		const FVector* EditCenterOverride = nullptr);
+	void RebuildChunksNearEditedCell(
+		const FIntVector& Cell,
+		bool bGridNode = false,
+		const FVector* CenterOverride = nullptr);
+	void SchedulePostMiningMeshRepair(const FIntVector& Cell);
+
+	FSVoxelGenerationSettings MakeGenerationSettings(
+		const FVector& ChunkOrigin,
+		const FIntVector& ChunkOriginCells,
+		float EffectiveBaseVoxelSize,
+		float VoxelSize,
+		bool bFilterBlockEdits = true) const;
+
+	// Guard same-frame duplicate calls from existing Blueprint input handlers and this actor.
+	uint64 LastBreakInteractionFrame = 0;
+	uint64 LastPlaceInteractionFrame = 0;
+
+	// Bind only once, and retry when the PlayerController appears after BeginPlay.
+	TWeakObjectPtr<APlayerController> InteractionInputController;
+	bool bInteractionActionsBound = false;
+
+	TMap<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*> ActiveChunks;
+	TArray<TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>> QueuedChunkBuilds;
+	TArray<TWeakObjectPtr<ASmoothVoxelTransvoxelChunk>> CompletedChunkBuilds;
+	int32 InFlightMeshBuildCount = 0;
+	TSet<FSVoxelOctreeNode> DesiredNodes;
+	TMap<FSVoxelOctreeNode, uint8> DesiredFaceMasks;
+	TMap<FSVoxelOctreeNode, FVector> DesiredChunkOrigins;
+	TMap<FSVoxelOctreeNode, float> DesiredVoxelSizes;
+	TMap<FSVoxelOctreeNode, bool> DesiredCollisionFlags;
+	TSet<FSVoxelOctreeNode> PreparedDesiredNodes;
+
+	// Block-cell edits: +1 adds smooth Dirt/Sand, negative values preserve
+	// explicit legacy air cuts, and +2 marks a separately rendered hard cube.
+	// Hard cubes never modify the procedural terrain density field.
+	FSVoxelBlockEditMap EditedBlockCells;
+	FSVoxelBlockEditCenterMap EditedBlockCenters;
+	TMap<FIntVector, EVoxelBlock> EditedBlockTypes;
+	TSharedPtr<const FSVoxelBlockEditMap, ESPMode::ThreadSafe> BlockEditSnapshot;
+	TSharedPtr<const FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe> BlockEditCenterSnapshot;
+
+	// A placed cube temporarily replaces the edit state of its target cell.
+	// Restore the prior state when that cube is broken so removing a block
+	// does not itself excavate terrain or refill a previously mined cell.
+	TMap<FIntVector, int8> PrePlacedBlockEditStates;
+	TMap<FIntVector, FVector> PrePlacedBlockEditCenters;
+	TMap<FIntVector, EVoxelBlock> PrePlacedBlockEditTypes;
+
+	// Completed mining cuts are keyed by absolute integer voxel cells. Each hit
+	// removes one axis-aligned cell from the density field, producing stable
+	// floors/walls while looking straight down.
+	FSVoxelMinedNodeSet MinedTerrainNodes;
+	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedNodeSnapshot;
+
+	// Broken generated road cells are tracked independently so mining asphalt
+	// or dirt road never excavates the natural terrain that happens to be below.
+	FSVoxelMinedNodeSet MinedRoadNodes;
+	TSharedPtr<const FSVoxelMinedNodeSet, ESPMode::ThreadSafe> MinedRoadNodeSnapshot;
+
+	UPROPERTY()
+	TMap<FIntVector, ASmoothVoxelPlacedCubeBlock*> PlacedCubeBlocks;
+
+	UPROPERTY(Transient)
+	ASmoothVoxelWaterSurface* WaterSurfaceActor = nullptr;
+
+	UPROPERTY(Transient)
+	ASmoothVoxelRoadNetwork* RoadNetworkActor = nullptr;
+
+	// Immutable source rasters shared by chunk workers and interaction probes.
+	FSVoxelReferenceWorldDataPtr ReferenceWorldDataSnapshot;
+
+	int32 DesiredCellsPerAxis = 32;
+	float DesiredBaseVoxelSize = 97.65625f;
+	bool bForceBuildDesiredSelection = false;
+
+	FVector SelectionCameraLocation = FVector::ZeroVector;
+	FVector LastCompletedCameraLocation = FVector::ZeroVector;
+	float TimeSinceSelection = 0.0f;
+	bool bHasCompletedSelection = false;
+	bool bForceUpdate = true;
+	bool bApplyingSelection = false;
+	bool bSelectionFailed = false;
+};

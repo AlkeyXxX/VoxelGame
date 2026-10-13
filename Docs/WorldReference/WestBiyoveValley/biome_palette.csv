@@ -1,0 +1,6 @@
+r,g,b,a,pixels,percent,visual_label_inference
+255,168,0,255,246221,23.481,"Desert-like region; confirm against game palette"
+255,255,255,255,244099,23.279,"Snow/pale region; confirm against game palette"
+255,228,119,255,227791,21.724,"Burnt-forest/ochre region; confirm against game palette"
+186,0,255,255,195144,18.610,"Wasteland/purple region; confirm against game palette"
+0,64,0,255,135321,12.905,"Forest/dark-green region; confirm against game palette"

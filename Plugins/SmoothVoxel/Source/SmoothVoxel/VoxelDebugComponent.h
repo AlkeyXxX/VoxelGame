@@ -6,7 +6,8 @@
 #include "VoxelTypes.h"
 #include "VoxelDebugComponent.generated.h"
 
-class AVoxelWorld;
+class AVoxelWorld; // Kept only for serialized Blueprint compatibility.
+class ASmoothVoxelOctreeWorld;
 
 USTRUCT(BlueprintType)
 struct SMOOTHVOXEL_API FVoxelDebugData
@@ -150,6 +151,33 @@ struct SMOOTHVOXEL_API FVoxelDebugData
 
     UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
     float InteractionDistance = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    float WorldSizeKilometers = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    int32 MaxLod = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    int32 MaxLeafCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    int32 MaxConcurrentBuilds = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    int32 CollisionMaxLod = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    float CollisionRadius = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    FVector RootWorldCenter = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    int32 PlayerLod = INDEX_NONE;
+
+    UPROPERTY(BlueprintReadOnly, Category="Voxel|Debug")
+    int32 TargetLod = INDEX_NONE;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
@@ -174,11 +202,19 @@ public:
         ELevelTick TickType,
         FActorComponentTickFunction* ThisTickFunction) override;
 
+    /** Legacy serialized reference; intentionally ignored by the Octree debug path. */
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category="Voxel|Debug",
+        meta=(DeprecatedProperty, DeprecationMessage="Use OctreeWorld; this reference is ignored."))
+    AVoxelWorld* VoxelWorld = nullptr;
+
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
         Category="Voxel|Debug")
-    AVoxelWorld* VoxelWorld = nullptr;
+    ASmoothVoxelOctreeWorld* OctreeWorld = nullptr;
 
     UPROPERTY(
         EditAnywhere,
