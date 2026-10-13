@@ -275,9 +275,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World", meta=(DisplayName="World Size"))
 	ESmoothVoxelWorldSize WorldSize = ESmoothVoxelWorldSize::Size8Km;
 
-    /** Use captured West Biyove Valley source rasters instead of procedural macro terrain. */
+    /** Opt-in: use the captured West Biyove Valley rasters as a fixed reference map. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
-    bool bUseReferenceWorldData = true;
+    bool bUseReferenceWorldData = false;
+
+    /** Prefer seed-driven terrain even when an older Blueprint saved the reference flag as true. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World Generation")
+    bool bForceProceduralGeneration = true;
+
+    /** Choose a fresh seed at launch and each time StartNewGame is requested. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World Generation")
+    bool bRandomizeSeedForNewWorld = true;
 
     /** Project-relative 8192x8192 little-endian uint16 DTM (1/256 metre units). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
@@ -320,13 +328,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
 	float DetailAmplitude = 60.0f;
 
-	/** Target flatland share before the reduction multiplier is applied. */
+	/** Flatland share among non-mountain terrain; 0.5 plus 20% mountains targets a 40/40/20 mix. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.2", ClampMax="0.9"))
-	float FlatlandCoverage = 0.2f;
+	float FlatlandCoverage = 0.5f;
 
-	/** Multiplies flatland coverage; 0.6 means 40% less flatland and more varied relief. */
+	/** Multiplies flatland coverage; leave at 1.0 to preserve the intended terrain proportions. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.1", ClampMax="1.0", DisplayName="Flatland Coverage Multiplier"))
-	float FlatlandCoverageMultiplier = 0.6f;
+	float FlatlandCoverageMultiplier = 1.0f;
 
 	/** Broad, gentle elevation variation over flatland regions, in centimetres. When fixed-level rivers are enabled, the effective value is capped to keep lowland terrain from falling far below the river plane. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="3000.0", Units="cm", DisplayName="Gentle Plains Relief Height"))
@@ -348,13 +356,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="100000.0", Units="cm"))
 	float HillHeight = 4000.0f;
 
-	/** Share of desert occupied by hills; keep low for mostly flat desert terrain. */
+	/** Share of desert assigned to hills; amplitudes remain lower in desert regions. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="0.3"))
-	float DesertHillCoverage = 0.18f;
+	float DesertHillCoverage = 0.5f;
 
-	/** Higher threshold means mountain climate regions are rarer. */
+	/** Climate threshold used to keep lakes out of cold mountain-climate cells. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.3", ClampMax="0.95"))
 	float MountainBiomeThreshold = 0.80f;
+
+	/** Target share of the whole map with mountainous landforms, independent of biome placement. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.05", ClampMax="0.45", DisplayName="Mountain Coverage"))
+	float MountainCoverage = 0.20f;
 
 	/** Large-scale mountain relief, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="200000.0", Units="cm"))
