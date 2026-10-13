@@ -701,7 +701,6 @@ void ASmoothVoxelTransvoxelChunk::CompleteBuild(
 	// Compact every material section to only the vertices it references. Passing
 	// the whole terrain vertex buffer to tiny road sections would duplicate
 	// thousands of unused vertices per chunk and waste memory.
-	const TArray<FVector2D> EmptyUV1;
 	const TArray<FVector2D> EmptyUV2;
 	const TArray<FVector2D> EmptyUV3;
 	const auto CreateCompactSection = [&](
