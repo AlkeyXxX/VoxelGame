@@ -1021,6 +1021,10 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
     float MountainBlend = SmoothStep(MountainStart, MountainStart + 0.20f, MountainSignal01);
     (void)WinterBlend;
 
+    // Keep the landform classes distinct: mountains replace ordinary hills
+    // rather than stacking full hill relief on top of the mountain envelope.
+    HillBlend *= (1.0f - MountainBlend);
+
     const double HillNoise = FBM2D(
         X * static_cast<double>(S.HillScale),
         Y * static_cast<double>(S.HillScale),
