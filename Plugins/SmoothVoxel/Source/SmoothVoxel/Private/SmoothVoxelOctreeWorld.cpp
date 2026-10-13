@@ -3338,7 +3338,9 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 					if (BestScore < TNumericLimits<float>::Max())
 					{
 						Cell = BestRoadCell + FIntVector(0, 0, 1);
-						PlacementSurfaceZ = static_cast<float>(BestDeckHeight);
+						// Snap the block to the actual ray-hit surface, which already
+						// includes the road deck's continuous height interpolation.
+						PlacementSurfaceZ = Hit.ImpactPoint.Z;
 					}
 				}
 			}
