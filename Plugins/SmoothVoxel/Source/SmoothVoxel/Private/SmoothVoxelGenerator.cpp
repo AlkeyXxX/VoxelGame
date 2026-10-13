@@ -751,6 +751,21 @@ FSVoxelReferenceWorldDataPtr FSVoxelGenerator::LoadReferenceWorldData(
         MakeShared<FSVoxelReferenceWorldData, ESPMode::ThreadSafe>();
     Data->HeightBytesLE = MoveTemp(HeightBytes);
 
+    // Scan the uint16 height field once at load time. Chunk selection can then
+    // cull entirely empty vertical regions using the real DTM range rather than
+    // the unrelated BaseHeight/HillHeight values from procedural mode.
+    uint16 MinHeightSample = 65535;
+    uint16 MaxHeightSample = 0;
+    for (int32 ByteIndex = 0; ByteIndex < Data->HeightBytesLE.Num(); ByteIndex += 2)
+    {
+        const uint16 Sample = static_cast<uint16>(Data->HeightBytesLE[ByteIndex]) |
+            (static_cast<uint16>(Data->HeightBytesLE[ByteIndex + 1]) << 8);
+        MinHeightSample = FMath::Min(MinHeightSample, Sample);
+        MaxHeightSample = FMath::Max(MaxHeightSample, Sample);
+    }
+    Data->MinHeightCentimeters = static_cast<double>(MinHeightSample) * (100.0 / 256.0);
+    Data->MaxHeightCentimeters = static_cast<double>(MaxHeightSample) * (100.0 / 256.0);
+
     TArray<uint8> BiomeBytes;
     if (FFileHelper::LoadFileToArray(BiomeBytes, *BiomeMaskPath) &&
         BiomeBytes.Num() == 1024 * 1024)
