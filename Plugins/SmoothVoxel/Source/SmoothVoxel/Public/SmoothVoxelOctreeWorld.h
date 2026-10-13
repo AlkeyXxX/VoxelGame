@@ -506,7 +506,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="250.0", ClampMax="5000.0", Units="cm"))
 	float RoadSampleSpacing = 500.0f;
 
-	/** Optional offset from the sampled terrain height, in centimetres. Zero embeds the full road block flush with the surface. */
+	/** Vertical road offset in centimetres. The default deck is recessed one base voxel below terrain; a positive offset raises it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Roads", meta=(ClampMin="0.0", ClampMax="100.0", Units="cm"))
 	float RoadSurfaceOffset = 0.0f;
 
