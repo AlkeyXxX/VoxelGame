@@ -131,7 +131,11 @@ namespace
             Settings.MinedNodes.IsValid() && Settings.MinedNodes->Num() > 0;
         const bool bHasRoadBlocks =
             Settings.RoadBlocks.IsValid() && Settings.RoadBlocks->Num() > 0;
-        if (!bHasBlockEdits && !bHasMinedNodes && !bHasRoadBlocks)
+        const bool bHasRoadEmbankmentFill =
+            Settings.RoadEmbankmentFillHeights.IsValid() &&
+            Settings.RoadEmbankmentFillHeights->Num() > 0;
+        if (!bHasBlockEdits && !bHasMinedNodes && !bHasRoadBlocks &&
+            !bHasRoadEmbankmentFill)
         {
             return Density;
         }
@@ -140,7 +144,7 @@ namespace
         const int32 BaseX = static_cast<int32>(std::floor(X / Step));
         const int32 BaseY = static_cast<int32>(std::floor(Y / Step));
         const int32 BaseZ = static_cast<int32>(std::floor(Z / Step));
-        bool bMayHaveRoadBlock = bHasRoadBlocks;
+        bool bMayHaveRoadBlock = bHasRoadBlocks || bHasRoadEmbankmentFill;
         if (bMayHaveRoadBlock && Settings.RoadSampleBins.IsValid())
         {
             constexpr int32 RoadSampleBinSize = 8;
@@ -167,7 +171,7 @@ namespace
         // but their deck is a continuous height field. Interpolating stamped
         // elevations before evaluating the SDF removes voxel-height stair steps
         // without adding per-block actors or independent collision objects.
-        if (bMayHaveRoadBlock)
+        if (bMayHaveRoadBlock && Settings.RoadBlocks.IsValid())
         {
             const double RoadHalfExtent = Step * 0.5 +
                 FMath::Max(0.05, Step * 0.005);
@@ -315,6 +319,41 @@ namespace
                         }
                     }
                 }
+            }
+        }
+
+        // Restore the original terrain surface upward only where a shoulder fill
+        // column exists. Interpolate neighbouring fill tops so the terrain mesh
+        // gets a continuous ramp instead of a standalone strip or voxel staircase.
+        if (bMayHaveRoadBlock && bHasRoadEmbankmentFill)
+        {
+            const double NaturalSurfaceHeight = SampleSurfaceHeight(X, Y, Settings);
+            const double GridX = X / Step - 0.5;
+            const double GridY = Y / Step - 0.5;
+            const int32 X0 = FMath::FloorToInt(GridX);
+            const int32 Y0 = FMath::FloorToInt(GridY);
+            const double TX = GridX - static_cast<double>(X0);
+            const double TY = GridY - static_cast<double>(Y0);
+            const auto GetFillTop = [&](int32 CellX, int32 CellY) -> double
+            {
+                if (const double* FillTop =
+                    Settings.RoadEmbankmentFillHeights->Find(FIntPoint(CellX, CellY)))
+                {
+                    return *FillTop;
+                }
+                return NaturalSurfaceHeight;
+            };
+            const double H00 = GetFillTop(X0,     Y0);
+            const double H10 = GetFillTop(X0 + 1, Y0);
+            const double H01 = GetFillTop(X0,     Y0 + 1);
+            const double H11 = GetFillTop(X0 + 1, Y0 + 1);
+            const double Low = FMath::Lerp(H00, H10, TX);
+            const double High = FMath::Lerp(H01, H11, TX);
+            const double SmoothFillTop = FMath::Lerp(Low, High, TY);
+            if (SmoothFillTop > NaturalSurfaceHeight + Step * 0.005)
+            {
+                Density = static_cast<float>(FMath::Max(
+                    static_cast<double>(Density), SmoothFillTop - Z));
             }
         }
 
