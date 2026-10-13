@@ -1009,7 +1009,7 @@ double FSVoxelGenerator::SampleUnflattenedSurfaceHeight(
         1.0f - DesertHillCoverage - 0.025f,
         1.0f - DesertHillCoverage + 0.025f,
         Region01);
-    const float HillBlend = FMath::Lerp(
+    float HillBlend = FMath::Lerp(
         NonDesertHillBlend, DesertHillBlend, DesertBlend);
 
     // Landforms are independent of climate/biome layout: every biome can
