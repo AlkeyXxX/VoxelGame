@@ -925,7 +925,7 @@ float FSVoxelGenerator::SampleFlatlandInfluence(
         0.05f, 0.9f);
     const float NonDesertHillCoverage = FMath::Clamp(
         1.0f - EffectiveFlatlandCoverage, 0.0f, 0.95f);
-    const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.3f);
+    const float DesertHillCoverage = FMath::Clamp(S.DesertHillCoverage, 0.0f, 0.9f);
     // Blend two finished masks instead of sliding one threshold across the noise
     // field. Sliding the threshold can make a whole hillside vanish in a narrow
     // strip at the biome border, even when the biome weights are continuous.
