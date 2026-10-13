@@ -2781,13 +2781,14 @@ bool ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 		BlockEditCenterSnapshot =
 			MakeShared<FSVoxelBlockEditCenterMap, ESPMode::ThreadSafe>(EditedBlockCenters);
 	}
-	RebuildChunksNearEditedCell(Cell);
+	RebuildChunksNearEditedCell(Cell, false, EditCenterOverride);
 	return true;
 }
 
 void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(
 	const FIntVector& Cell,
-	bool bGridNode)
+	bool bGridNode,
+	const FVector* CenterOverride)
 {
 	check(IsInGameThread());
 	if (ActiveChunks.Num() == 0 || DesiredNodes.Num() == 0)
@@ -2796,12 +2797,14 @@ void ASmoothVoxelOctreeWorld::RebuildChunksNearEditedCell(
 	}
 
 	const float Step = GetEffectiveBlockSize();
-	const FVector Center = bGridNode
-		? FVector(
-			static_cast<float>(Cell.X) * Step,
-			static_cast<float>(Cell.Y) * Step,
-			static_cast<float>(Cell.Z) * Step)
-		: BlockCellCenter(Cell);
+	const FVector Center = CenterOverride
+		? *CenterOverride
+		: (bGridNode
+			? FVector(
+				static_cast<float>(Cell.X) * Step,
+				static_cast<float>(Cell.Y) * Step,
+				static_cast<float>(Cell.Z) * Step)
+			: BlockCellCenter(Cell));
 	const float EditRadius = Step * (bGridNode ? 1.1f : 0.55f);
 	const FVector EditExtent(EditRadius);
 	const FBox EditBounds(Center - EditExtent, Center + EditExtent);
@@ -2954,7 +2957,7 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		// grid-aligned. A shallow probe can therefore land in the terrain cell
 		// below a road and incorrectly mine that cell first. Resolve an actual
 		// road hit from its footprint/deck before classifying the underlying SDF.
-		bool bHitRoadBlock = false;
+		bool bHitRoadBlock = HitBlock == EVoxelBlock::Asphalt || HitBlock == EVoxelBlock::DirtRoad;
 		if (IsValid(RoadNetworkActor))
 		{
 			const auto RoadBlockSnapshot = RoadNetworkActor->GetRoadBlockSnapshot();
@@ -3057,6 +3060,11 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 				static_cast<double>(Hit.ImpactPoint.Z) - static_cast<double>(Step) * 0.5);
 			Cell = WorldPositionToBlockCell(SurfaceAlignedBlockCenter);
 			HitBlock = GetBlockTypeForCell(Cell);
+			if (HitBlock == EVoxelBlock::Asphalt || HitBlock == EVoxelBlock::DirtRoad)
+			{
+				bHitRoadBlock = true;
+				bMineSurfaceAlignedTerrain = false;
+			}
 		}
 
 		if (HitBlock == EVoxelBlock::Air)
