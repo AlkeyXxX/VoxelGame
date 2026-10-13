@@ -27,6 +27,9 @@ struct FSVoxelReferenceWorldData
     int32 HeightWidth = 8192;
     int32 HeightHeight = 8192;
     TArray<uint8> HeightBytesLE;
+    // Exact source DTM envelope in Unreal centimetres; used to cull chunks safely.
+    double MinHeightCentimeters = 0.0;
+    double MaxHeightCentimeters = 0.0;
 
     int32 BiomeWidth = 1024;
     int32 BiomeHeight = 1024;
