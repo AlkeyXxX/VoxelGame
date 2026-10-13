@@ -1925,13 +1925,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const double CenterGround = GroundHeights[SampleIndex];
             const double TerrainClearance = SafeSurfaceOffset;
 
-            // Keep the carriageway level side-to-side so vehicles do not roll
-            // with the hillside. The new earthen bevels close the small clearance
-            // gap while wider fills grow naturally on the low side of a slope.
-            // Keep the deck at its analytical height instead of quantizing it to
-            // whole voxel planes. Density sampling below preserves this continuous
-            // height while the integer cell key remains available for mining.
-            const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
+            // Recess the road deck one full base block into the sampled terrain.
+            // Its top remains a continuous height field (no stair-stepped Z planes),
+            // while the logical road cell and density SDF both describe a full block
+            // volume below that recessed deck. Lifted bridge spans retain their lift.
+            const double RoadDeckZ = CenterGround + Lift + TerrainClearance - RoadBlockSize;
             const double LeftZ = RoadDeckZ;
             const double RightZ = RoadDeckZ;
 
