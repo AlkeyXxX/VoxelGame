@@ -274,5 +274,51 @@
   },
   "archiveMemberCount": 18,
   "extractedTotalBytes": 282450923,
-  "reproductionRule": "Use source DTM samples as a heightfield; do not expect seed-only procedural generation to be identical."
+  "reproductionRule": "Use source DTM samples as a heightfield; do not expect seed-only procedural generation to be identical.",
+  "roadOverlay": {
+    "source": "splat3.png",
+    "sha256": "e41feccf2d40ce251ce8ec65edf80c1b26c7718c9c04198dd1485f711a801abe",
+    "dimensions": [
+      8192,
+      8192
+    ],
+    "redPixels": 959472,
+    "greenPixels": 480670,
+    "transparentPixels": 65668722,
+    "encoding": "roadmask_2bit.raw stores four row-major pixel codes per byte; least-significant two-bit field is first",
+    "codes": {
+      "0": "transparent/no road",
+      "1": "opaque red; classified as asphalt",
+      "2": "opaque green; classified as dirt road",
+      "3": "unused"
+    },
+    "note": "Color-to-road type is inferred from the supplied road-overlay screenshot and should be visually checked in game."
+  },
+  "runtimeIntegration": {
+    "enabledByDefaultInBranch": true,
+    "defaultWorldSizeCentimeters": 819200,
+    "baseVoxelStepCentimeters": 100,
+    "paths": {
+      "heightmap": "Content/WorldReference/WestBiyoveValley/dtm.raw",
+      "biomes": "Content/WorldReference/WestBiyoveValley/biomes.raw",
+      "roadMask": "Content/WorldReference/WestBiyoveValley/roadmask_2bit.raw"
+    },
+    "fallbackPaths": [
+      "Docs/WorldReference/WestBiyoveValley/",
+      "Saved/WorldReference/WestBiyoveValley/"
+    ],
+    "requiredOneTimeBinaryStep": "Extract West_Biyove_Valley_Runtime_Assets.zip at the project root; commit RAW data with Git LFS so the repository clone contains the actual samples.",
+    "implemented": [
+      "DTM bilinear height sampling",
+      "source biome lookup per terrain triangle",
+      "road surface sections from splat3 mask",
+      "source road logical mining/placement query",
+      "source raster sharing across chunk workers"
+    ],
+    "notYetOneToOne": [
+      "prefab model meshes and exact building geometry",
+      "source water-body geometry/materials",
+      "UE4.27 runtime/build test"
+    ]
+  }
 }
