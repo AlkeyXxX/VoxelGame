@@ -1432,6 +1432,14 @@ void ASmoothVoxelOctreeWorld::BeginPlay()
 		{
 			FlatlandCoverage = 0.5f;
 		}
+		if (FMath::IsNearlyEqual(BaseHeight, 900.0f))
+		{
+			BaseHeight = 3500.0f;
+		}
+		if (FMath::IsNearlyEqual(MountainHeight, 12000.0f))
+		{
+			MountainHeight = 16000.0f;
+		}
 		if (FMath::IsNearlyEqual(FlatlandCoverageMultiplier, 0.6f))
 		{
 			FlatlandCoverageMultiplier = 1.0f;
