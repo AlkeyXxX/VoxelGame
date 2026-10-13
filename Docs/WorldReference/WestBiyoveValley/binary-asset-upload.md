@@ -1,35 +1,40 @@
-# One-time retention of the source-world data in GitHub
+# One-time runtime-data and Git LFS setup
 
-The full-resolution DTM must be present in the repo if future work is to reproduce this exact world without needing the original archive or companion download again. The connected GitHub editor used for this task can commit text but cannot stream local binary artifacts into Git LFS. The companion download therefore needs one local checkout commit.
+The reference generator now reads three external RAW rasters. Their actual bytes must be present on disk; text documentation alone is insufficient for identical terrain.
 
-## Files to copy from the companion reference ZIP
+## Fastest local setup
 
-Extract the downloadable archive and copy these items into `Docs/WorldReference/WestBiyoveValley/`:
+Download `West_Biyove_Valley_Runtime_Assets.zip` from the ChatGPT response and extract it at the local repository/project root. It contains:
 
-- `heightmap_u16_lossless.png` and `heightmap_processed_u16_lossless.png` — each is an exact 8192×8192 uint16-preserving conversion of its matching RAW file. Both were checked sample-for-sample.
-- `source_layers/` — exact original `splat3*`, `splat4*`, and `radiation.png`.
-- `prefab_placements.csv` and `prefab_name_counts.csv` — all 4175 placement records/rotations and all 1107 unique names/counts.
-- `core-source-bundle.zlib.b64` and `decode_core_bundle.py` — restores exact `map_info.xml`, `prefabs.xml`, `spawnpoints.xml`, `checksums.txt`, `main.ttw`, `biomes.png`, and `radiation.png`.
-- `original_screenshots/`, `biome_palette.csv`, and the visual previews if you want the complete research artefact retained together.
-- `analysis_artifact_manifest.csv` — sizes and SHA-256 checksums for the exported/derived artifacts.
+- `Docs/WorldReference/WestBiyoveValley/dtm.raw` — the original 128 MiB DTM.
+- `Docs/WorldReference/WestBiyoveValley/biomes.raw` — 1 MiB exact categorical biome IDs derived from the source `biomes.png`.
+- `Docs/WorldReference/WestBiyoveValley/roadmask_2bit.raw` — 16 MiB packed red/green road classes derived from exact `splat3.png` pixels.
 
-The reference package preserves all source archive members: the two raw height files are represented by verified lossless uint16 PNGs (both sample arrays are identical), the original splat layers and screenshots are retained as PNGs, and small original files can be restored from the source bundle.
+The code first looks for the configured `Content/WorldReference/WestBiyoveValley/` paths, then falls back to these `Docs/` paths and `Saved/WorldReference/WestBiyoveValley/`. After extraction, use the output log to check that the DTM and both masks report as loaded. If you see the warning “source DTM unavailable”, the fallback procedural terrain is active instead.
 
-## Git LFS upload for the two 16-bit height maps
+## Make the repository self-contained (recommended)
 
-From the extracted package, copy the two large height PNGs into the folder above, then from a local checkout on branch `feature/transvoxel-octree-terrain`:
+A root `.gitattributes` is configured to track `*.raw` in these two paths using Git LFS:
+
+- `Docs/WorldReference/WestBiyoveValley/`
+- `Content/WorldReference/WestBiyoveValley/`
+
+From a local checkout on branch `feature/transvoxel-octree-terrain`:
 
 ```powershell
 git lfs install
-git lfs track "Docs/WorldReference/WestBiyoveValley/heightmap*_u16_lossless.png"
-git add .gitattributes
-git add Docs/WorldReference/WestBiyoveValley
-git commit -m "Store West Biyove Valley source data and heightfields"
+# Extract the runtime ZIP at the repository root.
+git add Docs/WorldReference/WestBiyoveValley/*.raw
+git commit -m "Store West Biyove Valley source terrain rasters"
 git push origin feature/transvoxel-octree-terrain
 ```
 
-The height maps are about 60.7 MB and 66.8 MB. The original `dtm.raw` and `dtm_processed.raw` files are each 128 MiB, above GitHub's normal 100 MiB file limit. Git LFS should contain the **real uploaded object**, not just a pointer. If Git LFS is unavailable, use another external release/object-storage method and record its immutable URL and checksum.
+The DTM exceeds GitHub's normal 100 MiB per-file limit; the .gitattributes rules route it through LFS. The actual large-file object must be pushed, not just a pointer. If Git LFS reports quota/permission errors, keep the runtime ZIP archived externally and record its SHA-256.
 
-## Why this one-time step is necessary
+For a packaged build, the project packaging settings stage `Content/WorldReference/WestBiyoveValley` as UFS. For best portability, copy the three files into that Content directory and commit them via LFS as well. Test the packaged build separately; the source data is not a UE-imported texture asset and should not be treated as a normal uasset.
 
-The written analysis and checksums are already in this GitHub folder, but the large binary map assets and complete placement table are delivered in the companion ZIP rather than this branch. Until those files are copied and pushed, this folder alone describes the world but does not contain enough data to sample every original terrain height in a future session.
+## Re-generating the masks
+
+`prepare_runtime_assets.py` converts the source `biomes.png` and `splat3.png` into the exact two raw mask files. It requires Python 3, Pillow, and NumPy. The DTM itself is copied byte-for-byte from the original archive, not re-saved from the PNG preview.
+
+The code connection in this session can create commits and text files, but cannot stream local binary assets into Git LFS. The runtime ZIP is provided separately to bridge this one-time binary step.
