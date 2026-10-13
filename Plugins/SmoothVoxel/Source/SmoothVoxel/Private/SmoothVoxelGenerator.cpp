@@ -1932,7 +1932,7 @@ void FSVoxelGenerator::GetSurfaceMaterialBlendData(
     const bool bMayQueryRoads = bHasReferenceRoadMask ||
         (bHasRoadMap && (!S.RoadSampleBins.IsValid() || S.RoadSampleBins->Contains(SampleBin)));
 
-    const auto GetRoad = [&S, Step, Z, bMayQueryRoads](
+    const auto GetRoad = [&S, Step, Z, bMayQueryRoads, bHasReferenceRoadMask](
         int32 CX, int32 CY, EVoxelBlock& Type) -> bool
     {
         Type = EVoxelBlock::Air;
