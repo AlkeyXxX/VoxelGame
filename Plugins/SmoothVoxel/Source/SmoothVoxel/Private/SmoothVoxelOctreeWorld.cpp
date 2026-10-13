@@ -2584,6 +2584,24 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 	}
 
 	const FVector HitPoint = RayStart + Direction * HitDistance;
+
+	// Ray marching knows where density crosses the surface, but the ray direction
+	// is not the terrain normal. Estimate the true outward normal from the density
+	// gradient so top/side placement and mining work independently of view angle.
+	const float NormalProbeDistance = FMath::Max(1.0f, GetEffectiveBlockSize() * 0.02f);
+	const FVector NormalProbeX(NormalProbeDistance, 0.0f, 0.0f);
+	const FVector NormalProbeY(0.0f, NormalProbeDistance, 0.0f);
+	const FVector NormalProbeZ(0.0f, 0.0f, NormalProbeDistance);
+	const FVector DensityGradient(
+		SampleRayDensity(HitPoint + NormalProbeX) - SampleRayDensity(HitPoint - NormalProbeX),
+		SampleRayDensity(HitPoint + NormalProbeY) - SampleRayDensity(HitPoint - NormalProbeY),
+		SampleRayDensity(HitPoint + NormalProbeZ) - SampleRayDensity(HitPoint - NormalProbeZ));
+	if (DensityGradient.SizeSquared() > KINDA_SMALL_NUMBER)
+	{
+		// Positive density is solid; its negative gradient points outward into air.
+		HitNormal = -DensityGradient.GetSafeNormal();
+	}
+
 	ASmoothVoxelTransvoxelChunk* HitChunk = nullptr;
 	float BestChunkDistanceSquared = TNumericLimits<float>::Max();
 	for (const TPair<FSVoxelOctreeNode, ASmoothVoxelTransvoxelChunk*>& Pair : ActiveChunks)
@@ -2614,8 +2632,8 @@ bool ASmoothVoxelOctreeWorld::TraceInteractionRay(FHitResult& OutHit) const
 		return false;
 	}
 
-	// Fallback hit results are oriented toward the air from which the ray came.
-	// BreakBlockByRay then validates the inside/outside side against density.
+	// The density-gradient normal points toward air and is also used by placement
+	// to distinguish a true top surface from a sloped side face.
 	OutHit = FHitResult(ForceInit);
 	OutHit.bBlockingHit = true;
 	OutHit.Distance = HitDistance;
