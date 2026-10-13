@@ -3005,15 +3005,19 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 			}
 		}
 
-		if (!bFoundSolidProbe)
+		// Road top/side unions can have a very shallow or non-axis-aligned
+		// density gradient. Defer a failed generic probe until after checking the
+		// road map; road hits receive their own guaranteed interior probe below.
+		if (bFoundSolidProbe)
 		{
-			// No solid sample behind this exact crossing means the density data
-			// changed between trace and interaction. Do not mine an unrelated cell.
-			return false;
+			Cell = WorldPositionToBlockCell(InsidePoint);
+			HitBlock = GetBlockTypeForCell(Cell);
 		}
-
-		Cell = WorldPositionToBlockCell(InsidePoint);
-		HitBlock = GetBlockTypeForCell(Cell);
+		else
+		{
+			Cell = WorldPositionToBlockCell(Hit.ImpactPoint);
+			HitBlock = GetBlockTypeForCell(Cell);
+		}
 
 		// Road decks are continuous in Z while their logical block cells remain
 		// grid-aligned. A shallow probe can therefore land in the terrain cell
@@ -3186,6 +3190,13 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 						InteriorDeckHeight - static_cast<double>(Step) * 0.5);
 				}
 			}
+		}
+
+		// A missed inward probe is acceptable only when the road-map lookup
+		// positively identified a road and assigned an interior point of its slab.
+		if (!bFoundSolidProbe && !bHitRoadBlock)
+		{
+			return false;
 		}
 
 		// On an upward-facing natural surface, mine one full block-height volume
