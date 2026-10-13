@@ -2973,8 +2973,6 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	FIntVector Cell = FIntVector::ZeroValue;
 	EVoxelBlock HitBlock = EVoxelBlock::Air;
 	FVector InsidePoint = Hit.ImpactPoint;
-	bool bMineSurfaceAlignedTerrain = false;
-	FVector SurfaceAlignedBlockCenter = FVector::ZeroVector;
 	ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor());
 	if (IsValid(HitCube) && HitCube->GetOwner() == this)
 	{
@@ -3203,34 +3201,15 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 			return false;
 		}
 
-		// On an upward-facing natural surface, mine one full block-height volume
-		// measured down from the visible surface, rather than a world-grid cell
-		// that might contain only a few centimetres of the smoothed surface.
-		// The edit centre is still keyed by its grid cell so successive hits
-		// descend one block at a time and retain the existing block drop behaviour.
-		bMineSurfaceAlignedTerrain = !bHitRoadBlock && Normal.Z >= 0.55f;
-		if (bMineSurfaceAlignedTerrain)
-		{
-			const int32 SurfaceCellX = FMath::FloorToInt(Hit.ImpactPoint.X / Step);
-			const int32 SurfaceCellY = FMath::FloorToInt(Hit.ImpactPoint.Y / Step);
-			SurfaceAlignedBlockCenter = FVector(
-				(static_cast<double>(SurfaceCellX) + 0.5) * Step,
-				(static_cast<double>(SurfaceCellY) + 0.5) * Step,
-				static_cast<double>(Hit.ImpactPoint.Z) - static_cast<double>(Step) * 0.5);
-			Cell = WorldPositionToBlockCell(SurfaceAlignedBlockCenter);
-			HitBlock = GetBlockTypeForCell(Cell);
-			if (HitBlock == EVoxelBlock::Asphalt || HitBlock == EVoxelBlock::DirtRoad)
-			{
-				bHitRoadBlock = true;
-				bMineSurfaceAlignedTerrain = false;
-			}
-		}
-
+		// Keep the target cell chosen by the inward density probe. It is the
+		// integer voxel cell containing the solid immediately behind the hit.
+		// Do not move its centre to the fractional terrain surface height: that
+		// made the first cut thinner/offset while all later cuts stayed grid-aligned.
 		if (HitBlock == EVoxelBlock::Air)
 		{
 			const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
 			const FVector& ClassificationPoint =
-				bMineSurfaceAlignedTerrain ? Hit.ImpactPoint : InsidePoint;
+				Normal.Z >= 0.55f ? Hit.ImpactPoint : InsidePoint;
 			const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
 				static_cast<double>(ClassificationPoint.X),
 				static_cast<double>(ClassificationPoint.Y),
@@ -3301,26 +3280,14 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		return true;
 	}
 
-	if (bMineSurfaceAlignedTerrain)
-	{
-		// Store a full one-block-high cut whose top aligns to the rendered
-		// surface. The grid key is the box centre's cell, so the next hit targets
-		// the next layer down instead of leaving a thin cap for a second click.
-		if (!ApplyBlockCellEdit(
-			MinedCell, EVoxelBlock::Air, int8(-5), &SurfaceAlignedBlockCenter))
-		{
-			return false;
-		}
-		SchedulePostMiningMeshRepair(MinedCell);
-	}
-	else
-	{
-		MinedTerrainNodes.Add(MinedCell);
-		MinedNodeSnapshot =
-			MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
-		RebuildChunksNearEditedCell(MinedCell, false);
-		SchedulePostMiningMeshRepair(MinedCell);
-	}
+	// All natural-terrain hits, including the first exposed surface layer,
+	// use the exact same integer-cell cut. This keeps every successive mining
+	// action aligned to the absolute voxel grid instead of surface-dependent Z.
+	MinedTerrainNodes.Add(MinedCell);
+	MinedNodeSnapshot =
+		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
+	RebuildChunksNearEditedCell(MinedCell, false);
+	SchedulePostMiningMeshRepair(MinedCell);
 
 	if (Inventory && DropBlock != EVoxelBlock::Air)
 	{
