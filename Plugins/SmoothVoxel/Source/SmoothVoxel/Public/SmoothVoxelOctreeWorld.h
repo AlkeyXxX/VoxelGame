@@ -46,6 +46,13 @@ public:
 	void SetRoadMaterials(
 		UMaterialInterface* InDirtRoadMaterial,
 		UMaterialInterface* InAsphaltRoadMaterial);
+    void SetReferenceBiomeMaterials(
+        UMaterialInterface* InPlains,
+        UMaterialInterface* InForest,
+        UMaterialInterface* InDesert,
+        UMaterialInterface* InSnow,
+        UMaterialInterface* InBurntForest,
+        UMaterialInterface* InWasteland);
 
 	void QueueBuild(
 		const FSVoxelOctreeNode& Node,
@@ -97,6 +104,18 @@ private:
 	UMaterialInterface* DirtRoadSectionMaterial = nullptr;
 	UPROPERTY()
 	UMaterialInterface* AsphaltRoadSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferencePlainsSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceForestSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceDesertSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceSnowSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceBurntForestSectionMaterial = nullptr;
+    UPROPERTY()
+    UMaterialInterface* ReferenceWastelandSectionMaterial = nullptr;
 	int32 PendingCompletedRevision = -1;
 	bool bPendingCompletedCollision = false;
 	bool bHasPendingBuildApply = false;
