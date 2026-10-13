@@ -3435,9 +3435,15 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		if (bTopSurfacePlacement)
 		{
 			const FIntVector SurfaceCell = WorldPositionToBlockCell(Hit.ImpactPoint);
-			Cell = FIntVector(SurfaceCell.X, SurfaceCell.Y, SurfaceCell.Z + 1);
-			// Placement uses the containing surface cell; the actor transform is
-			// snapped to that cell's grid top below, never to fractional hit Z.
+			// Place at the first grid plane at or above the surface. A tiny
+			// epsilon keeps an exact grid-plane hit on that plane, but any real
+			// positive height above it advances to the next whole block layer.
+			const float SurfaceGridEpsilon = FMath::Max(0.001f, Step * 0.0001f);
+			Cell = FIntVector(
+				SurfaceCell.X,
+				SurfaceCell.Y,
+				FMath::CeilToInt((Hit.ImpactPoint.Z - SurfaceGridEpsilon) / Step));
+			// The actor transform below is snapped to this cell, never to fractional hit Z.
 
 			// Roads have a continuous deck height too. If this hit is on a road,
 			// attach the block to the deck and reserve the logical cell immediately
