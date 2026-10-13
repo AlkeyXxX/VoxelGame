@@ -357,7 +357,7 @@ public:
 	float HillHeight = 4000.0f;
 
 	/** Share of desert assigned to hills; amplitudes remain lower in desert regions. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="0.3"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="0.9"))
 	float DesertHillCoverage = 0.5f;
 
 	/** Climate threshold used to keep lakes out of cold mountain-climate cells. */
@@ -441,7 +441,7 @@ public:
 
 	/** Absolute world-space Z shared by every river surface; separate from SeaLevel. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water", meta=(Units="cm"))
-	float RiverWaterLevel = 850.0f;
+	float RiverWaterLevel = 2500.0f;
 
 	/** Generate rare small lakes in plains/forest/snow, never in desert or mountains. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Water")
