@@ -2987,10 +2987,72 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 				const FIntVector SearchOrigin = WorldPositionToBlockCell(
 					Hit.ImpactPoint - Normal * FMath::Max(0.05f, Step * 0.001f));
 				const float SurfaceTolerance = FMath::Max(1.0f, Step * 0.01f);
-				const bool bTopFacing = FMath::Abs(Normal.Z) >= 0.55f;
+				// Only an outward/upward-facing normal represents the road top. Using
+				// absolute Z also treats an underside hit as a top hit.
+				const bool bTopFacing = Normal.Z >= 0.55f;
+
+				// Chunk density uses a bilinearly smoothed road deck, while the road map
+				// stores stamped sample heights. Use the same interpolation here, or
+				// sloped road tops can be misidentified as a thin natural-terrain layer.
+				const auto FindRoadHeightAtColumn = [&](int32 CellX, int32 CellY,
+					double ReferenceHeight, double& OutHeight) -> bool
+				{
+					if (!RoadHeightSnapshot.IsValid())
+					{
+						return false;
+					}
+					const int32 ReferenceCellZ = FMath::FloorToInt(ReferenceHeight / Step);
+					double BestDifference = TNumericLimits<double>::Max();
+					bool bFound = false;
+					for (int32 HeightDZ = -2; HeightDZ <= 1; ++HeightDZ)
+					{
+						const FIntVector HeightCell(CellX, CellY, ReferenceCellZ + HeightDZ);
+						if (!RoadBlockSnapshot->Contains(HeightCell))
+						{
+							continue;
+						}
+						const double* Height = RoadHeightSnapshot->Find(HeightCell);
+						if (!Height)
+						{
+							continue;
+						}
+						const double Difference = FMath::Abs(*Height - ReferenceHeight);
+						if (Difference < BestDifference)
+						{
+							BestDifference = Difference;
+							OutHeight = *Height;
+							bFound = true;
+						}
+					}
+					return bFound;
+				};
+
+				const auto GetSmoothRoadDeckHeightAt = [&](double WorldX, double WorldY,
+					double ReferenceHeight) -> double
+				{
+					const double GridX = WorldX / Step - 0.5;
+					const double GridY = WorldY / Step - 0.5;
+					const int32 X0 = FMath::FloorToInt(GridX);
+					const int32 Y0 = FMath::FloorToInt(GridY);
+					const double TX = GridX - static_cast<double>(X0);
+					const double TY = GridY - static_cast<double>(Y0);
+					double H00 = ReferenceHeight;
+					double H10 = ReferenceHeight;
+					double H01 = ReferenceHeight;
+					double H11 = ReferenceHeight;
+					FindRoadHeightAtColumn(X0,     Y0,     ReferenceHeight, H00);
+					FindRoadHeightAtColumn(X0 + 1, Y0,     ReferenceHeight, H10);
+					FindRoadHeightAtColumn(X0,     Y0 + 1, ReferenceHeight, H01);
+					FindRoadHeightAtColumn(X0 + 1, Y0 + 1, ReferenceHeight, H11);
+					const double Low = FMath::Lerp(H00, H10, TX);
+					const double High = FMath::Lerp(H01, H11, TX);
+					return FMath::Lerp(Low, High, TY);
+				};
+
 				float BestRoadScore = TNumericLimits<float>::Max();
 				FIntVector BestRoadCell = FIntVector::ZeroValue;
 				EVoxelBlock BestRoadBlock = EVoxelBlock::Air;
+				double BestRoadReferenceDeckHeight = 0.0;
 
 				for (int32 DZ = -1; DZ <= 1; ++DZ)
 				{
@@ -3030,26 +3092,36 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 							}
 
 							const double HitZ = static_cast<double>(Hit.ImpactPoint.Z);
-						if (HitZ < DeckHeight - Step - SurfaceTolerance ||
-							HitZ > DeckHeight + SurfaceTolerance)
+							const double SmoothDeckHeight = GetSmoothRoadDeckHeightAt(
+								Hit.ImpactPoint.X, Hit.ImpactPoint.Y, DeckHeight);
+							const double VerticalDistance = HitZ - SmoothDeckHeight;
+							const double VerticalTolerance = FMath::Max(
+								static_cast<double>(SurfaceTolerance) * 4.0,
+								static_cast<double>(Step) * 0.08);
+							if (bTopFacing)
 							{
-								continue;
+								// Top hits must match the actual SDF surface, not raw height
+								// from a single rasterized road cell.
+								if (FMath::Abs(VerticalDistance) > VerticalTolerance)
+								{
+									continue;
+								}
 							}
-							// A top-facing ray must be near the road deck, not the soil
-							// underneath it. Side hits may occur anywhere through the deck.
-							if (bTopFacing &&
-								FMath::Abs(HitZ - DeckHeight) > Step * 0.35f)
+							else if (HitZ < SmoothDeckHeight - Step - VerticalTolerance ||
+								HitZ > SmoothDeckHeight + VerticalTolerance)
 							{
+								// Side hits can occur anywhere through the one-block slab.
 								continue;
 							}
 
 							const float Score = FMath::Square(DeltaX) + FMath::Square(DeltaY) +
-								FMath::Square(static_cast<float>(HitZ - DeckHeight) * 0.1f);
+								FMath::Square(static_cast<float>(VerticalDistance) * 0.1f);
 							if (Score < BestRoadScore)
 							{
 								BestRoadScore = Score;
 								BestRoadCell = Candidate;
 								BestRoadBlock = *RoadType;
+								BestRoadReferenceDeckHeight = DeckHeight;
 							}
 						}
 					}
@@ -3060,6 +3132,16 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 					Cell = BestRoadCell;
 					HitBlock = BestRoadBlock;
 					bHitRoadBlock = true;
+
+					// Validate the hit inside the selected road solid instead of using a
+					// normal-offset sample that can drift out into soil near road edges.
+					const FVector RoadCellCenter = BlockCellCenter(BestRoadCell);
+					const double InteriorDeckHeight = GetSmoothRoadDeckHeightAt(
+						RoadCellCenter.X, RoadCellCenter.Y, BestRoadReferenceDeckHeight);
+					InsidePoint = FVector(
+						RoadCellCenter.X,
+						RoadCellCenter.Y,
+						InteriorDeckHeight - static_cast<double>(Step) * 0.5);
 				}
 			}
 		}
