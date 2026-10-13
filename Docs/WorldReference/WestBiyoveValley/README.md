@@ -35,7 +35,7 @@ The branch now defaults to seed-driven procedural terrain. The captured West Biy
 - Each game-world startup and each `StartNewGame` call chooses a fresh seed by default. The terrain remains deterministic for that seed, so streamed chunks and LOD boundaries agree. Set `bRandomizeSeedForNewWorld=false` and keep `Seed` fixed when you need the same world for debugging.
 - Landform placement is independent of the climate/biome layout, so mountain ranges can appear across the whole map instead of only in the snow region.
 - Target landform proportions are approximately **40% plains, 40% hills, 20% mountains**. These are smooth spatial masks rather than hard tiles; observed percentages vary slightly with map size and seed.
-- Native defaults use `FlatlandCoverage=0.5`, `FlatlandCoverageMultiplier=1.0`, `MountainCoverage=0.20`, `BaseHeight=3500 cm` (35 m), `HillHeight=4000 cm` (40 m of relief), and `MountainHeight=16000 cm` (160 m of relief). These keep the elevation scale in the same general range as the analysed 7DTD DTM while allowing a new geography.
+- Native defaults use `FlatlandCoverage=0.5`, `FlatlandCoverageMultiplier=1.0`, `MountainCoverage=0.20`, `BaseHeight=3500 cm` (35 m), `HillHeight=4000 cm` (40 m of relief), and `MountainHeight=16000 cm` (160 m of relief), and `RiverWaterLevel=2500 cm` (25 m). These keep the elevation scale in the same general range as the analysed 7DTD DTM while allowing a new geography.
 - If you want the exact reference DTM, enable `bUseReferenceWorldData` **and** set `bForceProceduralGeneration=false`; the required RAW assets listed below must be present. When the reference heightfield is unavailable, generation falls back to the selected procedural world size.
 
 ## Runtime raster files
