@@ -713,10 +713,10 @@ EVoxelBlock FSVoxelReferenceWorldData::SampleRoadType(
     }
 
     const int32 X = FMath::Clamp(
-        FMath::RoundToInt((WorldX - WorldCenterX) / 100.0 + static_cast<double>(RoadWidth) * 0.5),
+        FMath::FloorToInt((WorldX - WorldCenterX) / 100.0 + static_cast<double>(RoadWidth) * 0.5),
         0, RoadWidth - 1);
     const int32 Y = FMath::Clamp(
-        FMath::RoundToInt((WorldY - WorldCenterY) / 100.0 + static_cast<double>(RoadHeight) * 0.5),
+        FMath::FloorToInt((WorldY - WorldCenterY) / 100.0 + static_cast<double>(RoadHeight) * 0.5),
         0, RoadHeight - 1);
     const int32 PixelIndex = Y * RoadWidth + X;
     const uint8 PackedByte = PackedRoadMask[PixelIndex >> 2];
