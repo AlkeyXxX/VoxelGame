@@ -3128,8 +3128,10 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 
 	if (HitBlock == EVoxelBlock::Asphalt || HitBlock == EVoxelBlock::DirtRoad)
 	{
-		// Road faces share terrain collision, but destroying the road removes
-		// only its implicit box. Do not cut the terrain density in this cell.
+		// Road faces share terrain collision. Remove only the road solid while
+		// retaining its full-depth trench cut; natural terrain remains below the
+		// bottom face, so mining leaves a one-block-deep recess instead of filling
+		// the whole road back to the original surface height.
 		MinedRoadNodes.Add(MinedCell);
 		MinedRoadNodeSnapshot =
 			MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedRoadNodes);
