@@ -295,7 +295,7 @@
     "note": "Color-to-road type is inferred from the supplied road-overlay screenshot and should be visually checked in game."
   },
   "runtimeIntegration": {
-    "enabledByDefaultInBranch": true,
+    "enabledByDefaultInBranch": false,
     "defaultWorldSizeCentimeters": 819200,
     "baseVoxelStepCentimeters": 100,
     "paths": {
