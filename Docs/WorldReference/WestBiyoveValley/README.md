@@ -24,6 +24,7 @@ Purpose: preserve the analysis of the user-supplied West Biyove Valley.7z for re
 - biome_palette.csv — exact RGBA counts with tentative labels.
 - map_info.xml — preserved world generation metadata.
 - source-manifest.csv — byte size, SHA-256 and CRC32 for all 18 original archive members, including source assets not committed here.
+- analysis-artifact-manifest.csv — SHA-256 fingerprints for the lossless derived/exported artifacts delivered in the companion package.
 - source-inventory.md — human-readable description of every original archive member, sizes, roles, data assumptions, and retention caveats.
 - binary-asset-upload.md — one-time instructions for adding the companion package's binary/source data.
 
