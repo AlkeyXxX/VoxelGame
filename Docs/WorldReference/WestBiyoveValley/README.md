@@ -1,43 +1,56 @@
 # West Biyove Valley — source-world reference
 
-Purpose: preserve the analysis of the user-supplied West Biyove Valley.7z for reproducing this exact 7 Days to Die world in VoxelGame.
+Purpose: preserve the analysis and import contract for the user-supplied West Biyove Valley 7 Days to Die world, and reproduce the same macro terrain in VoxelGame rather than generating a new landscape from unrelated noise.
 
-## Main findings
+## Confirmed source facts
 
-- Game version: **V.3.1.4**.
-- Height raster: **8192 × 8192**, Scale=1; nominal map extent is **8192 m (8.192 km) per side**.
-- Map-level Seed: **-1058264646**. Nested Generation/Seed: **123**. They are distinct and must both be preserved.
+- Game version in map_info.xml: **V.3.1.4**.
+- Raster: **8192 × 8192**, Scale=1; nominal footprint **8.192 km × 8.192 km**.
+- Map-level Seed: **-1058264646**. Nested Generation/Seed: **123**. These are separate metadata fields.
 - RandomGeneratedWorld=true; FixedWaterLevel=false.
-- dtm.raw and dtm_processed.raw are each 134,217,728 bytes = 8192 × 8192 uint16 samples. Empirically supported conversion: height in metres = sample / 256.
-- dtm.raw range: **1.0039–198.375 m**, mean **48.9082 m**.
-- Prefab coordinate check supports column ≈ round(world_x + 4096), row ≈ round(world_z + 4096). Across 4175 prefab entries, median absolute height difference to prefab Y = **0.855 m**, mean 2.339 m, p90 6.145 m. Good evidence for the transform, not proof of row direction/half-cell alignment; verify these in game.
-- prefabs.xml contains **4175 placements**, **1107 distinct prefab names**. It includes POIs/buildings, roads, driveways, highways, and RWG tile pieces—not only POI markers.
-- spawnpoints.xml contains **87 spawnpoints**.
-- biomes.png is 1024 × 1024 RGBA with five opaque colors. Exact counts are recorded in biome_palette.csv; human-readable biome labels remain visual inferences.
-- dtm_processed.raw matches dtm.raw on 96.7202% of pixels. Most differences are small but a subset differ by several metres. Keep both alternatives until the target-version behavior is confirmed.
+- dtm.raw: 134,217,728 bytes = 8192² little-endian uint16 samples; conversion is **height metres = sample / 256**. Height range: **1.0039–198.375 m**, mean **48.9082 m**.
+- dtm_processed.raw differs from dtm.raw in about **3.2798%** of pixels, so retain both until source-version A/B testing is completed.
+- Prefab coordinate check supports column ≈ round(world_x+4096), row ≈ round(world_z+4096). Across 4175 placements, median absolute difference between sampled DTM height and prefab Y is 0.855 m (mean 2.339 m, p90 6.145 m). This supports the global mapping; verify half-cell/row orientation in-game.
+- prefabs.xml: **4175 placed entries**, **1107 distinct names**, including road/driveway/highway tiles and building POIs.
+- spawnpoints.xml: **87 entries**.
+- biomes.png: 1024 × 1024 with five opaque RGBA classes.
+- splat3.png: 8192 × 8192 RGBA with **959,472 red road-mask pixels** and **480,670 green road-mask pixels**. Red is interpreted as asphalt/major road; green as dirt/minor road based on the supplied screenshot. Other pixels are transparent.
 
-## Files committed in this GitHub folder
+## Current VoxelGame implementation
 
-- world-analysis.json — structured dimensions, seed fields, DTM stats, coordinate validation, prefab/biome analysis.
-- terrain-import-spec.md — source-to-Unreal transform proposal, intended architecture, and open questions.
-- prefab-layout.md — placement counts and road-network implications.
-- biome_palette.csv — exact RGBA counts with tentative labels.
-- map_info.xml — preserved world generation metadata.
-- source-manifest.csv — byte size, SHA-256 and CRC32 for all 18 original archive members, including source assets not committed here.
-- analysis-artifact-manifest.csv — SHA-256 fingerprints for the lossless derived/exported artifacts delivered in the companion package.
-- source-inventory.md — human-readable description of every original archive member, sizes, roles, data assumptions, and retention caveats.
-- binary-asset-upload.md — one-time instructions for adding the companion package's binary/source data.
+Branch: `feature/transvoxel-octree-terrain`.
 
-## Companion reference package
+- In reference mode, `FSVoxelGenerator::SampleSurfaceHeight` uses bilinear samples of the original DTM and bypasses procedural hills, POI plateaus, micro-noise, and synthetic river/lake carving.
+- The 8192² source map is centred on `RootWorldCenter`; one source pixel is 1 m. In Unreal units, the DTM returns height in centimetres.
+- The 1024² biome raster is mapped into six mesh material sections (Plains fallback, Forest, Desert, Snow, Burnt Forest, Wasteland). Assign the corresponding material properties on `ASmoothVoxelOctreeWorld` to reproduce the colors/textures; if unassigned, the section falls back to the chunk's terrain material.
+- The 2-bit packed splat3 road mask classifies asphalt/dirt faces in the same terrain chunk mesh and collision component. Source road cells are available to the mining/placement query without per-road actors.
+- Reference mode defaults to 8.192 km. It suppresses unrelated seed-generated roads and synthetic flat water plane rather than layering them over the source.
+- The loader reports missing/invalid files and falls back to procedural terrain. The DTM/biome/road files still need to be copied into the runtime path below; **large binary files have not yet been pushed into Git LFS by this editor connection**.
 
-The companion downloadable analysis ZIP prepared for this task contains the full-resolution **lossless 16-bit PNG conversions of both DTM heightfields**, original splat3/splat4 layers, normalized CSV of all 4175 prefab placements, all unique prefab counts, the three original screenshots, and a compressed source bundle that restores the original small XML/PNG assets. Both height conversions were checked sample-for-sample against their source RAW arrays.
+## Runtime raster files
 
-That ZIP is delivered separately; it is **not currently committed to this branch**. This is a real storage limitation rather than an intentional omission: the connected GitHub editor can commit text but cannot stream a local 60–67 MB PNG into Git LFS. See binary-asset-upload.md. To make the repo alone sufficient for future work, one-time copying/commit of the package contents is still required.
+Required files:
+- `dtm.raw` — exact source height raster, 128 MiB.
+- `biomes.raw` — 1 byte per biome pixel, 1 MiB; IDs: 1 Forest, 2 Desert, 3 Snow, 4 BurntForest, 5 Wasteland.
+- `roadmask_2bit.raw` — 4 road pixels per byte, 16 MiB; two-bit codes: 0 none, 1 red/asphalt, 2 green/dirt, 3 unused.
 
-## Reproduction strategy
+Download the ready-to-extract [runtime rasters ZIP](https://github.com/AlkeyXxX/VoxelGame) is not stored in this repository; in this ChatGPT conversation it is supplied as `West_Biyove_Valley_Runtime_Assets.zip`. Extract it at the project root to populate `Docs/WorldReference/WestBiyoveValley/*.raw`. The loader also supports `Content/WorldReference/WestBiyoveValley/`. The project packaging config stages the Content directory for packaged builds.
 
-Do not attempt to reproduce this specific world with seed/noise alone. Use the full 8192² original heightfield as the terrain input, then use the source biome raster and fixed prefab placements as separate inputs. Rebuild road planning only after the DTM has been mapped and verified against landmarks. For exact appearance, also preserve/test the source splat layers, water/rivers, materials, and game-version-compatible prefab definitions.
+## Files in this folder
 
-## Source integrity
+- `world-analysis.json` — machine-readable source facts, DTM statistics, map seeds, coordinate check, biome palette, and prefab counts.
+- `terrain-import-spec.md` — coordinate and height conversion contract and remaining validation tasks.
+- `prefab-layout.md` — placement data interpretation and road/prefab implications.
+- `source-inventory.md` — all 18 source archive members, roles, lengths and caveats.
+- `source-manifest.csv` — source archive SHA-256, CRC32 and byte lengths.
+- `analysis-artifact-manifest.csv` — hashes for derived analysis-package artifacts.
+- `biome_palette.csv` and `map_info.xml` — exact palette counts and copied map metadata.
+- `binary-asset-upload.md` — one-time LFS instructions to make the repository self-contained.
 
-Uploaded archive SHA-256: `10e4b2dd90a3b5a0d2b1368b48e9d47f5e4546835811ceca6d9b704ee95dbfaa`. Full file fingerprints are in source-manifest.csv.
+The companion analysis ZIP also contains lossless 16-bit PNG versions of both DTM files, original splat layers/screenshots, prefab-placement CSVs, full prefab name counts, and a decoder for compact source bundles. That package is delivered separately, not yet committed here.
+
+## Accuracy boundaries
+
+**Exact macro-heightfield and source road-mask layout** are the first implemented import milestone once runtime rasters are present. Exact rendered buildings/POIs still require compatible meshes/prefab definitions: the source world archive contains prefab *placements* and names, not all of 7DTD's building mesh assets. Actual water-body shapes are also not explicitly represented in the current runtime raster bundle; the synthetic water plane is hidden in reference mode to avoid inventing a contradictory layout until the source water representation is reconstructed. Do not call the whole rendered world one-to-one until these remaining items are addressed and the import is checked in UE4.27.
+
+Archive SHA-256: `10e4b2dd90a3b5a0d2b1368b48e9d47f5e4546835811ceca6d9b704ee95dbfaa`.
