@@ -3464,22 +3464,25 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 		return;
 	}
 
-	// Remove leaves that cannot contain an isosurface. The noise amplitudes
-	// define a conservative terrain-height envelope. When caves are enabled,
-	// only the air-above-terrain test is safe because cave carving can extend
-	// into otherwise solid columns.
+	// Use the exact sampled DTM envelope in reference mode. The procedural
+	// BaseHeight/HillHeight values describe the legacy generator and can wrongly
+	// cull the tallest source mountains or retain empty chunks underneath.
 	const float HeightSafetyMargin = SelectionSettings.BaseVoxelSize * 2.0f;
-	// Biome shaping can amplify mountain relief and add dune/mountain lift.
-	// Bound that full range here, otherwise high mountain chunks could be
-	// culled above the old plains-only height envelope.
+	const bool bHasReferenceHeightEnvelope =
+		bUseReferenceWorldData && ReferenceWorldDataSnapshot.IsValid() &&
+		ReferenceWorldDataSnapshot->HasHeightField();
 	const float MaxBiomeRelief =
 		FMath::Abs(HillHeight) +
 		FMath::Abs(MountainHeight) +
 		FMath::Abs(FlatlandNoiseAmplitude) +
 		FMath::Abs(DetailAmplitude) +
 		FMath::Abs(LakeDepth);
-	const float MinSurfaceHeight = BaseHeight - MaxBiomeRelief;
-	const float MaxSurfaceHeight = BaseHeight + MaxBiomeRelief;
+	const float MinSurfaceHeight = bHasReferenceHeightEnvelope
+		? static_cast<float>(ReferenceWorldDataSnapshot->MinHeightCentimeters)
+		: BaseHeight - MaxBiomeRelief;
+	const float MaxSurfaceHeight = bHasReferenceHeightEnvelope
+		? static_cast<float>(ReferenceWorldDataSnapshot->MaxHeightCentimeters)
+		: BaseHeight + MaxBiomeRelief;
 	Leaves.RemoveAll([&](const FSVoxelOctreeNode& Node)
 	{
 		const FVector NodeOrigin = SelectionSettings.WorldOrigin +
@@ -3492,7 +3495,10 @@ void ASmoothVoxelOctreeWorld::RebuildForCamera(const FVector& CameraLocation)
 		{
 			return true;
 		}
-		if (!bEnableCaves && NodeMaxZ < MinSurfaceHeight - HeightSafetyMargin)
+		// Source-world mode disables synthetic cave carving, so even if the
+		// legacy editor checkbox remains enabled, DTM-below-minimum chunks are empty.
+		if ((!bEnableCaves || bHasReferenceHeightEnvelope) &&
+			NodeMaxZ < MinSurfaceHeight - HeightSafetyMargin)
 		{
 			return true;
 		}
