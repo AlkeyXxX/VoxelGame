@@ -846,14 +846,15 @@ ESVoxelBiome FSVoxelGenerator::SampleBiome(
     double Y,
     const FSVoxelGenerationSettings& S)
 {
-    if (!S.bEnableBiomes)
-    {
-        return ESVoxelBiome::Plains;
-    }
-    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid())
+    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid() &&
+        S.ReferenceWorldData->HasBiomeMask())
     {
         return S.ReferenceWorldData->SampleBiome(
             X, Y, S.BiomeWorldCenter.X, S.BiomeWorldCenter.Y);
+    }
+    if (!S.bEnableBiomes)
+    {
+        return ESVoxelBiome::Plains;
     }
 
     float DesertWeight = 0.0f;
@@ -1188,7 +1189,9 @@ FLinearColor FSVoxelGenerator::GetBiomeTint(
     double Y,
     const FSVoxelGenerationSettings& S)
 {
-    if (!S.bEnableBiomes)
+    const bool bHasSourceBiomeMask = S.bUseReferenceWorldData &&
+        S.ReferenceWorldData.IsValid() && S.ReferenceWorldData->HasBiomeMask();
+    if (!S.bEnableBiomes && !bHasSourceBiomeMask)
     {
         return FLinearColor::White;
     }
@@ -1220,7 +1223,7 @@ FLinearColor FSVoxelGenerator::GetBiomeTint(
         break;
     }
 
-    if (S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid())
+    if (bHasSourceBiomeMask)
     {
         return Tint;
     }
