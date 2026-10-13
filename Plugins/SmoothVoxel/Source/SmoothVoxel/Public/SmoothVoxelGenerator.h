@@ -122,7 +122,7 @@ struct FSVoxelGenerationSettings
 	float RiverScale = 0.000004f;
 	float RiverHalfWidth = 500.0f;
 	float RiverDepth = 200.0f;
-	float RiverWaterLevel = 850.0f;
+	float RiverWaterLevel = 2500.0f;
 
 	bool bEnableLakes = true;
 	float LakeSiteSpacing = 50000.0f;
