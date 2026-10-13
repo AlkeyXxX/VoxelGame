@@ -254,7 +254,23 @@ public:
 
 	/** Select the finite map dimensions for this world instance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|World", meta=(DisplayName="World Size"))
-	ESmoothVoxelWorldSize WorldSize = ESmoothVoxelWorldSize::Size4Km;
+	ESmoothVoxelWorldSize WorldSize = ESmoothVoxelWorldSize::Size8Km;
+
+    /** Use captured West Biyove Valley source rasters instead of procedural macro terrain. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
+    bool bUseReferenceWorldData = true;
+
+    /** Project-relative 8192x8192 little-endian uint16 DTM (1/256 metre units). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
+    FString ReferenceHeightmapPath = TEXT("Content/WorldReference/WestBiyoveValley/dtm.raw");
+
+    /** Project-relative 1024x1024 categorical biome IDs derived from biomes.png. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
+    FString ReferenceBiomeMaskPath = TEXT("Content/WorldReference/WestBiyoveValley/biomes.raw");
+
+    /** Project-relative 2-bit packed road types derived from splat3.png. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Reference World")
+    FString ReferenceRoadMaskPath = TEXT("Content/WorldReference/WestBiyoveValley/roadmask_2bit.raw");
 
 	/** LOD refinement distance multiplier. Higher values create more chunks and transition boundaries. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Octree", meta=(ClampMin="0.05", ClampMax="4.0"))
@@ -486,6 +502,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
 	UMaterialInterface* SnowBiomeMaterial = nullptr;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+    UMaterialInterface* BurntForestBiomeMaterial = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Biomes")
+    UMaterialInterface* WastelandBiomeMaterial = nullptr;
+
 	UFUNCTION(BlueprintPure, Category="Voxel|Biomes")
 	ESVoxelBiome GetBiomeAtWorldPosition(const FVector& WorldPosition) const;
 
@@ -584,6 +606,7 @@ public:
 	void EnqueueCompletedChunk(ASmoothVoxelTransvoxelChunk* Chunk);
 
 private:
+	void LoadReferenceWorldData();
 	void UpdateWaterSurface();
 	void UpdateRoadNetwork();
 	void TryBindPlayerInteractionInput();
@@ -673,6 +696,9 @@ private:
 
 	UPROPERTY(Transient)
 	ASmoothVoxelRoadNetwork* RoadNetworkActor = nullptr;
+
+	// Immutable source rasters shared by chunk workers and interaction probes.
+	FSVoxelReferenceWorldDataPtr ReferenceWorldDataSnapshot;
 
 	int32 DesiredCellsPerAxis = 32;
 	float DesiredBaseVoxelSize = 97.65625f;
