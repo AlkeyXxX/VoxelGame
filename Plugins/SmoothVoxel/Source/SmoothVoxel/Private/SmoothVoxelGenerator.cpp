@@ -303,8 +303,11 @@ namespace
                         const double QBottom = SmoothDeckZ - Step - Z;
                         const double RoadSdf = FMath::Max(
                             FMath::Max(QX, QY), FMath::Max(QTop, QBottom));
-                        Density = static_cast<float>(FMath::Max(
-                            static_cast<double>(Density), -RoadSdf));
+                        // Remove terrain above the road deck within this cell, then
+                        // restore a full one-cell-deep solid in the same density field.
+                        const double RoadCutSdf = FMath::Max(FMath::Max(QX, QY), -QTop);
+                        Density = FMath::Min(Density, static_cast<float>(RoadCutSdf));
+                        Density = static_cast<float>(FMath::Max(static_cast<double>(Density), -RoadSdf));
                     }
                 }
             }
@@ -1900,6 +1903,102 @@ FVector FSVoxelGenerator::DensityGradient(
         Dz).GetSafeNormal();
 }
 
+
+void FSVoxelGenerator::GetSurfaceMaterialBlendData(
+    double X, double Y, double Z,
+    const FSVoxelGenerationSettings& S,
+    FLinearColor& OutVertexColor, FVector2D& OutUV1)
+{
+    const double Step = FMath::Max(1.0, static_cast<double>(S.BaseVoxelSize));
+    const double GX = X / Step - 0.5, GY = Y / Step - 0.5;
+    const int32 X0 = FMath::FloorToInt(GX), Y0 = FMath::FloorToInt(GY);
+    const auto Smooth = [](double V) { V = FMath::Clamp(V, 0.0, 1.0); return V * V * (3.0 - 2.0 * V); };
+    const double TX = Smooth(GX - X0), TY = Smooth(GY - Y0);
+
+    struct FWeights { double Desert=0, Forest=0, Snow=0, Asphalt=0, Soil=0; };
+
+    const int32 SampleCellX = FMath::FloorToInt(X / Step);
+    const int32 SampleCellY = FMath::FloorToInt(Y / Step);
+    const int32 SampleCellZ = FMath::FloorToInt(Z / Step);
+    const auto FloorDivideByBin = [](int32 Value)
+    {
+        return Value >= 0 ? Value / 8 : (Value - 7) / 8;
+    };
+    const FIntVector SampleBin(
+        FloorDivideByBin(SampleCellX), FloorDivideByBin(SampleCellY), FloorDivideByBin(SampleCellZ));
+    const bool bHasRoadMap = S.RoadBlocks.IsValid() && S.RoadBlocks->Num() > 0;
+    const bool bHasReferenceRoadMask = S.bUseReferenceWorldData &&
+        S.ReferenceWorldData.IsValid() && S.ReferenceWorldData->HasRoadMask();
+    const bool bMayQueryRoads = bHasReferenceRoadMask ||
+        (bHasRoadMap && (!S.RoadSampleBins.IsValid() || S.RoadSampleBins->Contains(SampleBin)));
+
+    const auto GetRoad = [&S, Step, Z, bMayQueryRoads](
+        int32 CX, int32 CY, EVoxelBlock& Type) -> bool
+    {
+        Type = EVoxelBlock::Air;
+        if (!bMayQueryRoads) return false;
+        const int32 Z0 = FMath::FloorToInt(Z / Step);
+        double Best = TNumericLimits<double>::Max();
+        bool Found = false;
+        if (S.RoadBlocks.IsValid())
+        {
+            for (int32 DZ=-2; DZ<=1; ++DZ)
+            {
+                const FIntVector C(CX,CY,Z0+DZ);
+                const EVoxelBlock* T=S.RoadBlocks->Find(C);
+                if (!T || (*T!=EVoxelBlock::Asphalt && *T!=EVoxelBlock::DirtRoad) ||
+                    (S.MinedRoadBlocks.IsValid() && S.MinedRoadBlocks->Contains(C))) continue;
+                const double* H=S.RoadSurfaceHeights.IsValid()?S.RoadSurfaceHeights->Find(C):nullptr;
+                const double Height=H?*H:(static_cast<double>(C.Z)+1.0)*Step;
+                const double Diff=std::abs(Height-Z);
+                if (Diff<Best) { Best=Diff; Type=*T; Found=true; }
+            }
+        }
+        if (!Found && bHasReferenceRoadMask)
+        {
+            const double WX=(static_cast<double>(CX)+0.5)*Step, WY=(static_cast<double>(CY)+0.5)*Step;
+            const EVoxelBlock T=S.ReferenceWorldData->SampleRoadType(
+                WX,WY,S.BiomeWorldCenter.X,S.BiomeWorldCenter.Y);
+            if (T==EVoxelBlock::Asphalt || T==EVoxelBlock::DirtRoad)
+            { Type=T; Found=true; }
+        }
+        return Found;
+    };
+
+    const auto CellWeights = [&](int32 CX, int32 CY) -> FWeights
+    {
+        FWeights W;
+        EVoxelBlock Road=EVoxelBlock::Air;
+        if (GetRoad(CX,CY,Road))
+        {
+            if (Road==EVoxelBlock::Asphalt) W.Asphalt=1.0;
+            else W.Soil=1.0;
+            return W;
+        }
+        const double WX=(static_cast<double>(CX)+0.5)*Step, WY=(static_cast<double>(CY)+0.5)*Step;
+        switch (FSVoxelGenerator::SampleBiome(WX,WY,S))
+        {
+        case ESVoxelBiome::Desert: W.Desert=1.0; break;
+        case ESVoxelBiome::Forest: W.Forest=1.0; break;
+        case ESVoxelBiome::Snow: W.Snow=1.0; break;
+        default: break; // Plains is the implicit base layer.
+        }
+        return W;
+    };
+
+    // Interpolate adjacent cell-centre masks. The transition spans one base
+    // block and is exactly 50/50 at each shared boundary.
+    const FWeights A=CellWeights(X0,Y0), B=CellWeights(X0+1,Y0),
+                   C=CellWeights(X0,Y0+1), D=CellWeights(X0+1,Y0+1);
+    const auto Mix=[TX,TY](double A0,double B0,double C0,double D0)
+    { return FMath::Lerp(FMath::Lerp(A0,B0,TX),FMath::Lerp(C0,D0,TX),TY); };
+    OutVertexColor=FLinearColor(
+        static_cast<float>(Mix(A.Desert,B.Desert,C.Desert,D.Desert)),
+        static_cast<float>(Mix(A.Forest,B.Forest,C.Forest,D.Forest)),
+        static_cast<float>(Mix(A.Snow,B.Snow,C.Snow,D.Snow)),
+        static_cast<float>(Mix(A.Asphalt,B.Asphalt,C.Asphalt,D.Asphalt)));
+    OutUV1=FVector2D(static_cast<float>(Mix(A.Soil,B.Soil,C.Soil,D.Soil)),0.0f);
+}
 
 // ============================================================
 // GENERATE
