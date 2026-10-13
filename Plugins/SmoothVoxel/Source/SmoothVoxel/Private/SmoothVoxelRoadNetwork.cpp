@@ -1925,10 +1925,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             const double CenterGround = GroundHeights[SampleIndex];
             const double TerrainClearance = SafeSurfaceOffset;
 
-            // Keep the road top level with sampled terrain (or slightly above it
-            // via SurfaceOffset). The road's full voxel thickness extends downward,
-            // so it does not need to lower the visible deck to create solid geometry.
-            const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
+            // The road-cell Z index is ceil(deck / voxel size) - 1. Compensate
+            // for that lower-cell indexing so the extracted road top meets the
+            // terrain surface instead of appearing one voxel below it.
+            // The solid remains exactly one base voxel thick, downward from the deck.
+            const double RoadDeckZ = CenterGround + Lift + TerrainClearance + RoadBlockSize;
             const double LeftZ = RoadDeckZ;
             const double RightZ = RoadDeckZ;
 
@@ -3886,9 +3887,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const double WX=(static_cast<double>(Spill.X)+0.5)*RoadBlockSize;
                 const double WY=(static_cast<double>(Spill.Y)+0.5)*RoadBlockSize;
                 const double Ground=FSVoxelGenerator::SampleSurfaceHeight(WX,WY,GenerationSettings);
-                // Account for the configured offset: the deck follows sampled terrain
-                // and may sit slightly above it, rather than one voxel below it.
-                if (std::abs((Ground - *Deck) + SafeSurfaceOffset)>RoadBlockSize*0.75) continue;
+                // The deck reference includes one voxel of cell-index compensation.
+                // Remove that compensation when comparing it to the sampled terrain.
+                if (std::abs((Ground - *Deck) + RoadBlockSize + SafeSurfaceOffset)>RoadBlockSize*0.75) continue;
                 uint32 H=static_cast<uint32>(Group)*196314165u ^ static_cast<uint32>(Spill.X)*907633515u ^
                     static_cast<uint32>(Spill.Y)*604171u ^ static_cast<uint32>(GenerationSettings.Seed)*1376312589u;
                 H^=H>>16; H*=0x7feb352du; H^=H>>15;
