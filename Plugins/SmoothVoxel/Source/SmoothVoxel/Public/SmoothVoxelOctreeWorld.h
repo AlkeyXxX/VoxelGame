@@ -311,7 +311,7 @@ public:
 	int32 Seed = 555;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm"))
-	float BaseHeight = 900.0f;
+	float BaseHeight = 3500.0f;
 
 	/** Legacy compatibility only; use HillHeight and MountainHeight for new terrain. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(Units="cm", DeprecatedProperty, DeprecationMessage="Use Hill Height and Mountain Height"))
@@ -370,7 +370,7 @@ public:
 
 	/** Large-scale mountain relief, in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain", meta=(ClampMin="0.0", ClampMax="200000.0", Units="cm"))
-	float MountainHeight = 12000.0f;
+	float MountainHeight = 16000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Voxel|Terrain")
 	float BottomDepth = 2000.0f;
