@@ -3216,10 +3216,9 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 				HitBlock == EVoxelBlock::DirtRoad;
 		}
 
-		// Keep the target cell chosen by the inward density probe. It is the
-		// integer voxel cell containing the solid immediately behind the hit.
-		// Do not move its centre to the fractional terrain surface height: that
-		// made the first cut thinner/offset while all later cuts stayed grid-aligned.
+		// Keep the inward probe's grid-aligned X/Y column and the snapped Z
+		// layer computed above. Never centre the cut on the fractional terrain
+		// height: the first cut would then be offset from all later grid cells.
 		if (HitBlock == EVoxelBlock::Air)
 		{
 			const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
