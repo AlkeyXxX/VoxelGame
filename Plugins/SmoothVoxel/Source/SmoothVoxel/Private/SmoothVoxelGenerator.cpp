@@ -186,9 +186,9 @@ namespace
                 for (int32 DZ = -2; DZ <= 1; ++DZ)
                 {
                     const FIntVector Candidate(CellX, CellY, ReferenceCellZ + DZ);
-                    if (!Settings.RoadBlocks->Contains(Candidate) ||
-                        (Settings.MinedRoadBlocks.IsValid() &&
-                            Settings.MinedRoadBlocks->Contains(Candidate)))
+                    // Keep deck heights valid for mined road cells so the
+                    // excavation cut stays continuous after their solid is removed.
+                    if (!Settings.RoadBlocks->Contains(Candidate))
                     {
                         continue;
                     }
@@ -276,14 +276,12 @@ namespace
                     for (int32 DX = -1; DX <= 1; ++DX)
                     {
                         const FIntVector Cell(BaseX + DX, BaseY + DY, BaseZ + DZ);
-                        if (!Settings.RoadBlocks->Contains(Cell) ||
-                            (Settings.MinedRoadBlocks.IsValid() &&
-                                Settings.MinedRoadBlocks->Contains(Cell)))
+                        if (!Settings.RoadBlocks->Contains(Cell))
                         {
-                            // Breaking a road block removes only its generated road
-                            // solid; natural terrain underneath remains unchanged.
                             continue;
                         }
+                        const bool bRoadCellMined = Settings.MinedRoadBlocks.IsValid() &&
+                            Settings.MinedRoadBlocks->Contains(Cell);
 
                         const double* CellDeckHeight = Settings.RoadSurfaceHeights.IsValid()
                             ? Settings.RoadSurfaceHeights->Find(Cell) : nullptr;
@@ -306,8 +304,15 @@ namespace
                         // Remove terrain above the road deck within this cell, then
                         // restore a full one-cell-deep solid in the same density field.
                         const double RoadCutSdf = FMath::Max(FMath::Max(QX, QY), -QTop);
+                        // Keep the cut even when the asphalt/dirt-road block is mined:
+                        // otherwise natural terrain instantly fills the road back to the
+                        // old surface height, making the road behave like a paper-thin decal.
                         Density = FMath::Min(Density, static_cast<float>(RoadCutSdf));
-                        Density = static_cast<float>(FMath::Max(static_cast<double>(Density), -RoadSdf));
+                        if (!bRoadCellMined)
+                        {
+                            Density = static_cast<float>(FMath::Max(
+                                static_cast<double>(Density), -RoadSdf));
+                        }
                     }
                 }
             }
