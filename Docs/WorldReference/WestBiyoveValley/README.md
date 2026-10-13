@@ -28,6 +28,16 @@ Branch: `feature/transvoxel-octree-terrain`.
 - Reference mode defaults to 8.192 km. It suppresses unrelated seed-generated roads and synthetic flat water plane rather than layering them over the source.
 - The loader reports missing/invalid files and falls back to procedural terrain. The DTM/biome/road files still need to be copied into the runtime path below; **large binary files have not yet been pushed into Git LFS by this editor connection**.
 
+## Default procedural world generation
+
+The branch now defaults to seed-driven procedural terrain. The captured West Biyove Valley map is a reference option, not the default world.
+
+- Each game-world startup and each `StartNewGame` call chooses a fresh seed by default. The terrain remains deterministic for that seed, so streamed chunks and LOD boundaries agree. Set `bRandomizeSeedForNewWorld=false` and keep `Seed` fixed when you need the same world for debugging.
+- Landform placement is independent of the climate/biome layout, so mountain ranges can appear across the whole map instead of only in the snow region.
+- Target landform proportions are approximately **40% plains, 40% hills, 20% mountains**. These are smooth spatial masks rather than hard tiles; observed percentages vary slightly with map size and seed.
+- Native defaults use `FlatlandCoverage=0.5`, `FlatlandCoverageMultiplier=1.0`, `MountainCoverage=0.20`, `BaseHeight=3500 cm` (35 m), `HillHeight=4000 cm` (40 m of relief), and `MountainHeight=16000 cm` (160 m of relief). These keep the elevation scale in the same general range as the analysed 7DTD DTM while allowing a new geography.
+- If you want the exact reference DTM, enable `bUseReferenceWorldData` **and** set `bForceProceduralGeneration=false`; the required RAW assets listed below must be present. When the reference heightfield is unavailable, generation falls back to the selected procedural world size.
+
 ## Runtime raster files
 
 Required files:
