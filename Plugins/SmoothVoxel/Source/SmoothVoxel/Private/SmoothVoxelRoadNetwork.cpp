@@ -266,9 +266,10 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const double Spacing = FMath::Max(20000.0, std::abs(static_cast<double>(SiteSpacing)));
     const double RoadBlockSize = FMath::Max(
         1.0, std::abs(static_cast<double>(GenerationSettings.BaseVoxelSize)));
-    const double DirtRoadWidth = RoadBlockSize * 3.0;
-    const double OrdinaryRoadWidth = RoadBlockSize * 10.0;
-    const double HighwayRoadWidth = RoadBlockSize * 20.0;
+    // Exact core widths; optional shoulders add at most one cell to each side.
+    const double DirtRoadWidth = RoadBlockSize * 4.0;
+    const double OrdinaryRoadWidth = RoadBlockSize * 8.0;
+    const double HighwayRoadWidth = RoadBlockSize * 16.0;
     const int32 CityBlockCount = FMath::Clamp(
         FMath::RoundToInt((Spacing * 0.13 / RoadBlockSize) * 0.5) * 2, 46, 74);
     const double CityBlockSize = static_cast<double>(CityBlockCount) * RoadBlockSize;
@@ -277,7 +278,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     const double SafeSampleSpacing = FMath::Clamp(
         std::abs(static_cast<double>(SampleSpacing)), 250.0, 5000.0);
     const double SafeSurfaceOffset = FMath::Clamp(
-        static_cast<double>(SurfaceOffset), 2.0, 100.0);
+        static_cast<double>(SurfaceOffset), 0.0, 100.0);
 
     const double MinX = static_cast<double>(WorldCenter.X) - HalfExtent;
     const double MaxX = static_cast<double>(WorldCenter.X) + HalfExtent;
@@ -1922,9 +1923,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
 
             const double Lift = RoadLifts[SampleIndex];
             const double CenterGround = GroundHeights[SampleIndex];
-            const double TerrainClearance = FMath::Max(
-                SafeSurfaceOffset,
-                RoadBlockSize * 0.10);
+            const double TerrainClearance = SafeSurfaceOffset;
 
             // Keep the carriageway level side-to-side so vehicles do not roll
             // with the hillside. The new earthen bevels close the small clearance
@@ -1992,8 +1991,8 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                 const double SegmentLength = static_cast<double>((Point - Before).Size());
                 const int32 LongitudinalSteps = FMath::Max(
                     1, static_cast<int32>(std::ceil(SegmentLength / (RoadBlockSize * 0.5))));
-                const int32 LateralSteps = FMath::Max(
-                    0, FMath::RoundToInt(FullRoadWidth / RoadBlockSize) * 2 - 2);
+                const int32 LateralCellCount = FMath::Max(
+                    1, FMath::RoundToInt(FullRoadWidth / RoadBlockSize));
                 const double PreviousDeckZ = RoadDeckHeights[SampleIndex - 1];
                 for (int32 LongIndex = 0; LongIndex <= LongitudinalSteps; ++LongIndex)
                 {
@@ -2003,11 +2002,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     const double StampDeckZ = PreviousDeckZ + (RoadDeckZ - PreviousDeckZ) * T;
                     const int32 CellZ = static_cast<int32>(std::ceil(
                         StampDeckZ / RoadBlockSize)) - 1;
-                    for (int32 LateralIndex = 0; LateralIndex <= LateralSteps; ++LateralIndex)
+                    for (int32 LateralIndex = 0; LateralIndex < LateralCellCount; ++LateralIndex)
                     {
-                        const double LateralOffset = -SegmentHalfRoadWidth +
-                            RoadBlockSize * 0.5 +
-                            RoadBlockSize * 0.5 * static_cast<double>(LateralIndex);
+                        const double LateralOffset =
+                            (static_cast<double>(LateralIndex) -
+                                (static_cast<double>(LateralCellCount) - 1.0) * 0.5) * RoadBlockSize;
                         const FVector2D StampPoint = StampCenter +
                             Perp * static_cast<float>(LateralOffset);
                         const FIntVector Cell(
@@ -3858,6 +3857,48 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     DirtRoadWidth, false, false, false);
             }
         }
+    }
+
+    // Add an intermittent full-cell soil shoulder beside straight asphalt
+    // runs. The core stays 4/8/16 blocks, and the footprint reaches 6/10/18
+    // where shoulders appear. Four-cell groups create 1-2-cell spill runs.
+    if (RoadBlockTypes.Num() > 0)
+    {
+        TArray<FIntVector> AsphaltCells;
+        AsphaltCells.Reserve(RoadBlockTypes.Num());
+        for (const TPair<FIntVector, EVoxelBlock>& Entry : RoadBlockTypes)
+            if (Entry.Value == EVoxelBlock::Asphalt) AsphaltCells.Add(Entry.Key);
+        TArray<TPair<FIntVector, double>> SpillCells;
+        for (const FIntVector& Cell : AsphaltCells)
+        {
+            const auto IsAsphalt = [this](const FIntVector& C)
+            { const EVoxelBlock* T=RoadBlockTypes.Find(C); return T && *T==EVoxelBlock::Asphalt; };
+            const int32 NX=(IsAsphalt(Cell+FIntVector(-1,0,0))?1:0)+(IsAsphalt(Cell+FIntVector(1,0,0))?1:0);
+            const int32 NY=(IsAsphalt(Cell+FIntVector(0,-1,0))?1:0)+(IsAsphalt(Cell+FIntVector(0,1,0))?1:0);
+            if (NX==NY || FMath::Max(NX,NY)<2) continue;
+            const bool AlongX=NX>NY;
+            const int32 LongCell=AlongX?Cell.X:Cell.Y;
+            const int32 Group=LongCell>=0?LongCell/4:(LongCell-3)/4;
+            const int32 Within=LongCell-Group*4;
+            const double* Deck=RoadSurfaceHeights.Find(Cell);
+            if (!Deck) continue;
+            for (int32 Side : {-1,1})
+            {
+                const FIntVector Spill=AlongX?Cell+FIntVector(0,Side,0):Cell+FIntVector(Side,0,0);
+                if (RoadBlockTypes.Contains(Spill)) continue;
+                const double WX=(static_cast<double>(Spill.X)+0.5)*RoadBlockSize;
+                const double WY=(static_cast<double>(Spill.Y)+0.5)*RoadBlockSize;
+                const double Ground=FSVoxelGenerator::SampleSurfaceHeight(WX,WY,GenerationSettings);
+                if (std::abs(Ground-*Deck)>RoadBlockSize*0.75) continue;
+                uint32 H=static_cast<uint32>(Group)*196314165u ^ static_cast<uint32>(Spill.X)*907633515u ^
+                    static_cast<uint32>(Spill.Y)*604171u ^ static_cast<uint32>(GenerationSettings.Seed)*1376312589u;
+                H^=H>>16; H*=0x7feb352du; H^=H>>15;
+                const int32 Run=1+static_cast<int32>((H>>8)&1u);
+                if ((H%100u)<80u && Within<Run) SpillCells.Add(TPair<FIntVector,double>(Spill,*Deck));
+            }
+        }
+        for (const TPair<FIntVector,double>& S : SpillCells)
+            if (!RoadBlockTypes.Contains(S.Key)) { RoadBlockTypes.Add(S.Key,EVoxelBlock::DirtRoad); RoadSurfaceHeights.Add(S.Key,S.Value); }
     }
 
     if (RoadBlockTypes.Num() == 0)
