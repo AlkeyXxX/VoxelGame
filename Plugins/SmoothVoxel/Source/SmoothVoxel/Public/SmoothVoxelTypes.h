@@ -11,7 +11,10 @@ enum class ESVoxelBiome : uint8
 	Forest UMETA(DisplayName = "Forest"),
 	Desert UMETA(DisplayName = "Desert"),
 	Mountain UMETA(DisplayName = "Mountain"),
-	Snow UMETA(DisplayName = "Snow")
+	Snow UMETA(DisplayName = "Snow"),
+	// Appended values preserve the serialized IDs of the original five biomes.
+	BurntForest UMETA(DisplayName = "Burnt Forest"),
+	Wasteland UMETA(DisplayName = "Wasteland")
 };
 
 USTRUCT(BlueprintType)
