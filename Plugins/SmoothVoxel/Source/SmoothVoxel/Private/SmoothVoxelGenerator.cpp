@@ -327,7 +327,7 @@ namespace
         // gets a continuous ramp instead of a standalone strip or voxel staircase.
         if (bMayHaveRoadBlock && bHasRoadEmbankmentFill)
         {
-            const double NaturalSurfaceHeight = SampleSurfaceHeight(X, Y, Settings);
+            const double NaturalSurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(X, Y, Settings);
             const double GridX = X / Step - 0.5;
             const double GridY = Y / Step - 0.5;
             const int32 X0 = FMath::FloorToInt(GridX);
