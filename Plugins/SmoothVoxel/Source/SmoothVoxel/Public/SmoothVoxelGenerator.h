@@ -19,6 +19,36 @@ using FSVoxelRoadBlockMap = TMap<FIntVector, EVoxelBlock>;
 using FSVoxelRoadSurfaceHeightMap = TMap<FIntVector, double>;
 using FSVoxelRoadSampleBinSet = TSet<FIntVector>;
 
+// Runtime copy of the immutable 7 Days to Die source rasters. The DTM stores
+// 8192x8192 little-endian uint16 samples; biome IDs are one byte per 1024x1024
+// pixel; road types are four 2-bit samples packed into each byte at 8192x8192.
+struct FSVoxelReferenceWorldData
+{
+    int32 HeightWidth = 8192;
+    int32 HeightHeight = 8192;
+    TArray<uint8> HeightBytesLE;
+
+    int32 BiomeWidth = 1024;
+    int32 BiomeHeight = 1024;
+    TArray<uint8> BiomeIds;
+
+    int32 RoadWidth = 8192;
+    int32 RoadHeight = 8192;
+    TArray<uint8> PackedRoadMask;
+
+    bool HasHeightField() const;
+    bool HasBiomeMask() const;
+    bool HasRoadMask() const;
+    double SampleHeightCentimeters(
+        double WorldX, double WorldY, double WorldCenterX, double WorldCenterY) const;
+    ESVoxelBiome SampleBiome(
+        double WorldX, double WorldY, double WorldCenterX, double WorldCenterY) const;
+    EVoxelBlock SampleRoadType(
+        double WorldX, double WorldY, double WorldCenterX, double WorldCenterY) const;
+};
+using FSVoxelReferenceWorldDataPtr =
+    TSharedPtr<const FSVoxelReferenceWorldData, ESPMode::ThreadSafe>;
+
 struct FSVoxelGenerationSettings
 {
 	int32 CellsPerAxis = 32;
@@ -43,6 +73,10 @@ struct FSVoxelGenerationSettings
 	// Road carriageways use the terrain mesh, but may disable their road-face
 	// collision independently from ordinary terrain chunk collision.
 	bool bEnableRoadCollision = true;
+
+	// When loaded, the source DTM replaces procedural height noise entirely.
+	bool bUseReferenceWorldData = false;
+	FSVoxelReferenceWorldDataPtr ReferenceWorldData;
 
 	int32 Seed = 555;
 
@@ -146,6 +180,13 @@ public:
 	static float SampleDensityAtChunkLocal(
 		const FVector& LocalPosition,
 		const FSVoxelGenerationSettings& Settings);
+
+	/** Load and validate the source DTM, categorical biome raster and packed road mask. */
+	static FSVoxelReferenceWorldDataPtr LoadReferenceWorldData(
+		const FString& HeightmapPath,
+		const FString& BiomeMaskPath,
+		const FString& RoadMaskPath,
+		FString& OutStatus);
 
 	/** Evaluate the deterministic world-space terrain surface height for a column. */
 	static double SampleSurfaceHeight(
