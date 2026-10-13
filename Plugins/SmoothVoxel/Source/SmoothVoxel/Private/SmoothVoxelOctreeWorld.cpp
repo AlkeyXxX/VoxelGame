@@ -3407,7 +3407,12 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		// Continue from the cube's logical cell. Its actual transform may have
 		// a small vertical offset to sit flush on a smooth terrain surface.
 		Cell = HitCube->BlockCell + FaceStep;
-		CubeWorldOrigin = HitCube->GetActorLocation() + FaceDirection * Step;
+		// Placed blocks always share the absolute voxel grid, including when
+		// continuing a stack built before the surface-placement snap fix.
+		CubeWorldOrigin = FVector(
+			static_cast<float>(Cell.X) * Step,
+			static_cast<float>(Cell.Y) * Step,
+			static_cast<float>(Cell.Z) * Step);
 		bUsePlacementOriginOverride = true;
 	}
 	else
@@ -3427,7 +3432,8 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		{
 			const FIntVector SurfaceCell = WorldPositionToBlockCell(Hit.ImpactPoint);
 			Cell = FIntVector(SurfaceCell.X, SurfaceCell.Y, SurfaceCell.Z + 1);
-			float PlacementSurfaceZ = Hit.ImpactPoint.Z;
+			// Placement uses the containing surface cell; the actor transform is
+			// snapped to that cell's grid top below, never to fractional hit Z.
 
 			// Roads have a continuous deck height too. If this hit is on a road,
 			// attach the block to the deck and reserve the logical cell immediately
@@ -3491,9 +3497,7 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 					if (BestScore < TNumericLimits<float>::Max())
 					{
 						Cell = BestRoadCell + FIntVector(0, 0, 1);
-						// Snap the block to the actual ray-hit surface, which already
-						// includes the road deck's continuous height interpolation.
-						PlacementSurfaceZ = Hit.ImpactPoint.Z;
+						// Preserve grid alignment even where the rendered deck is sloped.
 					}
 				}
 			}
@@ -3501,7 +3505,7 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 			CubeWorldOrigin = FVector(
 				static_cast<float>(Cell.X) * Step,
 				static_cast<float>(Cell.Y) * Step,
-				PlacementSurfaceZ);
+				static_cast<float>(Cell.Z) * Step);
 			bUsePlacementOriginOverride = true;
 		}
 		else
