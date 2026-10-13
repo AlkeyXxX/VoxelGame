@@ -3722,9 +3722,23 @@ void ASmoothVoxelOctreeWorld::PrepareDesiredChunks(const FVector& CameraLocation
 					Node.OriginCells,
 					DesiredBaseVoxelSize,
 					*VoxelSize);
-			Chunk->SetRoadMaterials(
-				IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveDirtRoadMaterial() : DirtRoadMaterial,
-				IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveAsphaltRoadMaterial() : RoadMaterial);
+            UMaterialInterface* EffectiveDirtRoadMaterial =
+                IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveDirtRoadMaterial() : DirtRoadMaterial;
+            UMaterialInterface* EffectiveAsphaltRoadMaterial =
+                IsValid(RoadNetworkActor) ? RoadNetworkActor->GetActiveAsphaltRoadMaterial() : RoadMaterial;
+            if (!EffectiveDirtRoadMaterial)
+            {
+                const FVoxelBlockDefinition Definition = UVoxelBlockLibrary::GetBlockDefinitionFromTable(
+                    BlockDataTable, EVoxelBlock::DirtRoad);
+                EffectiveDirtRoadMaterial = Definition.Material.LoadSynchronous();
+            }
+            if (!EffectiveAsphaltRoadMaterial)
+            {
+                const FVoxelBlockDefinition Definition = UVoxelBlockLibrary::GetBlockDefinitionFromTable(
+                    BlockDataTable, EVoxelBlock::Asphalt);
+                EffectiveAsphaltRoadMaterial = Definition.Material.LoadSynchronous();
+            }
+			Chunk->SetRoadMaterials(EffectiveDirtRoadMaterial, EffectiveAsphaltRoadMaterial);
             Chunk->SetReferenceBiomeMaterials(
                 PlainsBiomeMaterial, ForestBiomeMaterial, DesertBiomeMaterial,
                 SnowBiomeMaterial, BurntForestBiomeMaterial, WastelandBiomeMaterial);
