@@ -349,6 +349,44 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         std::abs(static_cast<double>(SampleSpacing)), 250.0, 5000.0);
     const double SafeSurfaceOffset = FMath::Clamp(
         static_cast<double>(SurfaceOffset), 0.0, 100.0);
+    // A zero configured offset makes the road deck coincide with the terrain
+    // zero-crossing. Keep a small positive clearance so the road remains visible
+    // after marching-cubes interpolation, even on nearly level ground.
+    const double RoadSurfaceClearance = FMath::Max(
+        SafeSurfaceOffset, RoadBlockSize * 0.05);
+    TMap<FIntPoint, double> RoadGroundHeightCache;
+    const auto GetRoadColumnGroundHeight = [&](const FIntPoint& Cell) -> double
+    {
+        if (const double* CachedHeight = RoadGroundHeightCache.Find(Cell))
+        {
+            return *CachedHeight;
+        }
+
+        const double CenterX = (static_cast<double>(Cell.X) + 0.5) * RoadBlockSize;
+        const double CenterY = (static_cast<double>(Cell.Y) + 0.5) * RoadBlockSize;
+        double GroundHeight = FSVoxelGenerator::SampleSurfaceHeight(
+            CenterX, CenterY, GenerationSettings);
+
+        // Sample the high side of this cell as well as its centre. A road
+        // column must clear the smoothed terrain across the whole cell, not
+        // just at the single point where its height was originally sampled.
+        const double QuarterCell = RoadBlockSize * 0.40;
+        for (int32 SignY = -1; SignY <= 1; SignY += 2)
+        {
+            for (int32 SignX = -1; SignX <= 1; SignX += 2)
+            {
+                GroundHeight = FMath::Max(
+                    GroundHeight,
+                    FSVoxelGenerator::SampleSurfaceHeight(
+                        CenterX + static_cast<double>(SignX) * QuarterCell,
+                        CenterY + static_cast<double>(SignY) * QuarterCell,
+                        GenerationSettings));
+            }
+        }
+
+        RoadGroundHeightCache.Add(Cell, GroundHeight);
+        return GroundHeight;
+    };
 
     const double MinX = static_cast<double>(WorldCenter.X) - HalfExtent;
     const double MaxX = static_cast<double>(WorldCenter.X) + HalfExtent;
@@ -1981,8 +2019,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         static_cast<double>(LongitudinalSteps);
                     const FVector2D StampCenter = Before + (Point - Before) * static_cast<float>(T);
                     const double StampDeckZ = PreviousDeckZ + (RoadDeckZ - PreviousDeckZ) * T;
-                    const int32 CellZ = static_cast<int32>(std::ceil(
-                        StampDeckZ / RoadBlockSize)) - 1;
                     for (int32 LateralIndex = 0; LateralIndex < LateralCellCount; ++LateralIndex)
                     {
                         const double LateralOffset =
@@ -1990,10 +2026,15 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                                 (static_cast<double>(LateralCellCount) - 1.0) * 0.5) * RoadBlockSize;
                         const FVector2D StampPoint = StampCenter +
                             Perp * static_cast<float>(LateralOffset);
-                        const FIntVector Cell(
+                        const FIntPoint CellXY(
                             FMath::FloorToInt(StampPoint.X / RoadBlockSize),
-                            FMath::FloorToInt(StampPoint.Y / RoadBlockSize),
-                            CellZ);
+                            FMath::FloorToInt(StampPoint.Y / RoadBlockSize));
+                        const double LocalGroundHeight = GetRoadColumnGroundHeight(CellXY);
+                        const double ColumnDeckZ = FMath::Max(
+                            StampDeckZ, LocalGroundHeight + RoadSurfaceClearance);
+                        const int32 CellZ = static_cast<int32>(std::ceil(
+                            ColumnDeckZ / RoadBlockSize)) - 1;
+                        const FIntVector Cell(CellXY.X, CellXY.Y, CellZ);
                         EVoxelBlock* ExistingType = RoadBlockTypes.Find(Cell);
                         // Asphalt wins where road classes intersect; a dirt spur
                         // must not downgrade an already built paved junction.
@@ -2001,7 +2042,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                             *ExistingType != EVoxelBlock::Asphalt)
                         {
                             RoadBlockTypes.Add(Cell, RoadBlockType);
-                            RoadSurfaceHeights.Add(Cell, StampDeckZ);
+                            const double* ExistingDeck = RoadSurfaceHeights.Find(Cell);
+                            RoadSurfaceHeights.Add(
+                                Cell, ExistingDeck ? FMath::Max(*ExistingDeck, ColumnDeckZ) : ColumnDeckZ);
                         }
                     }
                 }
@@ -3718,8 +3761,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         const double DeckHeight = RoadColumn.Value;
         const double RoadWorldX = (static_cast<double>(RoadXY.X) + 0.5) * RoadBlockSize;
         const double RoadWorldY = (static_cast<double>(RoadXY.Y) + 0.5) * RoadBlockSize;
-        const double RoadGround = FSVoxelGenerator::SampleSurfaceHeight(
-            RoadWorldX, RoadWorldY, GenerationSettings);
+        const double RoadGround = GetRoadColumnGroundHeight(RoadXY);
 
         // Do not close river/lake crossings with soil. Their raised deck remains
         // supported by the bridge logic; fill is only for ordinary road shoulders.
@@ -3767,10 +3809,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                     break;
                 }
 
-                const double FillWorldX = (static_cast<double>(FillCell.X) + 0.5) * RoadBlockSize;
-                const double FillWorldY = (static_cast<double>(FillCell.Y) + 0.5) * RoadBlockSize;
-                const double Ground = FSVoxelGenerator::SampleSurfaceHeight(
-                    FillWorldX, FillWorldY, GenerationSettings);
+                const double Ground = GetRoadColumnGroundHeight(FillCell);
                 // The first outside cell begins half a voxel beyond the road edge;
                 // then native terrain fill descends at a conservative 1:1.5 grade.
                 const double DistanceFromRoadEdge =
@@ -3844,9 +3883,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     // density bins from natural ground to each fill top so fill-only chunks build.
     for (const TPair<FIntPoint, double>& Fill : RoadEmbankmentFillHeights)
     {
-        const double WX = (static_cast<double>(Fill.Key.X) + 0.5) * RoadBlockSize;
-        const double WY = (static_cast<double>(Fill.Key.Y) + 0.5) * RoadBlockSize;
-        const double Ground = FSVoxelGenerator::SampleSurfaceHeight(WX, WY, GenerationSettings);
+        const double Ground = GetRoadColumnGroundHeight(Fill.Key);
         const int32 MinCellZ = FMath::FloorToInt(Ground / RoadBlockSize) - 1;
         const int32 MaxCellZ = FMath::CeilToInt(Fill.Value / RoadBlockSize) + 1;
         const int32 MinSampleBinX = FloorDivideByRoadSampleBin(Fill.Key.X - 1);
