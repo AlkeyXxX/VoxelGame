@@ -1,0 +1,4 @@
+# Exact binary raster assets for the West Biyove Valley reference world.
+Docs/WorldReference/WestBiyoveValley/*.raw filter=lfs diff=lfs merge=lfs -text
+Content/WorldReference/WestBiyoveValley/*.raw filter=lfs diff=lfs merge=lfs -text
+Saved/WorldReference/WestBiyoveValley/*.raw filter=lfs diff=lfs merge=lfs -text
