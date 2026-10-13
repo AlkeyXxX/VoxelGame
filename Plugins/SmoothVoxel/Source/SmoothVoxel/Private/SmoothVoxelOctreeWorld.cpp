@@ -1296,7 +1296,8 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 	const FIntVector& InCell,
 	float InBlockSize,
 	UMaterialInterface* InMaterial,
-	int32 InDamageStage)
+	int32 InDamageStage,
+	const FVector* InWorldOriginOverride)
 {
 	BlockType = InBlockType;
 	BlockCell = InCell;
@@ -1311,8 +1312,9 @@ void ASmoothVoxelPlacedCubeBlock::ConfigureBlock(
 		static_cast<float>(InCell.X) * Size,
 		static_cast<float>(InCell.Y) * Size,
 		static_cast<float>(InCell.Z) * Size);
-	// Keep the actor transform consistent with the logical voxel cell.
-	SetActorLocation(GridAlignedOrigin);
+	// Keep cubic blocks grid-aligned by default, but allow blocks placed on
+	// smooth terrain or a continuous road deck to sit exactly on that surface.
+	SetActorLocation(InWorldOriginOverride ? *InWorldOriginOverride : GridAlignedOrigin);
 
 	if (!Mesh)
 	{
@@ -2732,7 +2734,7 @@ bool ASmoothVoxelOctreeWorld::ApplyBlockCellEdit(
 
 		Cube->ConfigureBlock(
 			Block, Cell, GetEffectiveBlockSize(), TerrainMaterial,
-			Cube->GetDamageStage());
+			Cube->GetDamageStage(), EditCenterOverride);
 		EditedBlockCenters.Remove(Cell);
 		EditedBlockTypes.Add(Cell, Block);
 		EditState = EditStateOverride != 0 ? EditStateOverride : int8(2);
@@ -3213,10 +3215,15 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 
 	const float Step = GetEffectiveBlockSize();
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
+	const bool bTopSurfacePlacement = Normal.Z >= 0.55f;
 	const FVector AbsNormal(
 		FMath::Abs(Normal.X), FMath::Abs(Normal.Y), FMath::Abs(Normal.Z));
 	FIntVector FaceStep = FIntVector::ZeroValue;
-	if (AbsNormal.X >= AbsNormal.Y && AbsNormal.X >= AbsNormal.Z)
+	if (bTopSurfacePlacement)
+	{
+		FaceStep.Z = 1;
+	}
+	else if (AbsNormal.X >= AbsNormal.Y && AbsNormal.X >= AbsNormal.Z)
 	{
 		FaceStep.X = Normal.X >= 0.0f ? 1 : -1;
 	}
@@ -3234,6 +3241,7 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		static_cast<float>(FaceStep.Z));
 	FIntVector Cell = FIntVector::ZeroValue;
 	FVector CubeWorldOrigin = FVector::ZeroVector;
+	bool bUsePlacementOriginOverride = false;
 	if (ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor()))
 	{
 		if (HitCube->GetOwner() != this)
@@ -3241,9 +3249,11 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 			return false;
 		}
 
-		// Continue from the cube's logical cell, not its transform. This keeps
-		// towers and walls aligned even when the ray hits an edge.
+		// Continue from the cube's logical cell. Its actual transform may have
+		// a small vertical offset to sit flush on a smooth terrain surface.
 		Cell = HitCube->BlockCell + FaceStep;
+		CubeWorldOrigin = HitCube->GetActorLocation() + FaceDirection * Step;
+		bUsePlacementOriginOverride = true;
 	}
 	else
 	{
@@ -3253,20 +3263,100 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 			return false;
 		}
 
-		// Use the dominant face normal to select an adjacent grid cell. The
-		// terrain stays smooth, while all placed cubes remain globally aligned.
-		// Bias just inside the terrain before flooring so an exact grid-plane
-		// hit chooses the cell on the solid side, then step outward one cell.
+		// Place on the visible hit surface, not on the dominant normal axis:
+		// marching-cubes normals vary continuously and can point sideways on a
+		// grassy slope. Keep the logical cell separate from the exact world Z so
+		// the placed cube touches the rendered surface without floating or sinking.
 		const float GridBias = FMath::Max(0.05f, Step * 0.001f);
-		Cell = WorldPositionToBlockCell(Hit.ImpactPoint - FaceDirection * GridBias) + FaceStep;
+		if (bTopSurfacePlacement)
+		{
+			const FIntVector SurfaceCell = WorldPositionToBlockCell(Hit.ImpactPoint);
+			Cell = FIntVector(SurfaceCell.X, SurfaceCell.Y, SurfaceCell.Z + 1);
+			float PlacementSurfaceZ = Hit.ImpactPoint.Z;
 
-		// Marching-cubes walls are rounded at cell edges. There the smoothed
-		// impact normal can point mostly upward even when the player is aiming
-		// at the side of a mined pit, which would put the cube one cell too high.
-		// If the normal-based cell is not part of the excavation, prefer the
-		// nearest unoccupied mined cell next to the impact point. Mined cells are
-		// the authoritative voxel grid for the cavity; the mesh surface is not.
-		if (!MinedTerrainNodes.Contains(Cell))
+			// Roads have a continuous deck height too. If this hit is on a road,
+			// attach the block to the deck and reserve the logical cell immediately
+			// above the actual road voxel so placement doesn't target asphalt itself.
+			if (IsValid(RoadNetworkActor))
+			{
+				const auto RoadBlocks = RoadNetworkActor->GetRoadBlockSnapshot();
+				const auto RoadHeights = RoadNetworkActor->GetRoadSurfaceHeightSnapshot();
+				if (RoadBlocks.IsValid())
+				{
+					const FIntVector SearchOrigin = WorldPositionToBlockCell(
+						Hit.ImpactPoint - FVector(0.0f, 0.0f, GridBias));
+					float BestScore = TNumericLimits<float>::Max();
+					FIntVector BestRoadCell = FIntVector::ZeroValue;
+					double BestDeckHeight = 0.0;
+					for (int32 DZ = -1; DZ <= 1; ++DZ)
+					{
+						for (int32 DY = -1; DY <= 1; ++DY)
+						{
+							for (int32 DX = -1; DX <= 1; ++DX)
+							{
+								const FIntVector Candidate = SearchOrigin + FIntVector(DX, DY, DZ);
+								if (MinedRoadNodes.Contains(Candidate))
+								{
+									continue;
+								}
+								const EVoxelBlock* RoadType = RoadBlocks->Find(Candidate);
+								if (!RoadType || (*RoadType != EVoxelBlock::Asphalt &&
+									*RoadType != EVoxelBlock::DirtRoad))
+								{
+									continue;
+								}
+
+								double DeckHeight = (static_cast<double>(Candidate.Z) + 1.0) * Step;
+								if (RoadHeights.IsValid())
+								{
+									if (const double* StoredHeight = RoadHeights->Find(Candidate))
+									{
+										DeckHeight = *StoredHeight;
+									}
+								}
+								const FVector CandidateCenter = BlockCellCenter(Candidate);
+								const float DXWorld = FMath::Abs(Hit.ImpactPoint.X - CandidateCenter.X);
+								const float DYWorld = FMath::Abs(Hit.ImpactPoint.Y - CandidateCenter.Y);
+								const float DZWorld = FMath::Abs(
+									Hit.ImpactPoint.Z - static_cast<float>(DeckHeight));
+								if (DXWorld > Step * 0.51f || DYWorld > Step * 0.51f ||
+									DZWorld > Step * 0.20f)
+								{
+									continue;
+								}
+								const float Score = FMath::Square(DXWorld) +
+									FMath::Square(DYWorld) + FMath::Square(DZWorld);
+								if (Score < BestScore)
+								{
+									BestScore = Score;
+									BestRoadCell = Candidate;
+									BestDeckHeight = DeckHeight;
+								}
+							}
+						}
+					}
+					if (BestScore < TNumericLimits<float>::Max())
+					{
+						Cell = BestRoadCell + FIntVector(0, 0, 1);
+						PlacementSurfaceZ = static_cast<float>(BestDeckHeight);
+					}
+				}
+			}
+
+			CubeWorldOrigin = FVector(
+				static_cast<float>(Cell.X) * Step,
+				static_cast<float>(Cell.Y) * Step,
+				PlacementSurfaceZ);
+			bUsePlacementOriginOverride = true;
+		}
+		else
+		{
+			Cell = WorldPositionToBlockCell(Hit.ImpactPoint - FaceDirection * GridBias) + FaceStep;
+		}
+
+		// The mined-cell correction is useful for side hits in a cavity, but a
+		// top-facing surface already has a dedicated surface-aligned placement path.
+		if (!bTopSurfacePlacement && !MinedTerrainNodes.Contains(Cell))
 		{
 			const FIntVector HitCell = WorldPositionToBlockCell(Hit.ImpactPoint);
 			float BestDistanceSquared = FMath::Square(Step * 1.5f);
@@ -3310,10 +3400,13 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 		}
 	}
 
-	CubeWorldOrigin = FVector(
-		static_cast<float>(Cell.X) * Step,
-		static_cast<float>(Cell.Y) * Step,
-		static_cast<float>(Cell.Z) * Step);
+	if (!bUsePlacementOriginOverride)
+	{
+		CubeWorldOrigin = FVector(
+			static_cast<float>(Cell.X) * Step,
+			static_cast<float>(Cell.Y) * Step,
+			static_cast<float>(Cell.Z) * Step);
+	}
 
 	// Never allow a face-adjacent placement to extend beyond the selected
 	// finite world window.
@@ -3441,7 +3534,9 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 	// landscape to fit a cube. Terrain may overlap the cube around a curved
 	// slope, but the scalar field stays unchanged, so placing/breaking blocks
 	// cannot secretly mine or refill the ground.
-	if (!ApplyBlockCellEdit(Cell, BlockToPlace))
+	if (!ApplyBlockCellEdit(
+		Cell, BlockToPlace, 0,
+		bUsePlacementOriginOverride ? &CubeWorldOrigin : nullptr))
 	{
 		return false;
 	}
