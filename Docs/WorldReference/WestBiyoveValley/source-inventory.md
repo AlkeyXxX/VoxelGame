@@ -23,6 +23,19 @@ Source archive: `West Biyove Valley.7z`, 138,447,232 bytes, SHA-256 `10e4b2dd90a
 | `скрин с сайта, рельеф и POI.png` | 2,040,860 B | User screenshot of the full world with POI square markers. |
 | `скрин с сайта, рельеф и дороги.png` | 2,067,643 B | User screenshot of the full world with a clearer road overlay. |
 
+## Road mask extracted from splat3.png
+
+The original 8192x8192 `splat3.png` has 65,668,722 transparent pixels, 959,472 opaque red pixels, and 480,670 opaque green pixels. The supplied website screenshot supports interpreting red as main/asphalt road marking and green as dirt/minor road marking. This color-to-type interpretation remains a visual inference; raw RGBA values remain source truth.
+
+The runtime converter writes a 2-bit-per-pixel mask (4 pixels per byte, row-major, least-significant two-bit code first). Code 0 = no road, 1 = red/asphalt, 2 = green/dirt, 3 unused. The generated file is 16,777,216 bytes with SHA-256 `e70cdf4334c079027b8e8ffa3cb0c3d3aa1b31d480aa4990ba25c7dad27cf8f7`.
+
+Required runtime rasters:
+- `dtm.raw` — SHA-256 `49a4afcc6fa37567798f6ef1644aa88e246f813d0ec9b413a46cca6e10fb52c3`.
+- `biomes.raw` — SHA-256 `3d8bc13f553ec69b80ff02f7a3a4266c34a3161789bf6a4956ecf97c7aaf2d5f`.
+- `roadmask_2bit.raw` — SHA-256 `e70cdf4334c079027b8e8ffa3cb0c3d3aa1b31d480aa4990ba25c7dad27cf8f7`.
+
+A ready-to-extract `West_Biyove_Valley_Runtime_Assets.zip` carries all three under `Docs/WorldReference/WestBiyoveValley/`; ZIP SHA-256 is `e40fb154524099c8b952f44fea9028bd4877265f2b8c0d2b07d47a26476c964a`. It is delivered separately in this conversation; the large binaries are not yet in the Git branch because they must be uploaded through Git LFS from a local checkout.
+
 ## Derived facts and cautions
 
 - Map raster is 8192×8192 with `Scale=1`; nominal footprint is 8.192×8.192 km.
