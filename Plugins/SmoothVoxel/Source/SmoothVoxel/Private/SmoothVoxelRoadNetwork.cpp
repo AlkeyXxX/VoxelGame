@@ -410,17 +410,9 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         }
     }
 
-    // Carriageways are written into the shared terrain density field below.
-    // This helper mesh contains only the sloped earthen embankment sides.
-    TArray<FVector> Vertices;
-    TArray<int32> DirtRoadTriangles;
-    TArray<FVector> Normals;
-    TArray<FVector2D> UV0;
-    TArray<FLinearColor> VertexColors;
-    TArray<FProcMeshTangent> Tangents;
-
+    // Carriageways and terrain-native embankments are evaluated in the same
+    // density field as the landscape. This actor does not build road-side meshes.
     int32 RoadSegmentCount = 0;
-    int32 EmbankmentSideQuadCount = 0;
     int32 TotalRoadSamples = 0;
     int32 SkippedRouteCount = 0;
     int32 BuiltBridgeCount = 0;
@@ -441,20 +433,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     TSet<FIntPoint> BridgeLimitedCityCells;
     const int32 SamplesPerRoad = FMath::Max(
         2, FMath::CeilToInt(static_cast<float>(Spacing / SafeSampleSpacing)));
-    // Reserve room for the hierarchy, urban blocks, POI driveways, and rural links.
-    const int32 ExpectedSamples = FMath::Clamp(
-        SamplesPerRoad * Sites.Num() * 8,
-        0, 300000);
-    Vertices.Reserve(ExpectedSamples * 4);
-    // The dirt section holds both shoulder/embankment strips. Reserve once to
-    // avoid repeated reallocations during large-world generation.
-    DirtRoadTriangles.Reserve(ExpectedSamples * 12);
-    Normals.Reserve(ExpectedSamples * 4);
-    UV0.Reserve(ExpectedSamples * 2);
-    VertexColors.Reserve(ExpectedSamples * 2);
-    Tangents.Reserve(ExpectedSamples * 2);
-
-    const FLinearColor RoadVertexColor(0.38f, 0.30f, 0.21f, 1.0f);
     const auto SmoothStep = [](double Edge0, double Edge1, double Value)
     {
         const double T = FMath::Clamp(
@@ -1926,23 +1904,11 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             }
         }
 
-        const int32 FirstVertex = Vertices.Num();
         const EVoxelBlock RoadBlockType = FullRoadWidth <= DirtRoadWidth + 1.0
             ? EVoxelBlock::DirtRoad
             : EVoxelBlock::Asphalt;
-        TArray<FVector2D> LeftEdgePositions;
-        TArray<FVector2D> RightEdgePositions;
-        TArray<FVector2D> PathTangents;
-        TArray<FVector2D> PathPerpendiculars;
         TArray<double> RoadDeckHeights;
-        TArray<double> RoadDistances;
-        LeftEdgePositions.Reserve(SampleCount + 1);
-        RightEdgePositions.Reserve(SampleCount + 1);
-        PathTangents.Reserve(SampleCount + 1);
-        PathPerpendiculars.Reserve(SampleCount + 1);
         RoadDeckHeights.Reserve(SampleCount + 1);
-        RoadDistances.Reserve(SampleCount + 1);
-        double TravelledDistance = 0.0;
         for (int32 SampleIndex = 0; SampleIndex <= SampleCount; ++SampleIndex)
         {
             const FVector2D& Point = Path[SampleIndex];
@@ -1988,66 +1954,14 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
             }
             const FVector2D Perp(-Tangent2D.Y, Tangent2D.X);
 
-            const FVector2D LeftXY = Point + Perp * static_cast<float>(SegmentHalfRoadWidth);
-            const FVector2D RightXY = Point - Perp * static_cast<float>(SegmentHalfRoadWidth);
-
             const double Lift = RoadLifts[SampleIndex];
             const double CenterGround = GroundHeights[SampleIndex];
             const double TerrainClearance = SafeSurfaceOffset;
 
-            // Match the natural surface elevation. The SDF slab is already one
-            // full base voxel thick below this deck; shifting the top by a voxel
-            // would lift the carriageway and manufacture unnecessary embankments.
+            // Match the natural surface elevation. The SDF slab remains one
+            // complete base voxel thick below this deck, with no separate side mesh.
             const double RoadDeckZ = CenterGround + Lift + TerrainClearance;
-            const double LeftZ = RoadDeckZ;
-            const double RightZ = RoadDeckZ;
-
-            const double DistanceBefore = static_cast<double>((Point - Before).Size());
-            const double DistanceAfter = static_cast<double>((After - Point).Size());
-            if (SampleIndex > 0)
-            {
-                TravelledDistance += DistanceBefore;
-            }
-
-            LeftEdgePositions.Add(LeftXY);
-            RightEdgePositions.Add(RightXY);
-            PathTangents.Add(Tangent2D);
-            PathPerpendiculars.Add(Perp);
             RoadDeckHeights.Add(RoadDeckZ);
-            RoadDistances.Add(TravelledDistance);
-
-            const double LengthForGradient = FMath::Max(
-                1.0, DistanceBefore + DistanceAfter);
-            const double DHAlong = SampleIndex == 0 || SampleIndex == SampleCount
-                ? 0.0
-                : (GroundHeights[SampleIndex + 1] + RoadLifts[SampleIndex + 1] -
-                    GroundHeights[SampleIndex - 1] - RoadLifts[SampleIndex - 1]) /
-                    LengthForGradient;
-            const double DHAcross = (LeftZ - RightZ) / FMath::Max(1.0, SegmentHalfRoadWidth * 2.0);
-            const FVector Normal = FVector(
-                static_cast<float>(-Tangent2D.X * DHAlong - Perp.X * DHAcross),
-                static_cast<float>(-Tangent2D.Y * DHAlong - Perp.Y * DHAcross),
-                1.0f).GetSafeNormal();
-
-            const FVector LeftVertex(
-                static_cast<float>(LeftXY.X - WorldCenter.X),
-                static_cast<float>(LeftXY.Y - WorldCenter.Y),
-                static_cast<float>(LeftZ));
-            const FVector RightVertex(
-                static_cast<float>(RightXY.X - WorldCenter.X),
-                static_cast<float>(RightXY.Y - WorldCenter.Y),
-                static_cast<float>(RightZ));
-
-            Vertices.Add(LeftVertex);
-            Vertices.Add(RightVertex);
-            Normals.Add(Normal);
-            Normals.Add(Normal);
-            UV0.Add(FVector2D(static_cast<float>(TravelledDistance / 1000.0), 0.0f));
-            UV0.Add(FVector2D(static_cast<float>(TravelledDistance / 1000.0), 1.0f));
-            VertexColors.Add(RoadVertexColor);
-            VertexColors.Add(RoadVertexColor);
-            Tangents.Add(FProcMeshTangent(FVector(Tangent2D.X, Tangent2D.Y, 0.0f), false));
-            Tangents.Add(FProcMeshTangent(FVector(Tangent2D.X, Tangent2D.Y, 0.0f), false));
 
             if (SampleIndex > 0)
             {
@@ -2091,165 +2005,6 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
                         }
                     }
                 }
-            }
-        }
-
-        // Build fill embankments on the low sides of the road. The road deck
-        // remains level across its width; the dirt shoulders descend with a
-        // gentle 1:1.5 grade until they meet the sampled terrain. Skip the span
-        // over a classified bridge so this fill never closes the waterway.
-        TArray<int32> LeftToeIndices;
-        TArray<int32> RightToeIndices;
-        TArray<double> LeftToeRuns;
-        TArray<double> RightToeRuns;
-        LeftToeIndices.Reserve(SampleCount + 1);
-        RightToeIndices.Reserve(SampleCount + 1);
-        LeftToeRuns.Reserve(SampleCount + 1);
-        RightToeRuns.Reserve(SampleCount + 1);
-        // Ignore the intentional anti-z-fighting clearance on nearly level
-        // ground; only build earthwork once the edge gap is a noticeable fraction
-        // of a block. This keeps flat road meshes lightweight.
-        const double MinimumFillHeight = RoadBlockSize * 0.25;
-        const double MaximumEmbankmentRun = RoadBlockSize * 18.0;
-        const auto AddEmbankmentToe = [&](
-            const FVector2D& EdgeXY,
-            const FVector2D& Outward,
-            const FVector2D& RoadTangent,
-            double DeckZ,
-            int32 RoadEdgeVertex,
-            double U,
-            bool bSkipFill,
-            double& OutRun) -> int32
-        {
-            OutRun = 0.0;
-            if (bSkipFill)
-            {
-                return RoadEdgeVertex;
-            }
-
-            const double EdgeGroundZ = FSVoxelGenerator::SampleSurfaceHeight(
-                EdgeXY.X, EdgeXY.Y, GenerationSettings);
-            const double EdgeFillHeight = DeckZ - EdgeGroundZ;
-            if (EdgeFillHeight < MinimumFillHeight)
-            {
-                return RoadEdgeVertex;
-            }
-
-            double Run = FMath::Clamp(
-                EdgeFillHeight * 1.5,
-                RoadBlockSize * 0.50,
-                MaximumEmbankmentRun);
-            FVector2D ToeXY = EdgeXY + Outward * static_cast<float>(Run);
-            double ToeGroundZ = FSVoxelGenerator::SampleSurfaceHeight(
-                ToeXY.X, ToeXY.Y, GenerationSettings);
-            double ToeZ = FMath::Min(
-                ToeGroundZ + SafeSurfaceOffset * 0.25,
-                DeckZ - RoadBlockSize * 0.10);
-
-            // Extend the toe if the terrain falls away farther than the first
-            // estimate predicted. A hard maximum keeps very tall banks bounded.
-            const double NeededRun = FMath::Clamp(
-                (DeckZ - ToeZ) * 1.5,
-                RoadBlockSize * 0.50,
-                MaximumEmbankmentRun);
-            if (NeededRun > Run + RoadBlockSize * 0.10)
-            {
-                Run = NeededRun;
-                ToeXY = EdgeXY + Outward * static_cast<float>(Run);
-                ToeGroundZ = FSVoxelGenerator::SampleSurfaceHeight(
-                    ToeXY.X, ToeXY.Y, GenerationSettings);
-                ToeZ = FMath::Min(
-                    ToeGroundZ + SafeSurfaceOffset * 0.25,
-                    DeckZ - RoadBlockSize * 0.10);
-            }
-
-            const double HorizontalRun = FMath::Max(1.0, Run);
-            const double Slope = (DeckZ - ToeZ) / HorizontalRun;
-            const FVector Normal = FVector(
-                static_cast<float>(Outward.X * Slope),
-                static_cast<float>(Outward.Y * Slope),
-                1.0f).GetSafeNormal();
-            const int32 ToeVertex = Vertices.Num();
-            Vertices.Add(FVector(
-                static_cast<float>(ToeXY.X - WorldCenter.X),
-                static_cast<float>(ToeXY.Y - WorldCenter.Y),
-                static_cast<float>(ToeZ)));
-            Normals.Add(Normal);
-            UV0.Add(FVector2D(
-                static_cast<float>(U),
-                static_cast<float>(1.0 + Run / 1000.0)));
-            VertexColors.Add(FLinearColor(0.42f, 0.31f, 0.21f, 1.0f));
-            Tangents.Add(FProcMeshTangent(
-                FVector(RoadTangent.X, RoadTangent.Y, 0.0f),
-                false));
-            OutRun = Run;
-            return ToeVertex;
-        };
-
-        for (int32 ToeSampleIndex = 0; ToeSampleIndex <= SampleCount; ++ToeSampleIndex)
-        {
-            const int32 LeftRoadVertex = FirstVertex + ToeSampleIndex * 2;
-            const int32 RightRoadVertex = LeftRoadVertex + 1;
-            const bool bSkipFill = bBridgeCrossing[ToeSampleIndex] != 0;
-            const FVector2D& Perp = PathPerpendiculars[ToeSampleIndex];
-            double LeftRun = 0.0;
-            double RightRun = 0.0;
-            const int32 LeftToe = AddEmbankmentToe(
-                LeftEdgePositions[ToeSampleIndex],
-                Perp,
-                PathTangents[ToeSampleIndex],
-                RoadDeckHeights[ToeSampleIndex],
-                LeftRoadVertex,
-                RoadDistances[ToeSampleIndex] / 1000.0,
-                bSkipFill,
-                LeftRun);
-            const int32 RightToe = AddEmbankmentToe(
-                RightEdgePositions[ToeSampleIndex],
-                Perp * -1.0f,
-                PathTangents[ToeSampleIndex],
-                RoadDeckHeights[ToeSampleIndex],
-                RightRoadVertex,
-                RoadDistances[ToeSampleIndex] / 1000.0,
-                bSkipFill,
-                RightRun);
-            LeftToeIndices.Add(LeftToe);
-            RightToeIndices.Add(RightToe);
-            LeftToeRuns.Add(LeftRun);
-            RightToeRuns.Add(RightRun);
-        }
-
-        // Surface vertices are two-per-sample at the beginning of this segment.
-        // Add the earthen slope triangles to the dirt section, even below asphalt.
-        for (int32 SampleIndex = 1; SampleIndex <= SampleCount; ++SampleIndex)
-        {
-            const int32 PreviousLeft = FirstVertex + (SampleIndex - 1) * 2;
-            const int32 PreviousRight = PreviousLeft + 1;
-            const int32 CurrentLeft = FirstVertex + SampleIndex * 2;
-            const int32 CurrentRight = CurrentLeft + 1;
-
-            if (LeftToeRuns[SampleIndex - 1] > 0.0 || LeftToeRuns[SampleIndex] > 0.0)
-            {
-                // Procedural road sections use the engine's established front-face
-                // winding (verified by the visible carriageway). Reverse the shoulder
-                // triangles to match that convention; the previous order was back-face
-                // culled, making the generated embankments appear inverted/invisible.
-                DirtRoadTriangles.Add(PreviousLeft);
-                DirtRoadTriangles.Add(LeftToeIndices[SampleIndex - 1]);
-                DirtRoadTriangles.Add(CurrentLeft);
-                DirtRoadTriangles.Add(LeftToeIndices[SampleIndex - 1]);
-                DirtRoadTriangles.Add(LeftToeIndices[SampleIndex]);
-                DirtRoadTriangles.Add(CurrentLeft);
-                ++EmbankmentSideQuadCount;
-            }
-            if (RightToeRuns[SampleIndex - 1] > 0.0 || RightToeRuns[SampleIndex] > 0.0)
-            {
-                DirtRoadTriangles.Add(PreviousRight);
-                DirtRoadTriangles.Add(CurrentRight);
-                DirtRoadTriangles.Add(RightToeIndices[SampleIndex - 1]);
-                DirtRoadTriangles.Add(RightToeIndices[SampleIndex - 1]);
-                DirtRoadTriangles.Add(CurrentRight);
-                DirtRoadTriangles.Add(RightToeIndices[SampleIndex]);
-                ++EmbankmentSideQuadCount;
             }
         }
 
@@ -4210,7 +3965,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
     };
 
     UE_LOG(LogTemp, Log,
-        TEXT("SmoothVoxel roads/POIs: %d temperate POIs (%d cabins, %d camps, %d ruins, %d lookouts), %d desert landmarks, %d mountain landmarks, %d snow landmarks; %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d asphalt blocks, %d dirt blocks; %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges, %d embankment side quads; skipped %d routes and %d unsafe bridges."),
+        TEXT("SmoothVoxel roads/POIs: %d temperate POIs (%d cabins, %d camps, %d ruins, %d lookouts), %d desert landmarks, %d mountain landmarks, %d snow landmarks; %d major cities (%d desert, %d snow), %d hubs (%d core temperate); %d asphalt blocks, %d dirt blocks; %d total segments (%d highway, %d ordinary, %d dirt) from %d site candidates [temperate=%d, desert=%d, snow=%d]; hubs by biome [temperate=%d, desert=%d, snow=%d]; %d small towns, %d rural links, %d bridges, %d terrain-native embankment fill columns; skipped %d routes and %d unsafe bridges."),
         GreenPOICount, CabinPOICount, CampPOICount, RuinPOICount, LookoutPOICount,
         DesertPOICount, MountainPOICount, SnowPOICount,
         MajorCityCells.Num(), DesertMajorCityCount, SnowMajorCityCount,
@@ -4219,6 +3974,7 @@ void ASmoothVoxelRoadNetwork::BuildRoadMesh(
         RoadSegmentCount, HighwayRoadSegmentCount, OrdinaryRoadSegmentCount, DirtRoadSegmentCount,
         Sites.Num(), TemperateSiteCount, DesertSiteCount, SnowSiteCount,
         TemperateHubCount, DesertHubCount, SnowHubCount,
-        SmallSettlementCells.Num(), RuralConnectorsBuilt, BuiltBridgeCount, EmbankmentSideQuadCount,
+        SmallSettlementCells.Num(), RuralConnectorsBuilt, BuiltBridgeCount,
+        RoadEmbankmentFillHeightSnapshot.IsValid() ? RoadEmbankmentFillHeightSnapshot->Num() : 0,
         SkippedRouteCount, SkippedUnsafeBridgeCount);
 }
