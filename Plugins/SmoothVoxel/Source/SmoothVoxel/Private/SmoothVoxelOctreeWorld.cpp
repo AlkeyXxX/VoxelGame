@@ -2904,6 +2904,8 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 	FIntVector Cell = FIntVector::ZeroValue;
 	EVoxelBlock HitBlock = EVoxelBlock::Air;
 	FVector InsidePoint = Hit.ImpactPoint;
+	bool bMineSurfaceAlignedTerrain = false;
+	FVector SurfaceAlignedBlockCenter = FVector::ZeroVector;
 	ASmoothVoxelPlacedCubeBlock* HitCube = Cast<ASmoothVoxelPlacedCubeBlock>(Hit.GetActor());
 	if (IsValid(HitCube) && HitCube->GetOwner() == this)
 	{
@@ -2921,9 +2923,8 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 
 		const float Step = GetEffectiveBlockSize();
 		// TraceInteractionRay returns the current density-field crossing, with
-		// ImpactNormal pointing toward the air side. Probe inward using a small,
-		// adaptive offset: a quarter-cell jump can skip the cell at a wall,
-		// especially when mining horizontally from inside a tunnel.
+		// ImpactNormal pointing toward the air side. Probe inward to validate that
+		// the density snapshot still contains solid material behind this crossing.
 		const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
 		const float ProbeScales[] = { 0.005f, 0.01f, 0.02f, 0.04f, 0.08f, 0.16f, 0.32f };
 		bool bFoundSolidProbe = false;
@@ -2945,82 +2946,129 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 			// changed between trace and interaction. Do not mine an unrelated cell.
 			return false;
 		}
+
 		Cell = WorldPositionToBlockCell(InsidePoint);
 		HitBlock = GetBlockTypeForCell(Cell);
-		if (HitBlock == EVoxelBlock::Air && IsValid(RoadNetworkActor))
-		{
-			// The implicit road box reaches a tiny fraction beyond its grid plane
-			// to keep marching-cubes corners solid. When the ray hits its top face,
-			// the first air-side cell can therefore be one row above the logical
-			// road block. Resolve the nearest road cell along/behind the hit normal.
-			const FVector AirNormal = Hit.ImpactNormal.GetSafeNormal();
-			const FVector AbsNormal(
-				FMath::Abs(AirNormal.X),
-				FMath::Abs(AirNormal.Y),
-				FMath::Abs(AirNormal.Z));
-			FIntVector FaceStep = FIntVector::ZeroValue;
-			if (AbsNormal.X >= AbsNormal.Y && AbsNormal.X >= AbsNormal.Z)
-			{
-				FaceStep.X = AirNormal.X >= 0.0f ? 1 : -1;
-			}
-			else if (AbsNormal.Y >= AbsNormal.Z)
-			{
-				FaceStep.Y = AirNormal.Y >= 0.0f ? 1 : -1;
-			}
-			else
-			{
-				FaceStep.Z = AirNormal.Z >= 0.0f ? 1 : -1;
-			}
 
-			const FIntVector SearchOrigin = Cell - FaceStep;
-			float BestRoadDistanceSquared = FMath::Square(Step);
-			FIntVector BestRoadCell = Cell;
-			EVoxelBlock BestRoadBlock = EVoxelBlock::Air;
-			for (int32 DZ = -1; DZ <= 1; ++DZ)
+		// Road decks are continuous in Z while their logical block cells remain
+		// grid-aligned. A shallow probe can therefore land in the terrain cell
+		// below a road and incorrectly mine that cell first. Resolve an actual
+		// road hit from its footprint/deck before classifying the underlying SDF.
+		bool bHitRoadBlock = false;
+		if (IsValid(RoadNetworkActor))
+		{
+			const auto RoadBlockSnapshot = RoadNetworkActor->GetRoadBlockSnapshot();
+			const auto RoadHeightSnapshot = RoadNetworkActor->GetRoadSurfaceHeightSnapshot();
+			if (RoadBlockSnapshot.IsValid())
 			{
-				for (int32 DY = -1; DY <= 1; ++DY)
+				const FIntVector SearchOrigin = WorldPositionToBlockCell(
+					Hit.ImpactPoint - Normal * FMath::Max(0.05f, Step * 0.001f));
+				const float SurfaceTolerance = FMath::Max(1.0f, Step * 0.01f);
+				const bool bTopFacing = FMath::Abs(Normal.Z) >= 0.55f;
+				float BestRoadScore = TNumericLimits<float>::Max();
+				FIntVector BestRoadCell = FIntVector::ZeroValue;
+				EVoxelBlock BestRoadBlock = EVoxelBlock::Air;
+
+				for (int32 DZ = -1; DZ <= 1; ++DZ)
 				{
-					for (int32 DX = -1; DX <= 1; ++DX)
+					for (int32 DY = -1; DY <= 1; ++DY)
 					{
-						const FIntVector Candidate =
-							SearchOrigin + FIntVector(DX, DY, DZ);
-						if (MinedTerrainNodes.Contains(Candidate) ||
-							MinedRoadNodes.Contains(Candidate))
+						for (int32 DX = -1; DX <= 1; ++DX)
 						{
-							continue;
-						}
-						EVoxelBlock CandidateBlock = EVoxelBlock::Air;
-						if (!RoadNetworkActor->GetRoadBlockTypeAtCell(
-							Candidate, CandidateBlock))
-						{
-							continue;
-						}
-						const float DistanceSquared = FVector::DistSquared(
-							BlockCellCenter(Candidate), Hit.ImpactPoint);
-						if (DistanceSquared <= BestRoadDistanceSquared)
-						{
-							BestRoadDistanceSquared = DistanceSquared;
-							BestRoadCell = Candidate;
-							BestRoadBlock = CandidateBlock;
+							const FIntVector Candidate = SearchOrigin + FIntVector(DX, DY, DZ);
+							if (MinedRoadNodes.Contains(Candidate))
+							{
+								continue;
+							}
+
+							const EVoxelBlock* RoadType = RoadBlockSnapshot->Find(Candidate);
+							if (!RoadType || (*RoadType != EVoxelBlock::Asphalt &&
+								*RoadType != EVoxelBlock::DirtRoad))
+							{
+								continue;
+							}
+
+							double DeckHeight = (static_cast<double>(Candidate.Z) + 1.0) * Step;
+							if (RoadHeightSnapshot.IsValid())
+							{
+								if (const double* StoredHeight = RoadHeightSnapshot->Find(Candidate))
+								{
+									DeckHeight = *StoredHeight;
+								}
+							}
+
+							const FVector CandidateCenter = BlockCellCenter(Candidate);
+							const float DeltaX = FMath::Abs(Hit.ImpactPoint.X - CandidateCenter.X);
+							const float DeltaY = FMath::Abs(Hit.ImpactPoint.Y - CandidateCenter.Y);
+							if (DeltaX > Step * 0.505f + SurfaceTolerance ||
+								DeltaY > Step * 0.505f + SurfaceTolerance)
+							{
+								continue;
+							}
+
+							const double HitZ = static_cast<double>(Hit.ImpactPoint.Z);
+						if (HitZ < DeckHeight - Step - SurfaceTolerance ||
+							HitZ > DeckHeight + SurfaceTolerance)
+							{
+								continue;
+							}
+							// A top-facing ray must be near the road deck, not the soil
+							// underneath it. Side hits may occur anywhere through the deck.
+							if (bTopFacing &&
+								FMath::Abs(HitZ - DeckHeight) > Step * 0.35f)
+							{
+								continue;
+							}
+
+							const float Score = FMath::Square(DeltaX) + FMath::Square(DeltaY) +
+								FMath::Square(static_cast<float>(HitZ - DeckHeight) * 0.1f);
+							if (Score < BestRoadScore)
+							{
+								BestRoadScore = Score;
+								BestRoadCell = Candidate;
+								BestRoadBlock = *RoadType;
+							}
 						}
 					}
 				}
+
+				if (BestRoadBlock != EVoxelBlock::Air)
+				{
+					Cell = BestRoadCell;
+					HitBlock = BestRoadBlock;
+					bHitRoadBlock = true;
+				}
 			}
-			if (BestRoadBlock != EVoxelBlock::Air)
-			{
-				Cell = BestRoadCell;
-				HitBlock = BestRoadBlock;
-			}
+		}
+
+		// On an upward-facing natural surface, mine one full block-height volume
+		// measured down from the visible surface, rather than a world-grid cell
+		// that might contain only a few centimetres of the smoothed surface.
+		// The edit centre is still keyed by its grid cell so successive hits
+		// descend one block at a time and retain the existing block drop behaviour.
+		bMineSurfaceAlignedTerrain = !bHitRoadBlock && Normal.Z >= 0.55f;
+		if (bMineSurfaceAlignedTerrain)
+		{
+			const int32 SurfaceCellX = FMath::FloorToInt(Hit.ImpactPoint.X / Step);
+			const int32 SurfaceCellY = FMath::FloorToInt(Hit.ImpactPoint.Y / Step);
+			SurfaceAlignedBlockCenter = FVector(
+				(static_cast<double>(SurfaceCellX) + 0.5) * Step,
+				(static_cast<double>(SurfaceCellY) + 0.5) * Step,
+				static_cast<double>(Hit.ImpactPoint.Z) - static_cast<double>(Step) * 0.5);
+			Cell = WorldPositionToBlockCell(SurfaceAlignedBlockCenter);
+			HitBlock = GetBlockTypeForCell(Cell);
 		}
 
 		if (HitBlock == EVoxelBlock::Air)
 		{
 			const FSVoxelGenerationSettings Settings = MakeBlockQuerySettings();
+			const FVector& ClassificationPoint =
+				bMineSurfaceAlignedTerrain ? Hit.ImpactPoint : InsidePoint;
 			const double SurfaceHeight = FSVoxelGenerator::SampleSurfaceHeight(
-				static_cast<double>(InsidePoint.X),
-				static_cast<double>(InsidePoint.Y),
+				static_cast<double>(ClassificationPoint.X),
+				static_cast<double>(ClassificationPoint.Y),
 				Settings);
-			const double Depth = SurfaceHeight - static_cast<double>(InsidePoint.Z);
+			const double Depth = SurfaceHeight - static_cast<double>(ClassificationPoint.Z);
 			HitBlock = Depth <= Step * 1.25 ? EVoxelBlock::Grass :
 				(Depth <= Step * 4.0 ? EVoxelBlock::Dirt : EVoxelBlock::Stone);
 		}
@@ -3084,11 +3132,26 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 		return true;
 	}
 
-	MinedTerrainNodes.Add(MinedCell);
-	MinedNodeSnapshot =
-		MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
-	RebuildChunksNearEditedCell(MinedCell, false);
-	SchedulePostMiningMeshRepair(MinedCell);
+	if (bMineSurfaceAlignedTerrain)
+	{
+		// Store a full one-block-high cut whose top aligns to the rendered
+		// surface. The grid key is the box centre's cell, so the next hit targets
+		// the next layer down instead of leaving a thin cap for a second click.
+		if (!ApplyBlockCellEdit(
+			MinedCell, EVoxelBlock::Air, int8(-5), &SurfaceAlignedBlockCenter))
+		{
+			return false;
+		}
+		SchedulePostMiningMeshRepair(MinedCell);
+	}
+	else
+	{
+		MinedTerrainNodes.Add(MinedCell);
+		MinedNodeSnapshot =
+			MakeShared<FSVoxelMinedNodeSet, ESPMode::ThreadSafe>(MinedTerrainNodes);
+		RebuildChunksNearEditedCell(MinedCell, false);
+		SchedulePostMiningMeshRepair(MinedCell);
+	}
 
 	if (Inventory && DropBlock != EVoxelBlock::Air)
 	{
