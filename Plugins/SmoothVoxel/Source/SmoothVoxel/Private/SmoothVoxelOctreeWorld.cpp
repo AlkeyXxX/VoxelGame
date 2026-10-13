@@ -3201,6 +3201,21 @@ bool ASmoothVoxelOctreeWorld::BreakBlockByRay()
 			return false;
 		}
 
+		// The inward probe may cross a grid plane when the real surface lies
+		// less than the probe distance above it. For an upward-facing natural
+		// surface, choose the grid cell immediately below the hit: exact-plane
+		// hits stay in the lower cell; any genuinely higher surface selects the
+		// partially filled cell above it.
+		if (!bHitRoadBlock && Normal.Z >= 0.55f)
+		{
+			const float SurfaceGridEpsilon = FMath::Max(0.001f, Step * 0.0001f);
+			Cell.Z = FMath::CeilToInt(
+				(Hit.ImpactPoint.Z - SurfaceGridEpsilon) / Step) - 1;
+			HitBlock = GetBlockTypeForCell(Cell);
+			bHitRoadBlock = HitBlock == EVoxelBlock::Asphalt ||
+				HitBlock == EVoxelBlock::DirtRoad;
+		}
+
 		// Keep the target cell chosen by the inward density probe. It is the
 		// integer voxel cell containing the solid immediately behind the hit.
 		// Do not move its centre to the fractional terrain surface height: that
