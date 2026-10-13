@@ -3287,7 +3287,6 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 						Hit.ImpactPoint - FVector(0.0f, 0.0f, GridBias));
 					float BestScore = TNumericLimits<float>::Max();
 					FIntVector BestRoadCell = FIntVector::ZeroValue;
-					double BestDeckHeight = 0.0;
 					for (int32 DZ = -1; DZ <= 1; ++DZ)
 					{
 						for (int32 DY = -1; DY <= 1; ++DY)
@@ -3330,7 +3329,6 @@ bool ASmoothVoxelOctreeWorld::PlaceBlockByRayWithType(EVoxelBlock BlockToPlace)
 								{
 									BestScore = Score;
 									BestRoadCell = Candidate;
-									BestDeckHeight = DeckHeight;
 								}
 							}
 						}
