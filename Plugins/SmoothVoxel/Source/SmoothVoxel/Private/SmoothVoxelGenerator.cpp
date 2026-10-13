@@ -301,12 +301,12 @@ namespace
                         const double QBottom = SmoothDeckZ - Step - Z;
                         const double RoadSdf = FMath::Max(
                             FMath::Max(QX, QY), FMath::Max(QTop, QBottom));
-                        // Remove terrain above the road deck within this cell, then
-                        // restore a full one-cell-deep solid in the same density field.
-                        const double RoadCutSdf = FMath::Max(FMath::Max(QX, QY), -QTop);
-                        // Keep the cut even when the asphalt/dirt-road block is mined:
-                        // otherwise natural terrain instantly fills the road back to the
-                        // old surface height, making the road behave like a paper-thin decal.
+                        // Excavate the whole road trench from its bottom face upward.
+                        // Restoring RoadSdf below fills exactly one full voxel layer with
+                        // asphalt/dirt; soil remains only beneath the bottom face.
+                        const double RoadCutSdf = FMath::Max(FMath::Max(QX, QY), QBottom);
+                        // Keep the trench cut when the road block is mined, so the road
+                        // does not collapse back into the original terrain surface.
                         Density = FMath::Min(Density, static_cast<float>(RoadCutSdf));
                         if (!bRoadCellMined)
                         {
