@@ -1726,7 +1726,9 @@ float FSVoxelGenerator::DensityFromSurfaceHeight(
         D = 1.0;
     }
 
-    if (S.bEnableCaves && S.CaveStrength > 0.0f)
+    if (S.bEnableCaves && S.CaveStrength > 0.0f &&
+        !(S.bUseReferenceWorldData && S.ReferenceWorldData.IsValid() &&
+            S.ReferenceWorldData->HasHeightField()))
     {
         const float Cave = FBM3D(
             X * static_cast<double>(S.CaveScale),
